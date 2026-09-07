@@ -1,0 +1,20 @@
+[workspace]
+resolver = "2"
+members = ["crates/demodesk-core", "src-tauri"]
+exclude = ["vendor"]
+
+[workspace.package]
+edition = "2021"
+version = "0.1.0"
+license = "AGPL-3.0-only"
+
+# `tauri dev` builds the dev profile; the demo parser is ~10× slower unoptimized,
+# so optimize dependencies (vendored parser included) even there.
+[profile.dev.package."*"]
+opt-level = 2
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+strip = true

@@ -1,0 +1,718 @@
+//! Background work: demo parsing and the sequential render queue. The engine
+//! owns the [`Store`] (config + render jobs) and keeps every parse result in
+//! memory only — nothing about demos is cached on disk. Changes are reported
+//! through a [`Notify`] sink so the Tauri layer can forward them as window events.
+
+use crate::parser::DemoParser;
+use crate::render::paths::{find_cs2_dir, find_steam_dir, replays_dir, resolve_tool_paths, PathOverrides, ToolPaths};
+use crate::radar::{ensure_map_assets, MapAssets};
+use crate::replay::build_replay;
+use crate::render::{clean_leftovers, doctor, render_highlights, run_setup, DoctorReport, RenderJobInput, RenderOptions};
+use crate::stats::build_parsed_demo;
+use crate::stats::ParsedDemo;
+use crate::store::{now, DemoMeta, DemoStatus, DemoSummary, JobOutput, JobStatus, RenderJob, Settings, Store};
+use anyhow::{anyhow, Result};
+use serde::Serialize;
+use std::collections::{HashMap, HashSet, VecDeque};
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
+
+/// Events the UI cares about. Payloads are already JSON-serializable.
+#[derive(Debug, Clone, Serialize)]
+#[serde(tag = "type", rename_all = "kebab-case")]
+pub enum Event {
+    DemoChanged { demo: DemoMeta },
+    JobChanged { job: RenderJob },
+    SetupLog { line: String },
+    SetupFinished { ok: bool, error: Option<String> },
+}
+
+pub trait Notify: Send + Sync + 'static {
+    fn notify(&self, event: Event);
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Detected {
+    pub steam_dir: Option<PathBuf>,
+    pub cs2_dir: Option<PathBuf>,
+    pub replays_dir: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SetupState {
+    pub running: bool,
+    pub log: Vec<String>,
+}
+
+/// In-memory state of one demo: what the last scan saw plus the parse result.
+#[derive(Clone)]
+struct DemoEntry {
+    meta: DemoMeta,
+    parsed: Option<Arc<ParsedDemo>>,
+}
+
+impl DemoEntry {
+    /// Back to "not parsed": no result in memory, nothing derived in the meta.
+    fn reset(&mut self) {
+        self.parsed = None;
+        self.meta.status = DemoStatus::New;
+        self.meta.error = None;
+        self.meta.summary = None;
+        self.meta.map_name = None;
+        self.meta.parsed_at = None;
+    }
+}
+
+pub struct Engine {
+    store: Store,
+    data_dir: PathBuf,
+    notify: Arc<dyn Notify>,
+    demos: Mutex<HashMap<String, DemoEntry>>,
+    parsing: Mutex<HashSet<String>>,
+    parser: Arc<DemoParser>,
+    render_queue: Mutex<VecDeque<String>>,
+    /// Serializes replay builds (each reads the whole demo again).
+    replay_lock: Mutex<()>,
+    /// Serializes radar extraction (one Source2Viewer-CLI at a time).
+    radar_lock: Mutex<()>,
+    active_job: Mutex<Option<(String, Arc<AtomicBool>)>>,
+    render_worker_running: AtomicBool,
+    setup_running: AtomicBool,
+    setup_log: Mutex<Vec<String>>,
+}
+
+impl Engine {
+    pub fn new(data_dir: PathBuf, notify: Arc<dyn Notify>) -> Result<Arc<Self>> {
+        let store = Store::open(data_dir.clone())?;
+        // Jobs that were running when the app died are not running any more.
+        for mut job in store.list_jobs() {
+            if matches!(job.status, JobStatus::Running | JobStatus::Queued) {
+                job.status = JobStatus::Error;
+                job.error = Some("app was closed while the job was running".into());
+                job.finished_at = Some(now());
+                let _ = store.save_job(&job);
+            }
+        }
+        let engine = Arc::new(Self {
+            store,
+            data_dir,
+            notify,
+            demos: Mutex::new(HashMap::new()),
+            parsing: Mutex::new(HashSet::new()),
+            parser: Arc::new(DemoParser::new()),
+            render_queue: Mutex::new(VecDeque::new()),
+            replay_lock: Mutex::new(()),
+            radar_lock: Mutex::new(()),
+            active_job: Mutex::new(None),
+            render_worker_running: AtomicBool::new(false),
+            setup_running: AtomicBool::new(false),
+            setup_log: Mutex::new(vec![]),
+        });
+        // Nothing can be recording yet, so an old plugin install is a leftover.
+        engine.clean_leftovers();
+        Ok(engine)
+    }
+
+    // ---- paths / settings ----
+    pub fn data_dir(&self) -> &Path {
+        &self.data_dir
+    }
+    pub fn settings(&self) -> Settings {
+        self.store.settings()
+    }
+    /// Validate, then write. Returns the problems instead of writing when there are any.
+    pub fn save_settings(&self, settings: Settings) -> Result<(), Vec<String>> {
+        let clean = settings.normalized();
+        let problems = self.validate_settings(&clean);
+        if !problems.is_empty() {
+            return Err(problems);
+        }
+        self.store.save_settings(&clean).map_err(|e| vec![format!("{e:#}")])?;
+        self.clean_leftovers();
+        Ok(())
+    }
+    /// Sizes of the disposable folders: (parsed, clips, radar).
+    pub fn storage_bytes(&self) -> (u64, u64, u64) {
+        (self.store.parsed_bytes(), self.store.clips_bytes(), self.store.radar_bytes())
+    }
+    pub fn clear_radar(&self) -> u64 {
+        self.store.clear_radar()
+    }
+    pub fn list_jobs(&self) -> Vec<RenderJob> {
+        self.store.list_jobs()
+    }
+    pub fn default_tools_dir(&self) -> PathBuf {
+        self.data_dir.join("tools")
+    }
+    pub fn overrides(&self, s: &Settings) -> PathOverrides {
+        let p = |v: &Option<String>| v.as_ref().map(PathBuf::from);
+        PathOverrides { tools_dir: p(&s.tools_dir), cs2_dir: p(&s.cs2_dir), hlae_exe: p(&s.hlae_exe), ffmpeg_exe: p(&s.ffmpeg_exe) }
+    }
+    pub fn tool_paths(&self) -> ToolPaths {
+        resolve_tool_paths(&self.default_tools_dir(), &self.overrides(&self.store.settings()))
+    }
+    pub fn doctor(&self) -> DoctorReport {
+        doctor(&self.default_tools_dir(), &self.overrides(&self.store.settings()))
+    }
+    /// Undo an interrupted run's plugin install — skipped while a render is active.
+    pub fn clean_leftovers(&self) -> bool {
+        if self.active_job_id().is_some() {
+            return false;
+        }
+        clean_leftovers(&self.default_tools_dir(), &self.overrides(&self.store.settings()))
+    }
+    pub fn detected(&self) -> Detected {
+        let steam_dir = find_steam_dir();
+        let cs2_dir = find_cs2_dir(steam_dir.as_deref());
+        Detected { replays_dir: cs2_dir.as_deref().map(replays_dir), steam_dir, cs2_dir }
+    }
+    pub fn replay_folders(&self) -> Vec<PathBuf> {
+        let s = self.store.settings();
+        let mut folders: Vec<PathBuf> = vec![];
+        if s.scan_game_replays {
+            let cs2 = self.overrides(&s).cs2_dir.or_else(|| self.detected().cs2_dir);
+            if let Some(cs2) = cs2 {
+                folders.push(replays_dir(&cs2));
+            }
+        }
+        folders.extend(s.replay_folders.iter().map(PathBuf::from));
+        folders.dedup();
+        folders.into_iter().filter(|f| f.is_dir()).collect()
+    }
+
+    pub fn validate_settings(&self, s: &Settings) -> Vec<String> {
+        let mut problems = vec![];
+        let o = self.overrides(s);
+        if let Some(cs2) = &o.cs2_dir {
+            if !crate::render::paths::cs2_exe_in(cs2).is_file() {
+                problems.push(format!("game\\bin\\win64\\cs2.exe not found under {}", cs2.display()));
+            }
+        }
+        if let Some(p) = &o.hlae_exe {
+            if !p.is_file() {
+                problems.push(format!("HLAE not found: {}", p.display()));
+            }
+        }
+        if let Some(p) = &o.ffmpeg_exe {
+            if !p.is_file() {
+                problems.push(format!("FFmpeg not found: {}", p.display()));
+            }
+        }
+        for f in &s.replay_folders {
+            if !Path::new(f).is_dir() {
+                problems.push(format!("folder not found: {f}"));
+            }
+        }
+        problems
+    }
+
+    // ---- demos ----
+    /// Stable id for a path (case-insensitive, so D:\x and d:\x match).
+    pub fn demo_id(path: &Path) -> String {
+        let key = path.to_string_lossy().to_lowercase().replace('/', "\\");
+        sha1_smol::Sha1::from(key.as_bytes()).digest().to_string()[..12].to_string()
+    }
+
+    fn is_dem(path: &Path) -> bool {
+        path.extension().map(|e| e.to_string_lossy().eq_ignore_ascii_case("dem")).unwrap_or(false)
+    }
+
+    /// Every .dem in the scanned folders.
+    fn demo_paths(&self) -> Vec<PathBuf> {
+        let mut out: Vec<PathBuf> = vec![];
+        for folder in self.replay_folders() {
+            let Ok(rd) = std::fs::read_dir(&folder) else { continue };
+            for entry in rd.flatten() {
+                let path = entry.path();
+                if Self::is_dem(&path) && path.is_file() {
+                    out.push(path);
+                }
+            }
+        }
+        let mut seen = HashSet::new();
+        out.retain(|p| seen.insert(Self::demo_id(p)));
+        out
+    }
+
+    /// Rescan the file system and merge with the in-memory parse state.
+    pub fn list_demos(&self) -> Vec<DemoMeta> {
+        // Everything that touches the disk happens before the lock.
+        let scanned: Vec<(PathBuf, u64, f64)> = self
+            .demo_paths()
+            .into_iter()
+            .filter_map(|path| {
+                let st = std::fs::metadata(&path).ok()?;
+                let mtime_ms = st.modified().ok().and_then(|m| m.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_millis() as f64).unwrap_or(0.0);
+                Some((path, st.len(), mtime_ms))
+            })
+            .collect();
+        let keep: HashSet<String> = scanned.iter().map(|(p, _, _)| Self::demo_id(p)).collect();
+        let list = {
+            let mut demos = self.demos.lock().unwrap();
+            let mut stale: Vec<String> = vec![];
+            for (path, bytes, mtime_ms) in scanned {
+                let id = Self::demo_id(&path);
+                let entry = demos.entry(id.clone()).or_insert_with(|| {
+                    // A result stored by an earlier session counts as parsed (loaded lazily).
+                    let stored = self.store.read_summary(&id, bytes, mtime_ms);
+                    DemoEntry {
+                        meta: DemoMeta {
+                            id,
+                            name: path.file_name().map(|f| f.to_string_lossy().to_string()).unwrap_or_default(),
+                            path: path.to_string_lossy().to_string(),
+                            bytes,
+                            mtime_ms,
+                            status: if stored.is_some() { DemoStatus::Parsed } else { DemoStatus::New },
+                            error: None,
+                            map_name: stored.as_ref().map(|s| s.map_name.clone()),
+                            parsed_at: stored.as_ref().map(|s| s.parsed_at.clone()),
+                            summary: stored.map(|s| s.summary),
+                        },
+                        parsed: None,
+                    }
+                });
+                entry.meta.path = path.to_string_lossy().to_string();
+                // File changed under us: the parse result no longer describes it.
+                if entry.meta.status == DemoStatus::Parsed && !entry.meta.same_file(bytes, mtime_ms) {
+                    entry.reset();
+                    stale.push(entry.meta.id.clone());
+                }
+                entry.meta.bytes = bytes;
+                entry.meta.mtime_ms = mtime_ms;
+            }
+            let parsing = self.parsing.lock().unwrap();
+            demos.retain(|id, _| keep.contains(id) || parsing.contains(id));
+            for id in &stale {
+                self.store.delete_parsed(id);
+            }
+            let mut list: Vec<DemoMeta> = demos.values().map(|e| e.meta.clone()).collect();
+            list.sort_by(|a, b| b.mtime_ms.total_cmp(&a.mtime_ms));
+            list
+        };
+        self.store.prune_parsed(&keep);
+        list
+    }
+
+    /// Meta + parse result; a result stored on disk is loaded on first use.
+    pub fn get_demo(&self, id: &str) -> Option<(DemoMeta, Option<Arc<ParsedDemo>>)> {
+        let (meta, parsed) = self.demos.lock().unwrap().get(id).map(|e| (e.meta.clone(), e.parsed.clone()))?;
+        if parsed.is_some() || meta.status != DemoStatus::Parsed {
+            return Some((meta, parsed));
+        }
+        match self.store.read_parsed(id).map(Arc::new) {
+            Some(p) => {
+                let mut demos = self.demos.lock().unwrap();
+                if let Some(e) = demos.get_mut(id) {
+                    if e.parsed.is_none() {
+                        e.parsed = Some(p.clone());
+                    }
+                }
+                Some((meta, Some(p)))
+            }
+            None => {
+                // Stored result unreadable: fall back to "not parsed".
+                self.store.delete_parsed(id);
+                self.update_meta(id, DemoEntry::reset).map(|m| (m, None))
+            }
+        }
+    }
+    pub fn parsed(&self, id: &str) -> Option<Arc<ParsedDemo>> {
+        self.get_demo(id).and_then(|(_, p)| p)
+    }
+
+    /// Add a demo the user picked: copy it into the first scanned folder (the
+    /// game's replays folder by default) so it shows up like any other demo.
+    /// A file already inside a scanned folder is used in place.
+    pub fn add_demo(&self, path: &Path) -> Result<DemoMeta> {
+        if !path.is_file() || !Self::is_dem(path) {
+            return Err(anyhow!("not a .dem file: {}", path.display()));
+        }
+        let name = path.file_name().ok_or_else(|| anyhow!("not a file"))?.to_owned();
+        let folders = self.replay_folders();
+        let inside = path.parent().map(|parent| folders.iter().any(|f| Self::same_dir(f, parent))).unwrap_or(false);
+        let target = if inside {
+            path.to_path_buf()
+        } else {
+            let dest_dir = folders.first().ok_or_else(|| anyhow!("no demo folder: set the CS2 folder or add a demo folder in settings first"))?;
+            let dest = dest_dir.join(&name);
+            check_ascii_path(&dest)?;
+            if dest.exists() {
+                let same = std::fs::metadata(&dest).map(|m| m.len()).ok() == std::fs::metadata(path).map(|m| m.len()).ok();
+                if !same {
+                    return Err(anyhow!("{} already exists with a different size", dest.display()));
+                }
+            } else {
+                std::fs::copy(path, &dest).map_err(|e| anyhow!("copy to {}: {e}", dest.display()))?;
+            }
+            dest
+        };
+        let id = Self::demo_id(&target);
+        self.list_demos().into_iter().find(|m| m.id == id).ok_or_else(|| anyhow!("demo not found after adding"))
+    }
+
+    fn same_dir(a: &Path, b: &Path) -> bool {
+        match (a.canonicalize(), b.canonicalize()) {
+            (Ok(x), Ok(y)) => x == y,
+            _ => a.to_string_lossy().eq_ignore_ascii_case(&b.to_string_lossy()),
+        }
+    }
+
+    pub fn is_parsing(&self, id: &str) -> bool {
+        self.parsing.lock().unwrap().contains(id)
+    }
+
+    fn update_meta(&self, id: &str, f: impl FnOnce(&mut DemoEntry)) -> Option<DemoMeta> {
+        let mut demos = self.demos.lock().unwrap();
+        let entry = demos.get_mut(id)?;
+        f(entry);
+        Some(entry.meta.clone())
+    }
+
+    pub fn parse_demo(self: &Arc<Self>, id: &str) -> Result<()> {
+        let (meta, _) = self.get_demo(id).ok_or_else(|| anyhow!("demo not found"))?;
+        if !self.parsing.lock().unwrap().insert(id.to_string()) {
+            return Ok(());
+        }
+        let meta = self
+            .update_meta(id, |e| {
+                e.meta.status = DemoStatus::Parsing;
+                e.meta.error = None;
+            })
+            .unwrap_or(meta);
+        self.notify.notify(Event::DemoChanged { demo: meta.clone() });
+        let engine = self.clone();
+        let id = id.to_string();
+        let thread_id = id.clone();
+        let spawned = std::thread::Builder::new().name(format!("parse-{id}")).spawn(move || {
+            let id = thread_id;
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| engine.parser.load_demo(Path::new(&meta.path)).map(build_parsed_demo)));
+            // Serialize to disk before taking the lock: the UI keeps listing while we write.
+            let outcome = match result {
+                Ok(Ok(parsed)) => {
+                    if let Err(err) = engine.store.write_parsed(&id, &meta, &parsed) {
+                        eprintln!("could not store parse result for {id}: {err:#}");
+                    }
+                    Ok(parsed)
+                }
+                Ok(Err(err)) => Err(format!("{err:#}")),
+                Err(_) => Err("parser crashed (unsupported or corrupt demo?)".to_string()),
+            };
+            let fresh = engine.update_meta(&id, |e| match outcome {
+                Ok(parsed) => {
+                    e.meta.status = DemoStatus::Parsed;
+                    e.meta.map_name = Some(parsed.info.map_name.clone());
+                    e.meta.parsed_at = Some(parsed.parsed_at.clone());
+                    e.meta.summary = Some(DemoSummary::of(&parsed));
+                    e.parsed = Some(Arc::new(parsed));
+                }
+                Err(msg) => {
+                    e.meta.status = DemoStatus::Error;
+                    e.meta.error = Some(msg);
+                }
+            });
+            engine.parsing.lock().unwrap().remove(&id);
+            if let Some(fresh) = fresh {
+                engine.notify.notify(Event::DemoChanged { demo: fresh });
+            }
+        });
+        if let Err(e) = spawned {
+            self.parsing.lock().unwrap().remove(&id);
+            self.update_meta(&id, DemoEntry::reset);
+            return Err(anyhow!("could not start the parse thread: {e}"));
+        }
+        Ok(())
+    }
+
+    /// Path of the replay stream for a parsed demo, building it on first use
+    /// (a few seconds: the demo is read again for positions and projectiles).
+    pub fn replay_file(&self, id: &str) -> Result<PathBuf> {
+        let (meta, parsed) = self.get_demo(id).ok_or_else(|| anyhow!("demo not found"))?;
+        let parsed = parsed.filter(|_| meta.status == DemoStatus::Parsed).ok_or_else(|| anyhow!("demo not parsed"))?;
+        let _guard = self.replay_lock.lock().unwrap();
+        let path = self.store.replay_path(id);
+        if path.is_file() && self.store.replay_is_current(id) {
+            return Ok(path);
+        }
+        let bytes = std::fs::read(&meta.path).map_err(|e| anyhow!("reading {}: {e}", meta.path))?;
+        let replay = build_replay(&self.parser, &parsed.info, &parsed.rounds, &bytes)?;
+        self.store.write_replay(id, &replay)
+    }
+
+    /// Radar image(s) + world mapping for a map, extracted from the game files
+    /// on first use (or again after a game update).
+    pub fn map_assets(&self, map: &str) -> Result<MapAssets> {
+        if map.is_empty() || !map.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+            return Err(anyhow!("unsupported map name {map:?}"));
+        }
+        let _guard = self.radar_lock.lock().unwrap();
+        let tools = self.tool_paths();
+        let radar_dir = self.store.radar_dir();
+        if let Some(a) = crate::radar::read_map_assets(&radar_dir, map, tools.cs2_patch_version) {
+            return Ok(a);
+        }
+        let cs2 = tools.cs2_dir.ok_or_else(|| anyhow!("CS2 folder not set"))?;
+        let vrf = tools.vrf_exe.ok_or_else(|| anyhow!("Source 2 Viewer CLI not installed — use \"Download tools\" in settings"))?;
+        ensure_map_assets(&radar_dir, &cs2, &vrf, map, tools.cs2_patch_version)
+    }
+
+    pub fn active_job_id(&self) -> Option<String> {
+        self.active_job.lock().unwrap().as_ref().map(|(id, _)| id.clone())
+    }
+
+    /// Drop the parse result (memory + disk); the demo goes back to "new".
+    pub fn clear_analysis(&self, id: &str) -> Result<()> {
+        self.ensure_idle(id)?;
+        self.store.delete_parsed(id);
+        let meta = self.update_meta(id, DemoEntry::reset).ok_or_else(|| anyhow!("demo not found"))?;
+        self.notify.notify(Event::DemoChanged { demo: meta });
+        Ok(())
+    }
+
+    /// Delete every parse result (disk + memory). Refused while something is parsing or rendering.
+    pub fn clear_all_analysis(&self) -> Result<u64> {
+        if !self.parsing.lock().unwrap().is_empty() {
+            return Err(anyhow!("a demo is being parsed"));
+        }
+        if self.active_job_id().is_some() {
+            return Err(anyhow!("a render is running"));
+        }
+        let freed = self.store.clear_all_parsed();
+        let metas: Vec<DemoMeta> = {
+            let mut demos = self.demos.lock().unwrap();
+            for e in demos.values_mut() {
+                e.reset();
+            }
+            demos.values().map(|e| e.meta.clone()).collect()
+        };
+        for meta in metas {
+            self.notify.notify(Event::DemoChanged { demo: meta });
+        }
+        Ok(freed)
+    }
+
+    /// Delete the .dem file from disk. Rendered videos are kept.
+    pub fn remove_demo(&self, id: &str) -> Result<()> {
+        self.ensure_idle(id)?;
+        let (meta, _) = self.get_demo(id).ok_or_else(|| anyhow!("demo not found"))?;
+        let path = Path::new(&meta.path);
+        if path.exists() {
+            std::fs::remove_file(path).map_err(|e| anyhow!("cannot delete {}: {e}", meta.path))?;
+        }
+        self.store.delete_parsed(id);
+        self.demos.lock().unwrap().remove(id);
+        Ok(())
+    }
+    fn ensure_idle(&self, demo_id: &str) -> Result<()> {
+        if self.is_parsing(demo_id) {
+            return Err(anyhow!("demo is being parsed"));
+        }
+        if let Some(active) = self.active_job_id() {
+            if self.store.get_job(&active).map(|j| j.demo_id == demo_id).unwrap_or(false) {
+                return Err(anyhow!("a render for this demo is running"));
+            }
+        }
+        Ok(())
+    }
+
+    // ---- setup ----
+    pub fn setup_state(&self) -> SetupState {
+        SetupState { running: self.setup_running.load(Ordering::Relaxed), log: self.setup_log.lock().unwrap().clone() }
+    }
+    pub fn start_setup(self: &Arc<Self>, force: bool) -> bool {
+        if self.setup_running.swap(true, Ordering::SeqCst) {
+            return false;
+        }
+        self.setup_log.lock().unwrap().clear();
+        let engine = self.clone();
+        std::thread::spawn(move || {
+            let settings = engine.store.settings();
+            let overrides = engine.overrides(&settings);
+            let mut log = |line: String| {
+                engine.setup_log.lock().unwrap().push(line.clone());
+                engine.notify.notify(Event::SetupLog { line });
+            };
+            let result = run_setup(&engine.default_tools_dir(), &overrides, force, &mut log);
+            engine.setup_running.store(false, Ordering::SeqCst);
+            match result {
+                Ok(_) => engine.notify.notify(Event::SetupFinished { ok: true, error: None }),
+                Err(e) => {
+                    engine.setup_log.lock().unwrap().push(format!("error: {e:#}"));
+                    engine.notify.notify(Event::SetupFinished { ok: false, error: Some(format!("{e:#}")) })
+                }
+            }
+        });
+        true
+    }
+
+    // ---- render queue ----
+    pub fn enqueue_render(self: &Arc<Self>, demo_id: &str, highlight_ids: Vec<String>, options: RenderOptions) -> Result<RenderJob> {
+        let (meta, parsed) = self.get_demo(demo_id).ok_or_else(|| anyhow!("demo not found"))?;
+        if meta.status != DemoStatus::Parsed || parsed.is_none() {
+            return Err(anyhow!("demo not parsed"));
+        }
+        if highlight_ids.is_empty() {
+            return Err(anyhow!("pick at least one highlight"));
+        }
+        check_ascii_path(Path::new(&meta.path))?;
+        let job = self.store.new_job(demo_id, highlight_ids, options)?;
+        self.render_queue.lock().unwrap().push_back(job.id.clone());
+        self.notify.notify(Event::JobChanged { job: job.clone() });
+        self.pump();
+        Ok(job)
+    }
+
+    pub fn cancel_job(&self, id: &str) -> bool {
+        {
+            let mut q = self.render_queue.lock().unwrap();
+            if let Some(pos) = q.iter().position(|j| j == id) {
+                q.remove(pos);
+                if let Some(mut job) = self.store.get_job(id) {
+                    job.status = JobStatus::Cancelled;
+                    job.finished_at = Some(now());
+                    self.persist(&job);
+                }
+                return true;
+            }
+        }
+        if let Some((active, flag)) = self.active_job.lock().unwrap().as_ref() {
+            if active == id {
+                flag.store(true, Ordering::SeqCst);
+                return true;
+            }
+        }
+        false
+    }
+
+    pub fn delete_job(&self, id: &str) -> Result<()> {
+        if self.active_job_id().as_deref() == Some(id) {
+            return Err(anyhow!("job is running"));
+        }
+        self.cancel_job(id);
+        self.store.delete_job(id)
+    }
+
+    /// Delete every render job and its videos. Refused while a render is running or queued.
+    pub fn clear_all_clips(&self) -> Result<u64> {
+        if self.active_job_id().is_some() || !self.render_queue.lock().unwrap().is_empty() {
+            return Err(anyhow!("a render is running"));
+        }
+        Ok(self.store.clear_all_clips())
+    }
+
+    fn pump(self: &Arc<Self>) {
+        if self.render_worker_running.swap(true, Ordering::SeqCst) {
+            return;
+        }
+        let engine = self.clone();
+        let spawned = std::thread::Builder::new().name("render-worker".into()).spawn(move || {
+            loop {
+                let next = engine.render_queue.lock().unwrap().pop_front();
+                let Some(id) = next else { break };
+                if let Some(job) = engine.store.get_job(&id) {
+                    if job.status == JobStatus::Queued {
+                        engine.run_job(job);
+                    }
+                }
+            }
+            engine.render_worker_running.store(false, Ordering::SeqCst);
+        });
+        if let Err(e) = spawned {
+            eprintln!("could not start the render worker: {e}");
+            self.render_worker_running.store(false, Ordering::SeqCst);
+        }
+    }
+
+    /// Write a job record and tell the UI; a failed write is logged, not fatal.
+    fn persist(&self, job: &RenderJob) {
+        if let Err(e) = self.store.save_job(job) {
+            eprintln!("could not save job {}: {e:#}", job.id);
+        }
+        self.notify.notify(Event::JobChanged { job: job.clone() });
+    }
+
+    fn run_job(self: &Arc<Self>, mut job: RenderJob) {
+        let cancel = Arc::new(AtomicBool::new(false));
+        *self.active_job.lock().unwrap() = Some((job.id.clone(), cancel.clone()));
+        job.status = JobStatus::Running;
+        job.started_at = Some(now());
+        job.stage = Some("starting".into());
+        self.persist(&job);
+
+        let progress = Mutex::new(job.clone());
+        let mut log = |line: String| {
+            let mut j = progress.lock().unwrap();
+            j.log.push(line);
+            if j.log.len() > 400 {
+                let excess = j.log.len() - 400;
+                j.log.drain(0..excess);
+            }
+            self.persist(&j);
+        };
+        let mut stage = |s: &str| {
+            let mut j = progress.lock().unwrap();
+            j.stage = Some(s.to_string());
+            self.persist(&j);
+        };
+        let outcome = self.get_demo(&job.demo_id).ok_or_else(|| anyhow!("demo not found")).and_then(|(meta, parsed)| {
+            let parsed = parsed.ok_or_else(|| anyhow!("demo not parsed (parse it again after restarting the app)"))?;
+            let wanted: HashSet<&str> = job.highlight_ids.iter().map(|s| s.as_str()).collect();
+            let highlights: Vec<_> = parsed.highlights.iter().filter(|h| wanted.contains(h.id.as_str())).cloned().collect();
+            render_highlights(RenderJobInput {
+                demo: &parsed.info,
+                demo_path: PathBuf::from(&meta.path),
+                highlights,
+                output_dir: self.store.job_dir(&job.id),
+                options: job.options.clone(),
+                tools: self.tool_paths(),
+                cancel: cancel.clone(),
+                log: &mut log,
+                stage: &mut stage,
+            })
+        });
+        job.log = progress.into_inner().unwrap().log;
+
+        *self.active_job.lock().unwrap() = None;
+        job.finished_at = Some(now());
+        job.stage = None;
+        match outcome {
+            Ok(result) => {
+                job.outputs = job_outputs(&result);
+                job.status = if job.outputs.is_empty() { JobStatus::Error } else { JobStatus::Done };
+                if job.outputs.is_empty() {
+                    job.error = Some("no clip was recorded".into());
+                }
+            }
+            Err(e) => {
+                let msg = format!("{e:#}");
+                job.status = if msg == "cancelled" { JobStatus::Cancelled } else { JobStatus::Error };
+                job.error = Some(msg);
+            }
+        }
+        self.persist(&job);
+    }
+}
+
+/// The game's `playdemo` only takes ASCII paths; refuse early with a clear message.
+fn check_ascii_path(path: &Path) -> Result<()> {
+    if path.to_string_lossy().is_ascii() {
+        Ok(())
+    } else {
+        Err(anyhow!("CS2 can only play demos from an ASCII path (playdemo limitation) — move or rename it: {}", path.display()))
+    }
+}
+
+/// One row per clip file, or the single merged video.
+fn job_outputs(result: &crate::render::RenderResult) -> Vec<JobOutput> {
+    let mut outputs: Vec<JobOutput> = result
+        .clips
+        .iter()
+        .filter_map(|c| c.file.as_ref().map(|f| JobOutput { file: f.to_string_lossy().to_string(), bytes: c.bytes.unwrap_or(0), highlight_id: Some(c.highlight_id.clone()), title: c.title.clone(), is_final: false }))
+        .collect();
+    if let (Some(f), Some(b)) = (&result.final_video, result.final_bytes) {
+        outputs.push(JobOutput { file: f.to_string_lossy().to_string(), bytes: b, highlight_id: None, title: "highlights (merged)".into(), is_final: true });
+    }
+    outputs
+}
