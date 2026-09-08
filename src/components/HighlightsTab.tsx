@@ -207,6 +207,12 @@ export function HighlightsTab({ meta, parsed, status, rendering, onRendered }: {
                   </Select.Content>
                 </Select.Root>
               </Box>
+              <Text as="label" size="1">
+                <Flex align="center" justify="between" gap="3">
+                  {t('highlights.showGame')}
+                  <Switch size="1" checked={opts.showGame} onCheckedChange={(showGame) => setOpts({ ...opts, showGame })} />
+                </Flex>
+              </Text>
             </Flex>
             <Flex direction="column" gap="3">
               <DataList.Root size="1">
@@ -271,7 +277,7 @@ export function HighlightsTab({ meta, parsed, status, rendering, onRendered }: {
           )}
           <Flex justify="between" align="center" mt="4" gap="3">
             <Text size="1" color="gray">
-              {t('highlights.hiddenGame')}
+              {t(opts.showGame ? 'highlights.visibleGame' : 'highlights.hiddenGame')}
             </Text>
             <Flex gap="3">
               <Dialog.Close>

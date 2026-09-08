@@ -4,7 +4,7 @@
 
 use super::paths::to_forward_slashes;
 use super::record::ClipOutput;
-use super::hide;
+use super::process::ProcessTree;
 use anyhow::{anyhow, Result};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -12,7 +12,7 @@ use std::process::{Command, Stdio};
 fn run(exe: &Path, args: &[String]) -> Result<()> {
     let mut cmd = Command::new(exe);
     cmd.args(args).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::piped());
-    let out = hide(&mut cmd).output()?;
+    let out = ProcessTree::new()?.output(&mut cmd)?;
     if !out.status.success() {
         let err = String::from_utf8_lossy(&out.stderr);
         let tail: Vec<&str> = err.lines().rev().take(5).collect();
@@ -32,7 +32,7 @@ pub fn ffprobe_exe(ffmpeg_exe: &Path) -> PathBuf {
 pub fn probe_duration_seconds(ffmpeg_exe: &Path, file: &Path) -> Result<f64> {
     let mut cmd = Command::new(ffprobe_exe(ffmpeg_exe));
     cmd.args(["-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0"]).arg(file);
-    let out = hide(&mut cmd).output()?;
+    let out = ProcessTree::new()?.output(&mut cmd)?;
     Ok(String::from_utf8_lossy(&out.stdout).trim().parse().unwrap_or(0.0))
 }
 

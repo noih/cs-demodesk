@@ -196,6 +196,7 @@ export interface RenderOptions {
   trueView: boolean;
   xray: boolean;
   voice: boolean;
+  showGame: boolean;
   quitWhenDone: boolean;
   keepRawFiles: boolean;
   /** join all clips into one video; the size limit then applies to that file */
@@ -224,6 +225,7 @@ export const DEFAULT_RENDER_OPTIONS: RenderOptions = {
   trueView: false,
   xray: false,
   voice: false,
+  showGame: false,
   quitWhenDone: true,
   keepRawFiles: false,
   merge: false,

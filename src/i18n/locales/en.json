@@ -184,7 +184,9 @@
     "hudScale": "HUD scale {{n}}",
     "clips": "Clips",
     "notReady": "Rendering is not ready - download the tools in Settings first.",
-    "hiddenGame": "CS2 runs hidden in the background while recording; do not close it manually.",
+    "showGame": "Show game window",
+    "visibleGame": "CS2 remains visible while recording; do not close it manually.",
+    "hiddenGame": "CS2 runs hidden with Windows audio muted while recording; do not close it manually.",
     "submitting": "Submitting..."
   },
   "renders": {

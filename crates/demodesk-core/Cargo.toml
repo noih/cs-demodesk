@@ -19,5 +19,12 @@ tempfile = "3"
 
 [target.'cfg(windows)'.dependencies]
 winreg = "0.56"
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging"] }
+windows = { version = "0.61", features = ["Win32_Media_Audio", "Win32_System_Com", "Win32_System_Com_StructuredStorage", "Win32_System_Variant"] }
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging", "Win32_UI_Accessibility", "Win32_System_Threading", "Win32_System_Diagnostics_ToolHelp", "Win32_System_JobObjects", "Win32_Security"] }
 
+
+[build-dependencies]
+cc = "1"
+sha2 = "0.10"
+ureq = { version = "3", features = ["platform-verifier"] }
+zip = { version = "8", default-features = false, features = ["deflate"] }

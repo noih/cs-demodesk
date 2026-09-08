@@ -108,7 +108,6 @@ pub fn build_schedule(clips: &[RenderClip], o: &ActionsOptions) -> Vec<Scheduled
         push(setup_tick, &mut slot, format!("echo {MARK} seq {} of {n} setup", seq + 1));
         for cmd in [
             "sv_cheats 1",
-            "volume 1",
             "demo_ui_mode 0",
             // keep rendering at full speed when the window is not in front
             "engine_no_focus_sleep 0",
@@ -123,6 +122,7 @@ pub fn build_schedule(clips: &[RenderClip], o: &ActionsOptions) -> Vec<Scheduled
         ] {
             push(setup_tick, &mut slot, cmd.to_string());
         }
+        push(setup_tick, &mut slot, "volume 1".into());
         push(setup_tick, &mut slot, format!("cl_demo_predict {}", r.true_view as u8));
         // HUD: cl_drawhud must stay on for any element; without the main HUD we go through
         // cl_draw_only_deathnotices and force radar / kill feed on or off individually.
@@ -233,6 +233,22 @@ mod tests {
     }
     fn idx(sched: &[Scheduled], cmd: &str) -> usize {
         sched.iter().position(|a| a.cmd == cmd || a.cmd.starts_with(&format!("{cmd} "))).unwrap()
+    }
+
+    #[test]
+    fn every_clip_keeps_game_audio_for_recording() {
+        let clips = [clip(10_000, 11_000, Some(3)), clip(20_000, 21_000, Some(3))];
+        for show_game in [false, true] {
+            let render = RenderOptions { show_game, ..RenderOptions::default() };
+            let schedule = build_schedule(&clips, &opts(&render));
+            let volumes: Vec<_> = schedule.iter().filter(|a| a.cmd.starts_with("volume ")).collect();
+            let starts: Vec<_> = schedule.iter().filter(|a| a.cmd == "mirv_streams record start").collect();
+            assert_eq!(volumes.len(), clips.len());
+            for (volume, start) in volumes.iter().zip(starts) {
+                assert_eq!(volume.cmd, "volume 1");
+                assert!(volume.tick < start.tick);
+            }
+        }
     }
 
     #[test]

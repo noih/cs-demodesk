@@ -180,7 +180,9 @@
     "hudScale": "介面大小 {{n}}",
     "clips": "片段",
     "notReady": "渲染環境未就緒，請先到設定完成工具下載。",
-    "hiddenGame": "錄影時 CS2 會在背景隱藏執行，請不要手動結束它。",
+    "showGame": "顯示遊戲畫面",
+    "visibleGame": "錄影時會顯示 CS2 遊戲畫面，請不要手動結束它。",
+    "hiddenGame": "錄影時 CS2 會隱藏執行並由 Windows 靜音，請不要手動結束它。",
     "submitting": "送出中…"
   },
   "renders": {

@@ -9,6 +9,10 @@ pub mod paths;
 mod record;
 pub mod setup;
 mod window;
+mod startup;
+mod process;
+#[cfg(windows)]
+mod audio;
 
 use crate::model::{DemoInfo, Highlight};
 use actions::{build_schedule, steamid_to_account_id, ActionsOptions, Camera, RenderClip};
@@ -116,6 +120,7 @@ pub struct RenderOptions {
     pub true_view: bool,
     pub xray: bool,
     pub voice: bool,
+    pub show_game: bool,
     pub quit_when_done: bool,
     pub keep_raw_files: bool,
     /// Join all clips into one video (`highlights.<container>`) instead of one file per clip
@@ -148,6 +153,7 @@ impl Default for RenderOptions {
             true_view: false,
             xray: false,
             voice: false,
+            show_game: false,
             quit_when_done: true,
             keep_raw_files: false,
             merge: false,
@@ -244,6 +250,7 @@ pub fn render_highlights(input: RenderJobInput) -> Result<RenderResult> {
         ffmpeg_exe: ffmpeg_exe.clone(),
         output_dir: output_dir.clone(),
         cfg_dir: tools.tools_dir.parent().map(|p| p.join("cfg")).unwrap_or_else(|| output_dir.join("cfg")),
+        show_game: o.show_game,
         width: o.width,
         height: o.height,
         schedule,
@@ -319,4 +326,46 @@ pub fn render_highlights(input: RenderJobInput) -> Result<RenderResult> {
     }
     log(format!("done: {}/{} clips", muxed.len(), clips.len()));
     Ok(result)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::RenderOptions;
+
+    #[test]
+    fn old_game_mute_setting_cannot_silence_new_recordings() {
+        let options: RenderOptions = serde_json::from_str(r#"{"muteMode":"game"}"#).unwrap();
+        assert!(!options.show_game);
+        assert!(serde_json::to_value(options).unwrap().get("muteMode").is_none());
+    }
+
+    #[test]
+    fn retired_startup_options_are_not_saved() {
+        for mode in ["event", "minimized", "hidden", "synchronous"] {
+            let options: RenderOptions = serde_json::from_value(serde_json::json!({
+                "hiddenStartup": mode, "showGame": false
+            })).unwrap();
+            assert!(!options.show_game);
+            assert!(serde_json::to_value(options).unwrap().get("hiddenStartup").is_none());
+        }
+    }
+
+    #[test]
+    fn legacy_render_options_keep_game_hidden() {
+        let mut saved = serde_json::to_value(RenderOptions::default()).unwrap();
+        saved.as_object_mut().unwrap().remove("showGame");
+        let options: RenderOptions = serde_json::from_value(saved).unwrap();
+        assert!(!options.show_game);
+    }
+
+    #[test]
+    fn game_visibility_survives_job_serialization() {
+        for show_game in [false, true] {
+            let options = RenderOptions { show_game, ..RenderOptions::default() };
+            let saved = serde_json::to_value(&options).unwrap();
+            assert_eq!(saved["showGame"], show_game);
+            let restored: RenderOptions = serde_json::from_value(saved).unwrap();
+            assert_eq!(restored.show_game, show_game);
+        }
+    }
 }

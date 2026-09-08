@@ -32,6 +32,7 @@ pub struct RecordSession<'a> {
     /// USRLOCALCSGO: where this launch keeps its cfg / video settings (shared by
     /// every job so the game does not start from a blank profile each time)
     pub cfg_dir: PathBuf,
+    pub show_game: bool,
     pub width: u32,
     pub height: u32,
     pub schedule: Vec<Scheduled>,
@@ -53,19 +54,49 @@ fn tasklist(image: &str, verbose: bool) -> String {
     hide(&mut cmd).output().map(|o| String::from_utf8_lossy(&o.stdout).to_string()).unwrap_or_default()
 }
 
-pub fn is_process_running(image: &str) -> bool {
-    tasklist(image, false).to_lowercase().contains(&image.to_lowercase())
+pub(super) fn is_process_running(image: &str) -> Result<bool> {
+    Ok(pid_of(image)?.is_some())
 }
 
-/// PID of the first process with this image name (tasklist /nh: "cs2.exe  12345 Console …").
-fn pid_of(image: &str) -> Option<u32> {
-    tasklist(image, false).lines().find(|l| l.to_lowercase().contains(&image.to_lowercase())).and_then(|l| l.split_whitespace().nth(1)).and_then(|p| p.parse().ok())
+#[cfg(windows)]
+pub(super) fn pid_of(image: &str) -> std::io::Result<Option<u32>> {
+    use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
+    use windows_sys::Win32::Foundation::{ERROR_NO_MORE_FILES, ERROR_INVALID_PARAMETER, INVALID_HANDLE_VALUE, WAIT_OBJECT_0, WAIT_TIMEOUT};
+    use windows_sys::Win32::System::Threading::{OpenProcess, WaitForSingleObject, PROCESS_SYNCHRONIZE};
+    use windows_sys::Win32::System::Diagnostics::ToolHelp::{CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W, TH32CS_SNAPPROCESS};
+    unsafe {
+        let raw = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+        if raw == INVALID_HANDLE_VALUE { return Err(std::io::Error::last_os_error()); }
+        let snapshot = OwnedHandle::from_raw_handle(raw);
+        let mut entry = PROCESSENTRY32W { dwSize: std::mem::size_of::<PROCESSENTRY32W>() as u32, ..Default::default() };
+        let mut found = Process32FirstW(snapshot.as_raw_handle(), &mut entry);
+        while found != 0 {
+            let len = entry.szExeFile.iter().position(|&c| c == 0).unwrap_or(entry.szExeFile.len());
+            if String::from_utf16_lossy(&entry.szExeFile[..len]).eq_ignore_ascii_case(image) {
+                // ToolHelp can briefly retain a terminated process after job cleanup.
+                let process = OpenProcess(PROCESS_SYNCHRONIZE, 0, entry.th32ProcessID);
+                if process.is_null() {
+                    let error = std::io::Error::last_os_error();
+                    if error.raw_os_error() != Some(ERROR_INVALID_PARAMETER as i32) { return Err(error); }
+                } else {
+                    let process = OwnedHandle::from_raw_handle(process);
+                    match WaitForSingleObject(process.as_raw_handle(), 0) {
+                        WAIT_TIMEOUT => return Ok(Some(entry.th32ProcessID)),
+                        WAIT_OBJECT_0 => {},
+                        _ => return Err(std::io::Error::last_os_error()),
+                    }
+                }
+            }
+            found = Process32NextW(snapshot.as_raw_handle(), &mut entry);
+        }
+        let error = std::io::Error::last_os_error();
+        if error.raw_os_error() == Some(ERROR_NO_MORE_FILES as i32) { Ok(None) } else { Err(error) }
+    }
 }
 
-pub fn kill_process(image: &str) {
-    let mut cmd = Command::new("taskkill");
-    cmd.args(["/f", "/im", image]).stdout(Stdio::null()).stderr(Stdio::null());
-    let _ = hide(&mut cmd).status();
+#[cfg(not(windows))]
+pub(super) fn pid_of(_image: &str) -> std::io::Result<Option<u32>> {
+    Err(std::io::Error::new(std::io::ErrorKind::Unsupported, "CS2 recording requires Windows"))
 }
 
 fn newest_crash_dump(cs2_exe: &Path, since: std::time::SystemTime) -> Option<PathBuf> {
@@ -95,7 +126,7 @@ pub fn summarize_console_log(cs2_dir: &Path, log: &mut dyn FnMut(String)) {
     }
 }
 
-pub fn hlae_args(s: &RecordSession) -> Vec<String> {
+pub fn hlae_args(s: &RecordSession, hook: Option<&Path>) -> Vec<String> {
     // TrueView (cl_demo_predict) is forced off at start; the schedule switches it
     // on later when the user asked for it.
     let mut game_args = vec![
@@ -120,24 +151,30 @@ pub fn hlae_args(s: &RecordSession) -> Vec<String> {
         s.width.to_string(),
         "-height".to_string(),
         s.height.to_string(),
-        "-sw".to_string(),
+        "-windowed".to_string(),
         // write csgo/console.log so a failure can be diagnosed
         "-condebug".to_string(),
     ];
     game_args.extend(s.extra_launch_options.iter().cloned());
-    vec![
+    let mut args = vec![
         "-noGui".into(),
         "-autoStart".into(),
         "-noConfig".into(),
         "-afxDisableSteamStorage".into(),
         "-customLoader".into(),
+    ];
+    if let Some(hook) = hook {
+        args.extend(["-hookDllPath".into(), hook.to_string_lossy().to_string()]);
+    }
+    args.extend([
         "-hookDllPath".into(),
         s.hlae_dll.to_string_lossy().to_string(),
         "-programPath".into(),
         s.cs2_exe.to_string_lossy().to_string(),
         "-cmdLine".into(),
         game_args.join(" "),
-    ]
+    ]);
+    args
 }
 
 /// Line-oriented client for the game's netcon (`-netconport`).
@@ -192,38 +229,86 @@ impl Netcon {
     }
 }
 
-/// Keeps the game window hidden from the moment it appears: polls every 200 ms
-/// from process start (splash / loading screens included) and hides it again
-/// whenever the engine shows it. Stops when dropped.
-struct WindowHider {
+/// Keeps window hiding independent of potentially slow Windows audio calls.
+/// Stops both workers and restores Windows audio state when dropped.
+struct GameWindowGuard {
     stop: Arc<AtomicBool>,
     hidden: Arc<AtomicU32>,
+    window: Option<super::window::EventHider>,
+    workers: Vec<std::thread::JoinHandle<()>>,
+    messages: mpsc::Receiver<String>,
 }
 
-impl WindowHider {
+impl GameWindowGuard {
     fn start(pid: u32) -> Self {
         let stop = Arc::new(AtomicBool::new(false));
         let hidden = Arc::new(AtomicU32::new(0));
-        let (s, h) = (stop.clone(), hidden.clone());
-        let _ = std::thread::Builder::new().name("window-hider".into()).spawn(move || {
-            while !s.load(Ordering::Relaxed) {
-                if let Ok(true) = super::window::hide_game_window(pid) {
-                    h.fetch_add(1, Ordering::Relaxed);
-                }
-                std::thread::sleep(Duration::from_millis(200));
+        let (tx, messages) = mpsc::channel::<String>();
+        let mut workers = vec![];
+        let window = match super::window::EventHider::start(pid, hidden.clone(), tx.clone()) {
+            Ok(window) => Some(window),
+            Err(e) => {
+                let _ = tx.send(format!("warning: window event listener could not start: {e}"));
+                None
             }
-        });
-        Self { stop, hidden }
+        };
+        #[cfg(windows)]
+        {
+            let (s, audio_tx) = (stop.clone(), tx.clone());
+            match std::thread::Builder::new().name("game-audio-mute".into()).spawn(move || {
+                let mut audio = match super::audio::GameAudioMute::new() {
+                    Ok(audio) => audio,
+                    Err(e) => {
+                        let _ = audio_tx.send(format!("warning: Windows audio mute unavailable: {e}"));
+                        return;
+                    }
+                };
+                let mut reported_error = false;
+                let mut muted_sessions = 0;
+                while !s.load(Ordering::Relaxed) {
+                    match audio.poll(pid) {
+                        Ok(n) if n > 0 => {
+                            muted_sessions += n;
+                            let _ = audio_tx.send(format!("CS2 Windows playback muted ({n} audio sessions)"));
+                        }
+                        Err(e) if !reported_error => {
+                            let _ = audio_tx.send(format!("warning: Windows audio mute failed: {e}"));
+                            reported_error = true;
+                        }
+                        _ => {}
+                    }
+                    std::thread::sleep(Duration::from_millis(200));
+                }
+                if muted_sessions == 0 {
+                    let _ = audio_tx.send("warning: no CS2 Windows audio session was muted".into());
+                }
+                let errors = audio.restore();
+                if muted_sessions > 0 && errors.is_empty() {
+                    let _ = audio_tx.send("CS2 Windows mute state restored".into());
+                }
+                for error in errors { let _ = audio_tx.send(error); }
+            }) {
+                Ok(worker) => workers.push(worker),
+                Err(e) => { let _ = tx.send(format!("warning: audio worker could not start: {e}")); }
+            }
+        }
+        Self { stop, hidden, window, workers, messages }
+    }
+    fn report(&self, log: &mut dyn FnMut(String)) {
+        for message in self.messages.try_iter() { log(message); }
+    }
+    fn stop(&mut self) {
+        self.stop.store(true, Ordering::Relaxed);
+        if let Some(mut window) = self.window.take() { window.stop(); }
+        for worker in self.workers.drain(..) { let _ = worker.join(); }
     }
     fn hidden(&self) -> u32 {
         self.hidden.load(Ordering::Relaxed)
     }
 }
 
-impl Drop for WindowHider {
-    fn drop(&mut self) {
-        self.stop.store(true, Ordering::Relaxed);
-    }
+impl Drop for GameWindowGuard {
+    fn drop(&mut self) { self.stop(); }
 }
 
 /// Progress derived from the `[demodesk] seq i of n …` markers.
@@ -255,19 +340,37 @@ impl RecordSession<'_> {
     }
 
     /// Start CS2 through HLAE and wait until the injected process is up; the
-    /// returned hider keeps its window off screen from here on.
-    fn launch(&mut self) -> Result<Option<WindowHider>> {
+    /// returned guard handles background hiding/muting.
+    fn launch(&mut self, processes: &super::process::ProcessTree) -> Result<Option<GameWindowGuard>> {
         // Keep the player's real config untouched: the game reads/writes cfg under USRLOCALCSGO.
         std::fs::create_dir_all(&self.cfg_dir)?;
-        let args = hlae_args(self);
-        (self.log)(format!("launching HLAE: {} {}", self.hlae_exe.display(), args.iter().map(|a| if a.contains(' ') { format!("\"{a}\"") } else { a.clone() }).collect::<Vec<_>>().join(" ")));
-        let mut cmd = Command::new(&self.hlae_exe);
+        let launcher = &self.hlae_exe;
+        if self.cancelled() { return Err(anyhow!("cancelled")); }
+        let hook = if !self.show_game {
+            std::fs::write(self.output_dir.join("window-hook.log"), "")?;
+            Some(super::startup::prepare_hook(&self.cfg_dir)?)
+        } else { None };
+        let args = hlae_args(self, hook.as_deref());
+        (self.log)(format!("launching HLAE: {} {}", launcher.display(), args.iter().map(|a| if a.contains(' ') { format!("\"{a}\"") } else { a.clone() }).collect::<Vec<_>>().join(" ")));
+        let mut cmd = Command::new(launcher);
         cmd.args(&args).env("USRLOCALCSGO", &self.cfg_dir).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
-        let mut hlae = hide(&mut cmd).spawn()?;
+        cmd.env_remove("DEMODESK_WINDOW_HOOK_LOG");
+        if hook.is_some() {
+            cmd.env("DEMODESK_WINDOW_HOOK_LOG", self.output_dir.join("window-hook.log"));
+        }
+        let mut hlae = processes.spawn(&mut cmd)?;
 
         // HLAE is only a loader; it returns quickly once cs2.exe has been injected.
         let deadline = Instant::now() + Duration::from_secs(60);
-        while !is_process_running("cs2.exe") {
+        let pid = loop {
+            match pid_of("cs2.exe") {
+                Ok(Some(pid)) => break pid,
+                Ok(None) => {}
+                Err(error) => {
+                    let _ = hlae.kill();
+                    return Err(error.into());
+                }
+            }
             if Instant::now() > deadline {
                 let _ = hlae.kill();
                 return Err(anyhow!("cs2.exe did not start within 60 s"));
@@ -277,16 +380,11 @@ impl RecordSession<'_> {
                 return Err(anyhow!("cancelled"));
             }
             std::thread::sleep(Duration::from_millis(250));
-        }
-        // The window shows up during engine init (engine_no_focus_sleep 0 keeps it
-        // rendering while hidden, verified in practice), so start hiding right away.
-        let hider = pid_of("cs2.exe").map(WindowHider::start);
-        if hider.is_none() {
-            (self.log)("cs2.exe pid not found — window stays on screen".into());
-        }
+        };
+        // Retain event hiding as a fallback alongside the synchronous DLL and audio mute.
+        let hider = if self.show_game { None } else { Some(GameWindowGuard::start(pid)) };
         std::thread::sleep(Duration::from_secs(3));
         if tasklist("cs2.exe", true).contains("Error - AfxHookSource") {
-            kill_process("cs2.exe");
             return Err(anyhow!("HLAE injection failed (AfxHookSource error window)"));
         }
         if let Ok(Some(status)) = hlae.try_wait() {
@@ -298,19 +396,17 @@ impl RecordSession<'_> {
     }
 
     /// Connect to the game's netcon once the engine answers.
-    fn connect_netcon(&mut self, hider: Option<&WindowHider>) -> Result<Netcon> {
+    fn connect_netcon(&mut self, hider: Option<&GameWindowGuard>) -> Result<Netcon> {
         (self.log)(format!("game running, connecting to netcon on port {NETCON_PORT}…"));
         let deadline = Instant::now() + Duration::from_secs(120);
         let con = loop {
-            if !is_process_running("cs2.exe") {
+            if !is_process_running("cs2.exe")? {
                 return Err(anyhow!("cs2.exe exited before the console came up"));
             }
             if self.cancelled() {
-                kill_process("cs2.exe");
                 return Err(anyhow!("cancelled"));
             }
             if Instant::now() > deadline {
-                kill_process("cs2.exe");
                 return Err(anyhow!("netcon did not come up within 120 s (-netconport {NETCON_PORT} / -afxFixNetCon)"));
             }
             if let Ok(mut c) = Netcon::connect(NETCON_PORT) {
@@ -321,9 +417,10 @@ impl RecordSession<'_> {
             std::thread::sleep(Duration::from_secs(1));
         };
         (self.log)("netcon connected".into());
-        match hider.map(WindowHider::hidden) {
-            Some(0) => (self.log)("game window not seen yet — it stays on screen".into()),
-            Some(n) => (self.log)(format!("game window hidden ({n}× so far)")),
+        if let Some(hider) = hider { hider.report(self.log); }
+        match hider.map(GameWindowGuard::hidden) {
+            Some(0) => (self.log)("no fallback window hiding needed (native hook handles startup)".into()),
+            Some(n) => (self.log)(format!("game window hidden ({n} times)")),
             None => {}
         }
         Ok(con)
@@ -339,7 +436,6 @@ impl RecordSession<'_> {
         }
         let noise = con.drain();
         if let Some(err) = noise.iter().find(|l| l.to_lowercase().contains("unknown command") && l.contains("mirv_cmd")) {
-            kill_process("cs2.exe");
             return Err(anyhow!("HLAE is not active in this game process ({err})"));
         }
         (self.log)(format!("schedule loaded ({} commands)", self.schedule.len()));
@@ -361,11 +457,10 @@ impl RecordSession<'_> {
         let demo_deadline = Instant::now() + Duration::from_secs(120);
         let mut progress = Progress::default();
         let mut replayed = false;
-        while is_process_running("cs2.exe") {
+        while is_process_running("cs2.exe")? {
             if self.cancelled() {
                 let _ = con.send("quit");
                 std::thread::sleep(Duration::from_secs(2));
-                kill_process("cs2.exe");
                 return Err(anyhow!("cancelled"));
             }
             for line in con.drain() {
@@ -373,7 +468,6 @@ impl RecordSession<'_> {
             }
             if !progress.seen_marker && Instant::now() > demo_deadline {
                 if replayed {
-                    kill_process("cs2.exe");
                     return Err(anyhow!("the demo did not reach the first clip within 4 minutes — see the log"));
                 }
                 replayed = true;
@@ -381,7 +475,6 @@ impl RecordSession<'_> {
                 self.playdemo(con)?;
             }
             if Instant::now() > timeout_at {
-                kill_process("cs2.exe");
                 return Err(anyhow!("recording timed out after {} s", self.timeout_seconds));
             }
             std::thread::sleep(Duration::from_millis(500));
@@ -412,22 +505,41 @@ impl RecordSession<'_> {
         }
     }
 
-    fn run(&mut self, schedule_file: &Path, started_at: std::time::SystemTime) -> Result<()> {
-        let hider = self.launch()?;
-        let mut con = self.connect_netcon(hider.as_ref())?;
-        self.start_demo(&mut con, schedule_file)?;
-        if !self.follow_markers(&mut con)? {
-            (self.log)("game exited before the schedule finished".into());
+    fn run(&mut self, schedule_file: &Path, started_at: std::time::SystemTime, processes: &super::process::ProcessTree) -> Result<()> {
+        let mut hider = self.launch(processes)?;
+        let result = (|| {
+            let mut con = self.connect_netcon(hider.as_ref())?;
+            if !self.show_game {
+                let evidence = std::fs::read_to_string(self.output_dir.join("window-hook.log")).unwrap_or_default();
+                if !evidence.lines().any(|line| line == "installed") {
+                    return Err(anyhow!("Synchronous window hook did not report successful installation; see window-hook.log."));
+                }
+                (self.log)("synchronous window hook installed".into());
+            }
+            self.start_demo(&mut con, schedule_file)?;
+            if !self.follow_markers(&mut con)? {
+                (self.log)("game exited before the schedule finished".into());
+            }
+            if let Some(dump) = newest_crash_dump(&self.cs2_exe, started_at) {
+                (self.log)(format!("warning: CS2 wrote a crash dump ({}) — HLAE may be out of date", dump.file_name().unwrap().to_string_lossy()));
+            }
+            Ok(())
+        })();
+        if let Some(hider) = hider.as_mut() {
+            hider.stop();
+            hider.report(self.log);
         }
-        if let Some(dump) = newest_crash_dump(&self.cs2_exe, started_at) {
-            (self.log)(format!("warning: CS2 wrote a crash dump ({}) — HLAE may be out of date", dump.file_name().unwrap().to_string_lossy()));
+        if !self.show_game {
+            if let Ok(evidence) = std::fs::read_to_string(self.output_dir.join("window-hook.log")) {
+                for line in evidence.lines() { (self.log)(format!("window hook: {line}")); }
+            }
         }
-        Ok(())
+        result
     }
 }
 
 pub fn run_recording_session(s: &mut RecordSession) -> Result<()> {
-    if is_process_running("cs2.exe") {
+    if is_process_running("cs2.exe")? {
         return Err(anyhow!("cs2.exe is already running — close the game first"));
     }
     std::fs::create_dir_all(&s.output_dir)?;
@@ -437,7 +549,11 @@ pub fn run_recording_session(s: &mut RecordSession) -> Result<()> {
     let started_at = std::time::SystemTime::now();
     let _ = std::fs::remove_file(console_log_path(&s.cs2_dir));
 
-    let result = s.run(&schedule_file, started_at);
+    let processes = super::process::ProcessTree::new()?;
+    let result = s.run(&schedule_file, started_at, &processes);
+    let cleanup = processes.finish();
+    if let Err(error) = &cleanup { (s.log)(format!("process cleanup failed: {error}")); }
+    let result = result.and(cleanup.map_err(Into::into));
     if result.is_err() {
         summarize_console_log(&s.cs2_dir, s.log);
     }
@@ -470,6 +586,17 @@ pub fn collect_clip_outputs(output_dir: &Path, count: usize, container: &str) ->
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(windows)]
+    #[test]
+    fn native_pid_lookup_matches_full_image_name_case_insensitively() {
+        let exe = std::env::current_exe().unwrap();
+        let name = exe.file_name().unwrap().to_string_lossy();
+        assert_eq!(pid_of(&name.to_ascii_uppercase()).unwrap(), Some(std::process::id()));
+        assert_eq!(pid_of("").unwrap(), None);
+        assert_eq!(pid_of(&format!("{name}.missing")).unwrap(), None);
+        assert_eq!(pid_of(&name[..name.len() - 4]).unwrap(), None);
+    }
 
     #[test]
     fn markers_parse() {
