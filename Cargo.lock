@@ -781,7 +781,7 @@ dependencies = [
 
 [[package]]
 name = "demodesk"
-version = "1.0.3"
+version = "1.0.4"
 dependencies = [
  "demodesk-core",
  "serde",
@@ -795,7 +795,7 @@ dependencies = [
 
 [[package]]
 name = "demodesk-core"
-version = "1.0.3"
+version = "1.0.4"
 dependencies = [
  "ahash",
  "anyhow",
