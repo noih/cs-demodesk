@@ -1,11 +1,13 @@
 {
   "name": "cs2-demodesk",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "private": true,
   "license": "AGPL-3.0-only",
   "type": "module",
   "description": "CS DemoDesk — Counter-Strike demo analysis desktop app",
-  "engines": { "node": ">=24.20.0" },
+  "engines": {
+    "node": ">=24.20.0"
+  },
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit -p tsconfig.json && vite build",
