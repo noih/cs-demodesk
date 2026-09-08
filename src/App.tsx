@@ -100,8 +100,8 @@ export function App() {
           <DemoView key={selected.id} meta={selected} jobs={jobs.filter((j) => j.demoId === selected.id)} status={status} onChanged={refresh} onRemoved={() => setSelectedId(undefined)} />
         ) : (
           <Flex align="center" justify="center" style={{ height: '100%' }}>
-            <Box>
-              <Text as="p" color="gray" size="3">
+            <Flex direction="column" align="center">
+              <Text as="p" align="center" color="gray" size="3">
                 {t('app.pickDemo')}
               </Text>
               {status && !status.ok && (
@@ -109,7 +109,7 @@ export function App() {
                   {t('app.goToSettings')}
                 </Button>
               )}
-            </Box>
+            </Flex>
           </Flex>
         )}
       </main>
