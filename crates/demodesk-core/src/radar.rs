@@ -183,7 +183,7 @@ pub fn pak_path(cs2_dir: &Path) -> PathBuf {
 }
 
 fn run_vrf(vrf: &Path, args: &[&str]) -> Result<String> {
-    let out = Command::new(vrf).args(args).output().with_context(|| format!("running {}", vrf.display()))?;
+    let out = crate::render::process::ProcessTree::new()?.output(Command::new(vrf).args(args)).with_context(|| format!("running {}", vrf.display()))?;
     let stdout = String::from_utf8_lossy(&out.stdout).to_string();
     if !out.status.success() {
         let stderr = String::from_utf8_lossy(&out.stderr);

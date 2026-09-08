@@ -10,7 +10,7 @@ mod record;
 pub mod setup;
 mod window;
 mod startup;
-mod process;
+pub(crate) mod process;
 #[cfg(windows)]
 mod audio;
 
