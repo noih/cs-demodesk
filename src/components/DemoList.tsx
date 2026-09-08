@@ -6,6 +6,7 @@ import { useVirtualizer } from '@tanstack/react-virtual';
 import { open } from '@tauri-apps/plugin-dialog';
 import { api, errorText, mb, type DemoMeta } from '../api.ts';
 import { fmtDate, fmtTime } from '../i18n/index.ts';
+import { DateField, dayOf } from './DateField.tsx';
 
 const STATUS_COLOR: Record<DemoMeta['status'], 'gray' | 'amber' | 'green' | 'red'> = { new: 'gray', parsing: 'amber', parsed: 'green', error: 'red' };
 const ROW_HEIGHT = 74;
@@ -16,12 +17,6 @@ function shortName(name: string): string {
   if (base.length <= 28) return base;
   const parts = base.split('_');
   return parts.length >= 3 ? `${parts[0]}_…_${parts[parts.length - 1]}` : `${base.slice(0, 14)}…${base.slice(-10)}`;
-}
-
-/** "2026-09-07" (local) for the date inputs */
-function dayOf(ms: number): string {
-  const d = new Date(ms);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
 export function DemoList({
@@ -55,7 +50,7 @@ export function DemoList({
         const hay = [d.name, d.mapName ?? '', ...(d.summary?.players ?? [])].join(' ').toLowerCase();
         if (!words.every((w) => hay.includes(w))) return false;
       }
-      const day = dayOf(d.mtimeMs);
+      const day = dayOf(new Date(d.mtimeMs));
       if (from && day < from) return false;
       if (to && day > to) return false;
       return true;
@@ -133,15 +128,15 @@ export function DemoList({
           )}
         </TextField.Root>
         <Flex align="center" gap="1">
-          <TextField.Root size="1" type="date" value={from} max={to || undefined} onChange={(e) => setFrom(e.target.value)} style={{ flex: 1, minWidth: 0 }} aria-label={t('demoList.from')} />
+          <DateField value={from} max={to || undefined} onChange={setFrom} label={t('demoList.from')} />
           <Text size="1" color="gray">
             –
           </Text>
-          <TextField.Root size="1" type="date" value={to} min={from || undefined} onChange={(e) => setTo(e.target.value)} style={{ flex: 1, minWidth: 0 }} aria-label={t('demoList.to')} />
+          <DateField value={to} min={from || undefined} onChange={setTo} label={t('demoList.to')} />
           {(from || to) && (
             <IconButton
               size="1"
-              variant="ghost"
+              variant="surface"
               color="gray"
               onClick={() => {
                 setFrom('');
