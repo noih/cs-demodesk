@@ -60,10 +60,9 @@ function PathField({ label, value, placeholder, hint, onChange, pick }: { label:
 function StorageRow({ label, what, path, bytes, confirm, onClear }: { label: string; what: string; path: string; bytes: number; confirm: string; onClear: () => Promise<void> }) {
   const { t } = useTranslation();
   return (
-    <Flex align="center" gap="3">
-      <Text size="2" weight="medium" style={{ flex: 1, minWidth: 0 }}>
-        {label} <Text color="gray">{mb(bytes)}</Text>
-      </Text>
+    <>
+      <Text size="2" weight="medium" style={{ minWidth: 0 }}>{label}</Text>
+      <Text size="2" color="gray" align="right" style={{ fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>{mb(bytes)}</Text>
       <IconButton size="1" variant="ghost" color="gray" aria-label={t('common.openInExplorer')} onClick={() => void api.open(path)}>
         <OpenInNewWindowIcon />
       </IconButton>
@@ -90,7 +89,7 @@ function StorageRow({ label, what, path, bytes, confirm, onClear }: { label: str
           </Flex>
         </AlertDialog.Content>
       </AlertDialog.Root>
-    </Flex>
+    </>
   );
 }
 
@@ -352,9 +351,11 @@ export function SettingsView({ onChanged }: { onChanged: () => Promise<void> }) 
                   <Callout.Text>{t('settings.restartRequired')}</Callout.Text>
                 </Callout.Root>
               )}
-              <StorageRow label={t('settings.parsedDir')} what={t('settings.clearParsedWhat')} path={`${data.dataDir}\\parsed`} bytes={data.parsedBytes} confirm={t('settings.clearParsedConfirm')} onClear={clear(t('settings.clearParsedWhat'), api.clearAllAnalysis)} />
-              <StorageRow label={t('settings.clipsDir')} what={t('settings.clearClipsWhat')} path={`${data.dataDir}\\clips`} bytes={data.clipsBytes} confirm={t('settings.clearClipsConfirm')} onClear={clear(t('settings.clearClipsWhat'), api.clearAllClips)} />
-              <StorageRow label={t('settings.radarDir')} what={t('settings.clearRadarWhat')} path={`${data.dataDir}\\radar`} bytes={data.radarBytes} confirm={t('settings.clearRadarConfirm')} onClear={clear(t('settings.clearRadarWhat'), api.clearRadar)} />
+              <Grid columns="minmax(0, 1fr) max-content max-content max-content" gapX="3" gapY="3" align="center">
+                <StorageRow label={t('settings.parsedDir')} what={t('settings.clearParsedWhat')} path={`${data.dataDir}\\parsed`} bytes={data.parsedBytes} confirm={t('settings.clearParsedConfirm')} onClear={clear(t('settings.clearParsedWhat'), api.clearAllAnalysis)} />
+                <StorageRow label={t('settings.clipsDir')} what={t('settings.clearClipsWhat')} path={`${data.dataDir}\\clips`} bytes={data.clipsBytes} confirm={t('settings.clearClipsConfirm')} onClear={clear(t('settings.clearClipsWhat'), api.clearAllClips)} />
+                <StorageRow label={t('settings.radarDir')} what={t('settings.clearRadarWhat')} path={`${data.dataDir}\\radar`} bytes={data.radarBytes} confirm={t('settings.clearRadarConfirm')} onClear={clear(t('settings.clearRadarWhat'), api.clearRadar)} />
+              </Grid>
             </Flex>
           </Card>
         </Flex>
