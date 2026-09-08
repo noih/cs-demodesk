@@ -242,12 +242,24 @@ fn get_startup_error(state: State<'_, StartupError>) -> Option<String> {
 fn recover_data_directory(app: AppHandle, directory: State<'_, Directory>, state: State<'_, StartupError>, path: Option<String>) -> CmdResult<()> {
     if state.0.is_none() { return Err("Recovery is only available before startup.".into()); }
     directory.save(directory.validate(path)?)?;
-    app.restart();
+    // Deliver Exit so the single-instance plugin releases its lock before relaunch.
+    app.request_restart();
+    Ok(())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let builder = tauri::Builder::default();
+    // Register first: duplicate launches must exit before opening the data store.
+    #[cfg(desktop)]
+    let builder = builder.plugin(tauri_plugin_single_instance::init(|app, _, _| {
+        if let Some(window) = app.get_webview_window("main") {
+            let _ = window.show();
+            let _ = window.unminimize();
+            let _ = window.set_focus();
+        }
+    }));
+    builder
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {

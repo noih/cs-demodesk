@@ -71,3 +71,12 @@ unchanged source contents, unselected siblings, and persistence across restart.
 Additional regressions cover truncated frames and varints, active Windows write
 handles, immediate parsing after completion, unavailable selected directories, explicit
 replacement/default recovery, and preservation of the original selection/data.
+
+The official Tauri single-instance plugin is registered before other plugins
+and engine setup. Reopening the app restores and focuses the existing main
+window. The application identifier stays constant across locations and versions.
+Recovery requests restart through the event loop so plugin exit cleanup runs.
+
+Manual desktop checks: reopen normally and while minimized; verify the original
+window returns and no second engine starts. Repeat from another portable copy,
+then verify closing/reopening and data-directory recovery restart.
