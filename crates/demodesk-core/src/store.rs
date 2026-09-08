@@ -15,7 +15,7 @@ use std::collections::HashSet;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
@@ -41,6 +41,13 @@ impl Default for Settings {
 }
 
 impl Settings {
+    fn map_paths(&mut self, mut map: impl FnMut(String) -> String) {
+        for field in [&mut self.cs2_dir, &mut self.hlae_exe, &mut self.ffmpeg_exe, &mut self.tools_dir] {
+            if let Some(value) = field.take() { *field = Some(map(value)); }
+        }
+        for folder in &mut self.replay_folders { *folder = map(std::mem::take(folder)); }
+    }
+
     /// Trimmed paths, blanks turned into "not set". Applied once when saving so
     /// every reader can use the fields as they are.
     pub fn normalized(mut self) -> Self {
@@ -167,7 +174,7 @@ pub struct JobOutput {
 
 /// Layout version written into every job.json. Jobs are records, never
 /// rebuilt: a future layout change reads the old version and converts in code.
-pub const JOB_SCHEMA_VERSION: u32 = 1;
+pub const JOB_SCHEMA_VERSION: u32 = 2;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -225,10 +232,27 @@ impl Store {
 
     // ---- settings ----
     pub fn settings(&self) -> Settings {
-        fs::read_to_string(self.root.join("settings.json")).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default()
+        let mut settings: Settings = fs::read_to_string(self.root.join("settings.json")).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default();
+        settings.map_paths(|value| {
+            let path = PathBuf::from(value.replace('\\', "/"));
+            let relative = if safe_relative(&path) {
+                Some(path.clone())
+            } else {
+                // Older settings stored bundled tool overrides as absolute paths.
+                let parts: Vec<_> = path.components().collect();
+                parts.iter().rposition(|c| c.as_os_str() == "demodesk-data")
+                    .map(|i| parts[i + 1..].iter().collect::<PathBuf>())
+                    .filter(|p| p.starts_with("tools") && safe_relative(p) && !path.exists() && self.root.join(p).exists())
+            };
+            relative.map(|p| self.root.join(p).to_string_lossy().into_owned()).unwrap_or(value)
+        });
+        settings
     }
     pub fn save_settings(&self, s: &Settings) -> Result<()> {
-        write_atomic(&self.root.join("settings.json"), serde_json::to_string_pretty(s)?.as_bytes())
+        let mut saved = s.clone();
+        saved.map_paths(|value| Path::new(&value).strip_prefix(&self.root)
+            .ok().filter(|p| safe_relative(p)).map(|p| p.to_string_lossy().into_owned()).unwrap_or(value));
+        write_atomic(&self.root.join("settings.json"), serde_json::to_string_pretty(&saved)?.as_bytes())
     }
 
     // ---- parse results (disposable cache) ----
@@ -346,10 +370,32 @@ impl Store {
     pub fn save_job(&self, job: &RenderJob) -> Result<()> {
         let dir = self.job_dir(&job.id);
         fs::create_dir_all(&dir)?;
-        write_atomic(&dir.join("job.json"), serde_json::to_string_pretty(job)?.as_bytes())
+        let mut saved = job.clone();
+        saved.schema_version = JOB_SCHEMA_VERSION;
+        for output in &mut saved.outputs {
+            if let Ok(relative) = Path::new(&output.file).strip_prefix(&dir) {
+                if safe_relative(relative) { output.file = relative.to_string_lossy().into_owned(); }
+            }
+        }
+        write_atomic(&dir.join("job.json"), serde_json::to_string_pretty(&saved)?.as_bytes())
     }
     pub fn get_job(&self, id: &str) -> Option<RenderJob> {
-        fs::read_to_string(self.job_dir(id).join("job.json")).ok().and_then(|t| serde_json::from_str(&t).ok())
+        let dir = self.job_dir(id);
+        let mut job: RenderJob = serde_json::from_str(&fs::read_to_string(dir.join("job.json")).ok()?).ok()?;
+        for output in &mut job.outputs {
+            let path = PathBuf::from(output.file.replace('\\', "/"));
+            let relative = if safe_relative(&path) {
+                Some(path.clone())
+            } else if job.schema_version == 1 {
+                // Recover old absolute paths from their job folder, even if the old
+                // installation still exists. Preserve nested output directories.
+                let parts: Vec<_> = path.components().collect();
+                parts.windows(2).rposition(|p| (p[0].as_os_str() == "clips" || p[0].as_os_str() == "renders") && p[1].as_os_str() == id)
+                    .map(|i| parts[i + 2..].iter().collect::<PathBuf>()).filter(|p| safe_relative(p))
+            } else { None };
+            if let Some(relative) = relative { output.file = dir.join(relative).to_string_lossy().into_owned(); }
+        }
+        Some(job)
     }
     pub fn list_jobs(&self) -> Vec<RenderJob> {
         let mut jobs: Vec<RenderJob> = fs::read_dir(self.root.join("clips"))
@@ -365,6 +411,11 @@ impl Store {
         }
         Ok(())
     }
+}
+
+// Portable paths must stay inside the directory they are resolved against.
+fn safe_relative(path: &Path) -> bool {
+    !path.as_os_str().is_empty() && path.components().all(|c| matches!(c, Component::Normal(_) | Component::CurDir))
 }
 
 /// Size of a file or of everything under a directory.
@@ -386,4 +437,114 @@ fn clear_dir(dir: &Path) -> u64 {
         }
     }
     freed
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn videos_survive_repeated_data_folder_moves() {
+        let temp = tempfile::tempdir().unwrap();
+        let first = temp.path().join("first/demodesk-data");
+        let store = Store::open(first.clone()).unwrap();
+        let mut job = store.new_job("demo", vec![], RenderOptions::default()).unwrap();
+        let video = store.job_dir(&job.id).join("nested/clip.mp4");
+        fs::create_dir_all(video.parent().unwrap()).unwrap();
+        fs::write(&video, b"video").unwrap();
+        job.outputs.push(JobOutput { file: video.to_string_lossy().into_owned(), bytes: 5, highlight_id: None, title: "clip".into(), is_final: false });
+        store.save_job(&job).unwrap();
+        let saved: RenderJob = serde_json::from_str(&fs::read_to_string(store.job_dir(&job.id).join("job.json")).unwrap()).unwrap();
+        assert_eq!(saved.schema_version, 2);
+        assert_eq!(Path::new(&saved.outputs[0].file), Path::new("nested/clip.mp4"));
+        let mut previous = first;
+        for name in ["second", "third"] {
+            let next = temp.path().join(name).join("demodesk-data");
+            fs::create_dir_all(next.parent().unwrap()).unwrap();
+            fs::rename(&previous, &next).unwrap();
+            let moved = Store::open(next.clone()).unwrap();
+            let loaded = moved.get_job(&job.id).unwrap();
+            assert_eq!(Path::new(&loaded.outputs[0].file), moved.job_dir(&job.id).join("nested/clip.mp4"));
+            assert_eq!(fs::read(&loaded.outputs[0].file).unwrap(), b"video");
+            moved.save_job(&loaded).unwrap();
+            previous = next;
+        }
+    }
+
+    #[test]
+    fn legacy_video_paths_use_the_current_job_folder() {
+        let temp = tempfile::tempdir().unwrap();
+        let old = Store::open(temp.path().join("old/demodesk-data")).unwrap();
+        let moved = Store::open(temp.path().join("new/demodesk-data")).unwrap();
+        let mut job = old.new_job("demo", vec![], RenderOptions::default()).unwrap();
+        for layout in ["clips", "renders"] {
+            let original = old.root.join(layout).join(&job.id).join("nested/clip.mp4");
+            fs::create_dir_all(original.parent().unwrap()).unwrap();
+            fs::write(&original, b"old copy").unwrap();
+            for separator in ["/", "\\"] {
+                job.schema_version = 1;
+                job.outputs = vec![JobOutput { file: original.to_string_lossy().replace('\\', "/").replace('/', separator), bytes: 0, highlight_id: None, title: "clip".into(), is_final: false }];
+                fs::create_dir_all(moved.job_dir(&job.id)).unwrap();
+                fs::write(moved.job_dir(&job.id).join("job.json"), serde_json::to_vec(&job).unwrap()).unwrap();
+                let loaded = moved.get_job(&job.id).unwrap();
+                assert_eq!(Path::new(&loaded.outputs[0].file), moved.job_dir(&job.id).join("nested/clip.mp4"));
+                moved.save_job(&loaded).unwrap();
+                let saved: RenderJob = serde_json::from_str(&fs::read_to_string(moved.job_dir(&job.id).join("job.json")).unwrap()).unwrap();
+                assert_eq!(Path::new(&saved.outputs[0].file), Path::new("nested/clip.mp4"));
+                assert_eq!(saved.schema_version, 2);
+            }
+        }
+    }
+
+    #[test]
+    fn internal_settings_move_but_external_paths_stay_absolute() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("old/demodesk-data");
+        let store = Store::open(root.clone()).unwrap();
+        let game = temp.path().join("Steam/CS2");
+        let settings = Settings {
+            tools_dir: Some(root.join("tools").to_string_lossy().into_owned()),
+            hlae_exe: Some(root.join("tools/hlae/HLAE.exe").to_string_lossy().into_owned()),
+            ffmpeg_exe: Some(root.join("tools/ffmpeg/ffmpeg.exe").to_string_lossy().into_owned()),
+            replay_folders: vec![root.join("demos").to_string_lossy().into_owned(), temp.path().join("external-demos").to_string_lossy().into_owned()],
+            cs2_dir: Some(game.to_string_lossy().into_owned()),
+            ..Settings::default()
+        };
+        store.save_settings(&settings).unwrap();
+        let next = temp.path().join("new/demodesk-data");
+        fs::create_dir_all(next.parent().unwrap()).unwrap();
+        fs::rename(&root, &next).unwrap();
+        let loaded = Store::open(next.clone()).unwrap().settings();
+        assert_eq!(Path::new(loaded.tools_dir.as_ref().unwrap()), next.join("tools"));
+        assert_eq!(Path::new(loaded.hlae_exe.as_ref().unwrap()), next.join("tools/hlae/HLAE.exe"));
+        assert_eq!(Path::new(loaded.ffmpeg_exe.as_ref().unwrap()), next.join("tools/ffmpeg/ffmpeg.exe"));
+        assert_eq!(Path::new(&loaded.replay_folders[0]), next.join("demos"));
+        assert_eq!(loaded.replay_folders[1], settings.replay_folders[1]);
+        assert_eq!(loaded.cs2_dir, settings.cs2_dir);
+    }
+
+    #[test]
+    fn legacy_bundled_tool_overrides_recover_after_a_move() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("new/demodesk-data");
+        let store = Store::open(root.clone()).unwrap();
+        let tool = root.join("tools/hlae/HLAE.exe");
+        fs::create_dir_all(tool.parent().unwrap()).unwrap();
+        fs::write(&tool, b"tool").unwrap();
+        let old_tool = temp.path().join("old/demodesk-data/tools/hlae/HLAE.exe");
+        let settings = Settings { hlae_exe: Some(old_tool.to_string_lossy().into_owned()), ..Settings::default() };
+        fs::write(root.join("settings.json"), serde_json::to_vec(&settings).unwrap()).unwrap();
+        assert_eq!(Path::new(store.settings().hlae_exe.as_ref().unwrap()), tool);
+        // An explicitly configured external tool that still exists is not relocated.
+        fs::create_dir_all(old_tool.parent().unwrap()).unwrap();
+        fs::write(&old_tool, b"external tool").unwrap();
+        assert_eq!(store.settings().hlae_exe, settings.hlae_exe);
+    }
+
+    #[test]
+    fn portable_paths_reject_parent_traversal() {
+        for value in ["../clip.mp4", "nested/../../clip.mp4", "", "/absolute/clip.mp4"] {
+            assert!(!safe_relative(Path::new(value)), "{value}");
+        }
+    }
 }

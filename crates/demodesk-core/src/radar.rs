@@ -242,6 +242,7 @@ pub fn assets_path(radar_dir: &Path, map: &str) -> PathBuf {
 /// version is known) were extracted from this game version.
 pub fn read_map_assets(radar_dir: &Path, map: &str, patch_version: Option<u32>) -> Option<MapAssets> {
     let mut a: MapAssets = serde_json::from_str(&fs::read_to_string(assets_path(radar_dir, map)).ok()?).ok()?;
+    a.dir = radar_dir.join(map);
     let current = a.schema_version == RADAR_SCHEMA_VERSION && (patch_version.is_none() || a.patch_version == patch_version);
     for l in &mut a.layers {
         l.path = a.dir.join(&l.image);
@@ -284,13 +285,38 @@ pub fn ensure_map_assets(radar_dir: &Path, cs2_dir: &Path, vrf: &Path, map: &str
         l.path = dir.join(&l.image);
     }
     let assets = MapAssets { schema_version: RADAR_SCHEMA_VERSION, patch_version, map_name: map.to_string(), dir, pos_x, pos_y, scale, layers };
-    fs::write(assets_path(radar_dir, map), serde_json::to_string_pretty(&assets)?)?;
+    let mut stored = assets.clone();
+    stored.dir = PathBuf::from(".");
+    for layer in &mut stored.layers { layer.path = PathBuf::from(&layer.image); }
+    fs::write(assets_path(radar_dir, map), serde_json::to_string_pretty(&stored)?)?;
     Ok(assets)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn moved_radar_assets_resolve_from_the_current_directory() {
+        let temp = tempfile::tempdir().unwrap();
+        let old = temp.path().join("old/radar");
+        let map = old.join("de_dust2");
+        fs::create_dir_all(&map).unwrap();
+        fs::write(map.join("default.png"), b"image").unwrap();
+        let assets = MapAssets {
+            schema_version: RADAR_SCHEMA_VERSION, patch_version: Some(1),
+            map_name: "de_dust2".into(), dir: map.clone(), pos_x: 0.0, pos_y: 0.0, scale: 1.0,
+            layers: vec![MapLayer { name: "default".into(), image: "default.png".into(), path: map.join("default.png"), altitude_min: 0.0, altitude_max: 1.0 }],
+        };
+        fs::write(assets_path(&old, "de_dust2"), serde_json::to_vec(&assets).unwrap()).unwrap();
+        let next = temp.path().join("new/radar");
+        fs::create_dir_all(next.parent().unwrap()).unwrap();
+        fs::rename(&old, &next).unwrap();
+        let loaded = read_map_assets(&next, "de_dust2", Some(1)).unwrap();
+        assert_eq!(loaded.dir, next.join("de_dust2"));
+        assert_eq!(loaded.layers[0].path, next.join("de_dust2/default.png"));
+        assert!(read_map_assets(&next, "de_dust2", Some(2)).is_none());
+    }
 
     #[test]
     fn parses_overview_with_sections() {
