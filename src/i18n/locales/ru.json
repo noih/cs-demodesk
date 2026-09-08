@@ -57,6 +57,11 @@
     "openSite": "Открыть страницу {{name}}"
   },
   "demoList": {
+    "refreshing": "Обновление…",
+    "refreshed": "Обновлено",
+    "refreshFailed": "Не удалось обновить",
+    "videos": "Видео: {{n}}",
+    "exportJobs": "{{status}}: заданий экспорта — {{n}}",
     "status": {
       "new": "Не разобрано",
       "parsing": "Разбор",

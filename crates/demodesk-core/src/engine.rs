@@ -145,8 +145,20 @@ impl Engine {
     pub fn clear_radar(&self) -> u64 {
         self.store.clear_radar()
     }
-    pub fn list_jobs(&self) -> Vec<RenderJob> {
-        self.store.list_jobs()
+    pub fn list_jobs(&self) -> Result<Vec<RenderJob>> {
+        let mut jobs = self.store.list_jobs();
+        for job in &mut jobs {
+            let mut available = Vec::with_capacity(job.outputs.len());
+            for output in std::mem::take(&mut job.outputs) {
+                match Path::new(&output.file).try_exists() {
+                    Ok(true) => available.push(output),
+                    Ok(false) => {},
+                    Err(error) => return Err(anyhow!("Cannot check video {}: {error}", output.file)),
+                }
+            }
+            job.outputs = available;
+        }
+        Ok(jobs)
     }
     pub fn default_tools_dir(&self) -> PathBuf {
         self.data_dir.join("tools")
@@ -817,6 +829,53 @@ mod tests {
             }
         }
         finished
+    }
+
+    #[test]
+    fn list_jobs_filters_deleted_videos_without_changing_records() {
+        let temp = tempfile::tempdir().unwrap();
+        let (send, _receive) = mpsc::channel();
+        let engine = Engine::new(temp.path().join("data"), Arc::new(Events(send))).unwrap();
+        let mut job = engine.store.new_job("demo", vec![], RenderOptions::default()).unwrap();
+        job.status = JobStatus::Done;
+        for name in ["clip.mp4", "merged.mp4"] {
+            let file = engine.store.job_dir(&job.id).join(name);
+            std::fs::write(&file, b"video").unwrap();
+            job.outputs.push(JobOutput { file: file.to_string_lossy().into_owned(), bytes: 5,
+                highlight_id: None, title: name.into(), is_final: name == "merged.mp4" });
+        }
+        engine.store.save_job(&job).unwrap();
+        let record = engine.store.job_dir(&job.id).join("job.json");
+        let original = std::fs::read(&record).unwrap();
+        assert_eq!(engine.list_jobs().unwrap()[0].outputs.len(), 2);
+        std::fs::remove_file(&job.outputs[0].file).unwrap();
+        let listed = engine.list_jobs().unwrap();
+        assert_eq!(listed[0].outputs.len(), 1);
+        assert!(listed[0].outputs[0].is_final);
+        std::fs::remove_file(&job.outputs[1].file).unwrap();
+        let listed = engine.list_jobs().unwrap();
+        assert_eq!(listed.len(), 1);
+        assert!(listed[0].outputs.is_empty());
+        assert_eq!(listed[0].status, JobStatus::Done);
+        std::fs::write(&job.outputs[0].file, b"restored").unwrap();
+        assert_eq!(engine.list_jobs().unwrap()[0].outputs.len(), 1);
+        assert_eq!(std::fs::read(record).unwrap(), original);
+    }
+
+    #[test]
+    fn list_jobs_reports_video_check_errors_without_changing_records() {
+        let temp = tempfile::tempdir().unwrap();
+        let (send, _receive) = mpsc::channel();
+        let engine = Engine::new(temp.path().join("data"), Arc::new(Events(send))).unwrap();
+        let mut job = engine.store.new_job("demo", vec![], RenderOptions::default()).unwrap();
+        let file = engine.store.job_dir(&job.id).join("invalid\0.mp4");
+        job.outputs.push(JobOutput { file: file.to_string_lossy().into_owned(), bytes: 5,
+            highlight_id: None, title: "invalid".into(), is_final: false });
+        engine.store.save_job(&job).unwrap();
+        let record = engine.store.job_dir(&job.id).join("job.json");
+        let original = std::fs::read(&record).unwrap();
+        assert!(engine.list_jobs().unwrap_err().to_string().contains("Cannot check video"));
+        assert_eq!(std::fs::read(record).unwrap(), original);
     }
 
     #[test]

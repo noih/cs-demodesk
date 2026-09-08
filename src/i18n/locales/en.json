@@ -57,6 +57,11 @@
     "openSite": "Open the {{name}} page"
   },
   "demoList": {
+    "refreshing": "Refreshing…",
+    "refreshed": "Updated",
+    "refreshFailed": "Refresh failed",
+    "videos": "{{n}} videos",
+    "exportJobs": "{{status}}: {{n}} export jobs",
     "status": {
       "new": "Not parsed",
       "parsing": "Parsing",

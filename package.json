@@ -16,7 +16,8 @@
     "app:dev": "tauri dev",
     "app:build": "tauri build --no-bundle && node scripts/portable.mjs",
     "test:core": "cargo test -p demodesk-core",
-    "test:replay": "node --experimental-transform-types --test scripts/test-replay.mjs"
+    "test:replay": "node --experimental-transform-types --test scripts/test-replay.mjs",
+    "test:sync": "node --experimental-transform-types --test scripts/test-app-sync.mjs"
   },
   "dependencies": {
     "@radix-ui/react-icons": "^1.3.2",

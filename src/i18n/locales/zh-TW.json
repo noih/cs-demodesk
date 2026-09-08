@@ -57,6 +57,11 @@
     "openSite": "開啟 {{name}} 網頁"
   },
   "demoList": {
+    "refreshing": "更新中…",
+    "refreshed": "已更新",
+    "refreshFailed": "更新失敗",
+    "videos": "{{n}} 部影片",
+    "exportJobs": "{{status}}：{{n}} 個輸出工作",
     "status": {
       "new": "未解析",
       "parsing": "解析中",

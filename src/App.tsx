@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Box, Button, Callout, Flex, Spinner, Text } from '@radix-ui/themes';
 import { ExclamationTriangleIcon } from '@radix-ui/react-icons';
 import { api, errorText, type DemoMeta, type RenderJob, type Status } from './api.ts';
+import { createAppSync } from './appSync.ts';
 import { applyLanguage } from './i18n/index.ts';
 import { StartupGate } from './components/StartupGate.tsx';
 import { DemoList } from './components/DemoList.tsx';
@@ -22,36 +23,31 @@ function ReadyApp() {
   const [showSettings, setShowSettings] = useState(false);
   const [error, setError] = useState<string>();
 
-  const refresh = useCallback(async () => {
-    try {
-      const [s, d, j] = await Promise.all([api.status(), api.demos(), api.jobs()]);
-      setStatus(s);
-      setDemos(d);
-      setJobs(j);
-      setError(undefined);
-    } catch (e) {
-      setError(errorText(e));
-    }
-  }, []);
+  const syncRef = useRef<ReturnType<typeof createAppSync> | undefined>(undefined);
+  const rescan = useCallback(() => syncRef.current?.refresh() ?? Promise.resolve(false), []);
+  const refresh = useCallback(async () => { await rescan(); }, [rescan]);
 
   useEffect(() => {
-    void refresh();
-    // language: settings.json wins over the system language
     void api.settings().then((s) => applyLanguage(s.settings.language)).catch(() => undefined);
-    const timer = setInterval(() => void refresh(), 5000);
-    let unlisten: (() => void) | undefined;
-    void api
-      .onEvent((ev) => {
-        if (ev.type === 'demo-changed') setDemos((list) => upsert(list, ev.demo, (d) => d.id));
-        if (ev.type === 'job-changed') setJobs((list) => upsert(list, ev.job, (j) => j.id).sort((a, b) => b.createdAt.localeCompare(a.createdAt)));
-        if (ev.type === 'setup-finished') void refresh();
-      })
-      .then((u) => (unlisten = u));
+    const sync = createAppSync(api, (snapshot) => {
+      setStatus(snapshot.status);
+      setDemos(snapshot.demos);
+      setJobs(snapshot.jobs);
+      setError(undefined);
+    }, (ev) => {
+      if (ev.type === 'demo-changed') setDemos((list) => upsert(list, ev.demo, (d) => d.id));
+      if (ev.type === 'job-changed') setJobs((list) => {
+        const next = upsert(list, ev.job, (j) => j.id);
+        return next.length === list.length ? next : next.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+      });
+    }, (error) => setError(errorText(error)));
+    syncRef.current = sync;
+    void sync.refresh();
     return () => {
-      clearInterval(timer);
-      unlisten?.();
+      syncRef.current = undefined;
+      sync.dispose();
     };
-  }, [refresh]);
+  }, []);
 
   const selected = demos.find((d) => d.id === selectedId);
   const runningJobs = jobs.filter((j) => j.status === 'running' || j.status === 'queued').length;
@@ -61,6 +57,7 @@ function ReadyApp() {
       <aside className="sidebar">
         <DemoList
           demos={demos}
+          jobs={jobs}
           selectedId={selectedId}
           settingsOpen={showSettings}
           onSelect={(id) => {
@@ -69,6 +66,7 @@ function ReadyApp() {
           }}
           onToggleSettings={() => setShowSettings((v) => !v)}
           onChanged={refresh}
+          onRefresh={rescan}
         />
         {/* footer only when there is something to act on or wait for */}
         {(error || (status && !status.ok) || runningJobs > 0) && (

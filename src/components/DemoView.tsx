@@ -44,6 +44,7 @@ export function DemoView({ meta, jobs, status, onChanged, onRemoved }: { meta: D
       setConfirmRemove(false);
     }
   };
+  const videoCount = jobs.reduce((count, job) => count + job.outputs.length, 0);
   const activeJobs = jobs.filter((j) => j.status === 'running' || j.status === 'queued').length;
 
   return (
@@ -141,9 +142,12 @@ export function DemoView({ meta, jobs, status, onChanged, onRemoved }: { meta: D
             <Tabs.Trigger value="charts">{t('demoView.tabs.charts')}</Tabs.Trigger>
             <Tabs.Trigger value="renders">
               {t('demoView.tabs.videos')}
-              {jobs.length > 0 && (
-                <Badge ml="2" variant="soft" color={activeJobs ? 'amber' : 'gray'}>
-                  {activeJobs ? t('demoView.activeJobs', { n: activeJobs }) : jobs.length}
+              <Badge ml="2" variant="soft" color="gray">
+                {videoCount}
+              </Badge>
+              {activeJobs > 0 && (
+                <Badge ml="2" variant="soft" color="amber">
+                  {t('demoView.activeJobs', { n: activeJobs })}
                 </Badge>
               )}
             </Tabs.Trigger>

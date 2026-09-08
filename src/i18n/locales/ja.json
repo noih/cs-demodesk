@@ -57,6 +57,11 @@
     "openSite": "{{name}} のページを開く"
   },
   "demoList": {
+    "refreshing": "更新中…",
+    "refreshed": "更新しました",
+    "refreshFailed": "更新に失敗しました",
+    "videos": "動画 {{n}} 本",
+    "exportJobs": "{{status}}：書き出しジョブ {{n}} 件",
     "status": {
       "new": "未解析",
       "parsing": "解析中",

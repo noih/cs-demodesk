@@ -57,6 +57,11 @@
     "openSite": "{{name}} 페이지 열기"
   },
   "demoList": {
+    "refreshing": "새로 고치는 중…",
+    "refreshed": "업데이트됨",
+    "refreshFailed": "새로 고침 실패",
+    "videos": "동영상 {{n}}개",
+    "exportJobs": "{{status}}: 내보내기 작업 {{n}}개",
     "status": {
       "new": "미분석",
       "parsing": "분석 중",

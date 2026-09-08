@@ -194,7 +194,7 @@ async fn start_render(engine: State<'_, Eng>, demo_id: String, highlight_ids: Ve
 
 #[tauri::command]
 async fn list_jobs(engine: State<'_, Eng>) -> CmdResult<Vec<RenderJob>> {
-    blocking(&engine, |e| Ok(e.list_jobs())).await
+    blocking(&engine, |e| e.list_jobs().map_err(err)).await
 }
 
 #[tauri::command]
