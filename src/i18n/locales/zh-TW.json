@@ -1,4 +1,10 @@
 {
+  "startup": {
+    "title": "無法使用資料目錄",
+    "hint": "請選擇其他資料目錄，或恢復 App 旁的 demodesk-data。程式將重新啟動，現有資料會保留在原處。",
+    "choose": "選擇目錄",
+    "default": "恢復預設目錄"
+  },
   "common": {
     "cancel": "取消",
     "close": "關閉",
@@ -322,6 +328,10 @@
     "setupLogTitle": "工具下載 log",
     "setupRunning": "下載進行中…",
     "setupFinished": "已結束",
-    "setupLogEmpty": "（等待輸出…）"
+    "setupLogEmpty": "（等待輸出…）",
+    "dataDir": "資料目錄",
+    "dataDirHint": "選擇資料目錄本身。清除後使用 app 旁的 demodesk-data。變更於重新啟動後生效，不會搬移既有檔案。",
+    "restartRequired": "請重新啟動 app 以使用選定的資料目錄。下方儲存空間操作仍使用目前目錄。",
+    "autoParseHint": "新 demo 會依序自動解析；解析失敗後，只有手動點選解析才會重試。"
   }
 }

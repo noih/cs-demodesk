@@ -1,4 +1,20 @@
-# Automatic parsing
+# Data storage and automatic parsing
+
+By default, the desktop app opens `demodesk-data` beside its current executable.
+The Storage setting selects the data folder itself; no extra directory name is
+appended. Clearing the field restores the portable default. Selection changes
+apply on the next application start, so active workers keep using their original
+store. Selecting a directory does not copy or move existing data.
+
+The bootstrap preference is `data-directory.json` under Tauri's
+`app.path().app_config_dir()`, outside the selected data folder. This allows the
+app to discover a custom folder before opening its `settings.json`, and allows
+clearing the selection while using that folder. Unwritable or relative paths are
+rejected; the app does not silently switch to a different data directory. If the
+selected store cannot be opened at startup, a recovery screen appears before
+normal app commands or workers start. Users can choose another directory or
+explicitly restore the portable default. A validated selection is saved before
+restarting the app; a failed selection leaves recovery available.
 
 The existing periodic demo scan starts automatic parsing for entries without
 analysis or a recorded error. Readiness uses Source 2 frame boundaries and a
@@ -27,7 +43,19 @@ cached analysis, and temporarily unavailable scan folders. Only an explicit Pars
 request retries a failed demo. Removing a demo through the app removes its error
 record. Clearing saved analysis causes demos without errors to be parsed again.
 
-Verification: `cargo test -p demodesk-core`.
+Verification:
+
+```powershell
+cargo test -p demodesk-core
+cargo test -p demodesk data_directory::tests
+cargo clippy -p demodesk-core -p demodesk --all-targets -- -D warnings
+npm run build
+```
+
+The parser regression uses invalid demo files to verify sequential attempts,
+persisted failure state, disconnected folders, restarts, and explicit retry.
+Directory tests cover selection precedence, clearing, executable relocation,
+restart behavior, and rejecting relative paths or file paths.
 
 Individually added demos stay at their original paths. The store records those
 paths in `registered-demos.json`; adding a file neither copies it nor adds its
@@ -39,3 +67,7 @@ Moving a source file changes its ID; source relocation is not inferred.
 
 The registration regression covers same-named files, repeated registration,
 unchanged source contents, unselected siblings, and persistence across restart.
+
+Additional regressions cover truncated frames and varints, active Windows write
+handles, immediate parsing after completion, unavailable selected directories, explicit
+replacement/default recovery, and preservation of the original selection/data.

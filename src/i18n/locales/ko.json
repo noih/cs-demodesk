@@ -1,4 +1,10 @@
 {
+  "startup": {
+    "title": "데이터 폴더를 사용할 수 없습니다",
+    "hint": "다른 폴더를 선택하거나 앱 옆의 demodesk-data로 복원하세요. 앱이 다시 시작되며 기존 데이터는 원래 위치에 유지됩니다.",
+    "choose": "폴더 선택",
+    "default": "기본 폴더로 복원"
+  },
   "common": {
     "cancel": "취소",
     "close": "닫기",
@@ -322,6 +328,10 @@
     "setupLogTitle": "도구 다운로드 로그",
     "setupRunning": "다운로드 중...",
     "setupFinished": "완료",
-    "setupLogEmpty": "(출력 대기 중...)"
+    "setupLogEmpty": "(출력 대기 중...)",
+    "dataDir": "데이터 폴더",
+    "dataDirHint": "데이터 폴더 자체를 선택하세요. 비우면 앱 옆의 demodesk-data를 사용합니다. 변경 사항은 재시작 후 적용되며 기존 파일은 이동되지 않습니다.",
+    "restartRequired": "선택한 데이터 폴더를 사용하려면 앱을 재시작하세요. 아래 저장 공간 작업은 현재 폴더에 적용됩니다.",
+    "autoParseHint": "새 데모는 하나씩 자동 분석됩니다. 실패한 데모는 분석 버튼을 클릭해야 다시 시도합니다."
   }
 }

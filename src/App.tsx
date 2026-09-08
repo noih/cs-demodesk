@@ -4,11 +4,16 @@ import { Box, Button, Callout, Flex, Spinner, Text } from '@radix-ui/themes';
 import { ExclamationTriangleIcon } from '@radix-ui/react-icons';
 import { api, errorText, type DemoMeta, type RenderJob, type Status } from './api.ts';
 import { applyLanguage } from './i18n/index.ts';
+import { StartupGate } from './components/StartupGate.tsx';
 import { DemoList } from './components/DemoList.tsx';
 import { DemoView } from './components/DemoView.tsx';
 import { SettingsView } from './components/SettingsView.tsx';
 
 export function App() {
+  return <StartupGate><ReadyApp /></StartupGate>;
+}
+
+function ReadyApp() {
   const { t } = useTranslation();
   const [status, setStatus] = useState<Status>();
   const [demos, setDemos] = useState<DemoMeta[]>([]);

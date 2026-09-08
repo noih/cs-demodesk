@@ -11,6 +11,10 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager, State};
 
+mod data_directory;
+use data_directory::DataDirectory;
+type Directory = Arc<DataDirectory>;
+
 pub const EVENT_NAME: &str = "demodesk://event";
 
 struct TauriNotify(AppHandle);
@@ -25,22 +29,6 @@ type CmdResult<T> = Result<T, String>;
 
 fn err<E: std::fmt::Display>(e: E) -> String {
     format!("{e:#}")
-}
-
-/// Portable layout: keep everything next to the executable when that folder is
-/// writable, otherwise fall back to the per-user app data folder.
-fn choose_data_dir(app: &AppHandle) -> PathBuf {
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(dir) = exe.parent() {
-            let candidate = dir.join("demodesk-data");
-            let probe = candidate.join(".write-test");
-            if std::fs::create_dir_all(&candidate).is_ok() && std::fs::write(&probe, b"ok").is_ok() {
-                let _ = std::fs::remove_file(&probe);
-                return candidate;
-            }
-        }
-    }
-    app.path().app_data_dir().map(|p| p.join("demodesk-data")).unwrap_or_else(|_| PathBuf::from("demodesk-data"))
 }
 
 #[derive(Serialize)]
@@ -61,6 +49,9 @@ struct SettingsResponse {
     doctor: DoctorReport,
     setup: SetupState,
     data_dir: PathBuf,
+    data_dir_override: Option<PathBuf>,
+    default_data_dir: PathBuf,
+    restart_required: bool,
     /// size of the stored parse results (demodesk-data/parsed)
     parsed_bytes: u64,
     /// size of the rendered videos (demodesk-data/clips)
@@ -77,9 +68,11 @@ struct DemoResponse {
     parsed: Option<serde_json::Value>,
 }
 
-fn settings_response(engine: &Engine) -> SettingsResponse {
+fn settings_response(engine: &Engine, directory: &DataDirectory) -> SettingsResponse {
     let (parsed_bytes, clips_bytes, radar_bytes) = engine.storage_bytes();
-    SettingsResponse { settings: engine.settings(), detected: engine.detected(), doctor: engine.doctor(), setup: engine.setup_state(), data_dir: engine.data_dir().to_path_buf(), parsed_bytes, clips_bytes, radar_bytes }
+    let selected = directory.selected();
+    let restart_required = selected.as_ref().unwrap_or(&directory.default) != &directory.active;
+    SettingsResponse { data_dir_override: selected, default_data_dir: directory.default.clone(), restart_required, settings: engine.settings(), detected: engine.detected(), doctor: engine.doctor(), setup: engine.setup_state(), data_dir: engine.data_dir().to_path_buf(), parsed_bytes, clips_bytes, radar_bytes }
 }
 
 /// Every engine call does file I/O (settings, parse results, job records) or
@@ -99,15 +92,19 @@ async fn get_status(engine: State<'_, Eng>) -> CmdResult<Status> {
 }
 
 #[tauri::command]
-async fn get_settings(engine: State<'_, Eng>) -> CmdResult<SettingsResponse> {
-    blocking(&engine, |e| Ok(settings_response(e))).await
+async fn get_settings(engine: State<'_, Eng>, directory: State<'_, Directory>) -> CmdResult<SettingsResponse> {
+    let directory = directory.inner().clone();
+    blocking(&engine, move |e| Ok(settings_response(e, &directory))).await
 }
 
 #[tauri::command]
-async fn save_settings(engine: State<'_, Eng>, settings: Settings) -> CmdResult<SettingsResponse> {
+async fn save_settings(engine: State<'_, Eng>, directory: State<'_, Directory>, settings: Settings, data_dir_override: Option<String>) -> CmdResult<SettingsResponse> {
+    let directory = directory.inner().clone();
     blocking(&engine, move |e| {
+        let selected = directory.validate(data_dir_override)?;
         e.save_settings(settings).map_err(|problems| problems.join("\n"))?;
-        Ok(settings_response(e))
+        directory.save(selected)?;
+        Ok(settings_response(e, &directory))
     })
     .await
 }
@@ -234,6 +231,20 @@ async fn open_url(url: String) -> CmdResult<()> {
     tauri_plugin_opener::open_url(&url, None::<&str>).map_err(err)
 }
 
+struct StartupError(Option<String>);
+
+#[tauri::command]
+fn get_startup_error(state: State<'_, StartupError>) -> Option<String> {
+    state.0.clone()
+}
+
+#[tauri::command]
+fn recover_data_directory(app: AppHandle, directory: State<'_, Directory>, state: State<'_, StartupError>, path: Option<String>) -> CmdResult<()> {
+    if state.0.is_none() { return Err("Recovery is only available before startup.".into()); }
+    directory.save(directory.validate(path)?)?;
+    app.restart();
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -241,14 +252,26 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
             let handle = app.handle().clone();
-            let data_dir = choose_data_dir(&handle);
-            let engine = Engine::new(data_dir.clone(), Arc::new(TauriNotify(handle.clone())))?;
-            // Let the webview play videos from the data folder.
-            let _ = app.asset_protocol_scope().allow_directory(&data_dir, true);
-            app.manage(engine);
+            let config = app.path().app_config_dir()?.join("data-directory.json");
+            let directory = Arc::new(DataDirectory::load(config, &std::env::current_exe()?).map_err(std::io::Error::other)?);
+            let data_dir = directory.active.clone();
+            let startup = directory.prepare().and_then(|_| Engine::new(data_dir.clone(), Arc::new(TauriNotify(handle.clone()))).map_err(err));
+            let error = match startup {
+                Ok(engine) => {
+                    // Let the webview play videos from the data folder.
+                    let _ = app.asset_protocol_scope().allow_directory(&data_dir, true);
+                    app.manage(engine);
+                    None
+                }
+                Err(error) => Some(error),
+            };
+            app.manage(StartupError(error));
+            app.manage(directory);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            get_startup_error,
+            recover_data_directory,
             get_status,
             get_settings,
             save_settings,

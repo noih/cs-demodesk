@@ -56,17 +56,13 @@ function PathField({ label, value, placeholder, hint, onChange, pick }: { label:
   );
 }
 
-/** One line of the storage card: name, path, size and a confirmed "empty". */
+/** Storage categories share the data folder selected above them. */
 function StorageRow({ label, what, path, bytes, confirm, onClear }: { label: string; what: string; path: string; bytes: number; confirm: string; onClear: () => Promise<void> }) {
   const { t } = useTranslation();
-  // one line: label + size | path | open | clear — so the button lines up with the path
   return (
     <Flex align="center" gap="3">
-      <Text size="2" weight="medium" style={{ flex: 'none', minWidth: 140 }}>
+      <Text size="2" weight="medium" style={{ flex: 1, minWidth: 0 }}>
         {label} <Text color="gray">{mb(bytes)}</Text>
-      </Text>
-      <Text size="1" color="gray" className="mono selectable" truncate title={path} style={{ flex: 1, minWidth: 0 }}>
-        {path}
       </Text>
       <IconButton size="1" variant="ghost" color="gray" aria-label={t('common.openInExplorer')} onClick={() => void api.open(path)}>
         <OpenInNewWindowIcon />
@@ -141,6 +137,7 @@ export function SettingsView({ onChanged }: { onChanged: () => Promise<void> }) 
   const { t } = useTranslation();
   const [data, setData] = useState<SettingsResponse>();
   const [form, setForm] = useState<Settings>({ language: null, cs2Dir: null, replayFolders: [], scanGameReplays: true, hlaeExe: null, ffmpegExe: null, toolsDir: null });
+  const [dataDirOverride, setDataDirOverride] = useState('');
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ ok: boolean; text: string }>();
   const [setupLog, setSetupLog] = useState<string[]>([]);
@@ -154,7 +151,7 @@ export function SettingsView({ onChanged }: { onChanged: () => Promise<void> }) 
   }, []);
   useEffect(() => {
     load()
-      .then((r) => setForm(r.settings))
+      .then((r) => { setForm(r.settings); setDataDirOverride(r.dataDirOverride ?? ''); })
       .catch((e) => setMessage({ ok: false, text: errorText(e) }));
     let unlisten: (() => void) | undefined;
     void api
@@ -173,9 +170,10 @@ export function SettingsView({ onChanged }: { onChanged: () => Promise<void> }) 
     setSaving(true);
     setMessage(undefined);
     try {
-      const r = await api.saveSettings(form);
+      const r = await api.saveSettings(form, dataDirOverride || null);
       setData(r);
       setForm(r.settings);
+      setDataDirOverride(r.dataDirOverride ?? '');
       applyLanguage(r.settings.language);
       // t() is still bound to the old language here; say it in the one just saved
       setMessage({ ok: true, text: t('settings.saved', { lng: r.settings.language ?? detectLanguage() }) });
@@ -226,7 +224,7 @@ export function SettingsView({ onChanged }: { onChanged: () => Promise<void> }) 
     setForm({ ...form, ...patch });
     setMessage(undefined);
   };
-  const dirty = JSON.stringify(form) !== JSON.stringify(data.settings);
+  const dirty = JSON.stringify(form) !== JSON.stringify(data.settings) || dataDirOverride !== (data.dataDirOverride ?? '');
   const folders = form.replayFolders.filter(Boolean);
   const gameReplays = data.detected.replaysDir ?? (form.cs2Dir ? `${form.cs2Dir}\\game\\csgo\\replays` : undefined);
 
@@ -303,6 +301,7 @@ export function SettingsView({ onChanged }: { onChanged: () => Promise<void> }) 
                 </Box>
                 <Switch checked={form.scanGameReplays} onCheckedChange={(v) => set({ scanGameReplays: v })} />
               </Flex>
+              <Text size="1" color="gray">{t('settings.autoParseHint')}</Text>
               <Box>
                 <Flex justify="between" align="center" mb="1">
                   <Text size="2" weight="medium">
@@ -347,6 +346,12 @@ export function SettingsView({ onChanged }: { onChanged: () => Promise<void> }) 
               {t('settings.storageSection')}
             </Heading>
             <Flex direction="column" gap="3">
+              <PathField label={t('settings.dataDir')} value={dataDirOverride} placeholder={data.defaultDataDir} hint={t('settings.dataDirHint')} onChange={(value) => { setDataDirOverride(value); setMessage(undefined); }} pick={{ directory: true }} />
+              {data.restartRequired && (
+                <Callout.Root color="amber" size="1">
+                  <Callout.Text>{t('settings.restartRequired')}</Callout.Text>
+                </Callout.Root>
+              )}
               <StorageRow label={t('settings.parsedDir')} what={t('settings.clearParsedWhat')} path={`${data.dataDir}\\parsed`} bytes={data.parsedBytes} confirm={t('settings.clearParsedConfirm')} onClear={clear(t('settings.clearParsedWhat'), api.clearAllAnalysis)} />
               <StorageRow label={t('settings.clipsDir')} what={t('settings.clearClipsWhat')} path={`${data.dataDir}\\clips`} bytes={data.clipsBytes} confirm={t('settings.clearClipsConfirm')} onClear={clear(t('settings.clearClipsWhat'), api.clearAllClips)} />
               <StorageRow label={t('settings.radarDir')} what={t('settings.clearRadarWhat')} path={`${data.dataDir}\\radar`} bytes={data.radarBytes} confirm={t('settings.clearRadarConfirm')} onClear={clear(t('settings.clearRadarWhat'), api.clearRadar)} />

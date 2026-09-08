@@ -285,6 +285,9 @@ export interface Settings {
   toolsDir: string | null;
 }
 export interface SettingsResponse {
+  dataDirOverride: string | null;
+  defaultDataDir: string;
+  restartRequired: boolean;
   settings: Settings;
   detected: { steamDir?: string; cs2Dir?: string; replaysDir?: string };
   doctor: DoctorReport;
@@ -311,9 +314,11 @@ export type AppEvent =
 // ---- commands ----
 
 export const api = {
+  startupError: () => invoke<string | null>('get_startup_error'),
+  recoverDataDirectory: (path: string | null) => invoke<void>('recover_data_directory', { path }),
   status: () => invoke<Status>('get_status'),
   settings: () => invoke<SettingsResponse>('get_settings'),
-  saveSettings: (settings: Settings) => invoke<SettingsResponse>('save_settings', { settings }),
+  saveSettings: (settings: Settings, dataDirOverride: string | null) => invoke<SettingsResponse>('save_settings', { settings, dataDirOverride }),
   runSetup: (force = false) => invoke<boolean>('run_setup', { force }),
   demos: () => invoke<DemoMeta[]>('list_demos'),
   registerDemo: (path: string) => invoke<DemoMeta>('register_demo', { path }),
