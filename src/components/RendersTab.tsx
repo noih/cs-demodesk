@@ -37,6 +37,7 @@ function JobCard({ job, parsed, onChanged }: { job: RenderJob; parsed: ParsedDem
   const pct = progressOf(job);
   const total = job.outputs.reduce((s, o) => s + o.bytes, 0);
   const revealTarget = job.outputs[0]?.file;
+  const hasOptions = job.options.trueView || !job.options.hud || !job.options.crosshair || !job.options.radar || !job.options.killFeed || !job.options.viewmodel || !job.options.tracers || job.options.chat || job.options.xray || job.options.voice;
 
   return (
     <Card>
@@ -110,13 +111,13 @@ function JobCard({ job, parsed, onChanged }: { job: RenderJob; parsed: ParsedDem
       )}
 
       {job.outputs.length > 0 && (
-        <Grid columns={{ initial: '1', lg: 'minmax(0, 1fr) 260px' }} gap="4" mt="3" align="start">
+        <Flex gap="4" mt="3" align="start" wrap="wrap">
           {/* same small preview for every file (merged video included); the player is one click away */}
-          <Grid columns={{ initial: '1', sm: '2', xl: '3' }} gap="3">
+          <Grid columns="repeat(auto-fit, minmax(min(100%, 240px), 1fr))" gap="3" style={{ flex: `0 1 ${job.outputs.length === 1 ? 340 : 680}px`, minWidth: 0 }}>
             {job.outputs.map((o) => {
               const title = o.isFinal ? t('renders.merged') : (titleOf(o.highlightId) ?? o.title);
               return (
-                <Box key={o.file}>
+                <Box key={o.file} style={{ minWidth: 0 }}>
                   <video controls preload="metadata" src={api.fileSrc(o.file)} />
                   <Text as="div" size="2" mt="1" truncate title={title}>
                     {title}
@@ -131,27 +132,27 @@ function JobCard({ job, parsed, onChanged }: { job: RenderJob; parsed: ParsedDem
               );
             })}
           </Grid>
-          <DataList.Root size="1">
+          <DataList.Root size="1" style={{ flex: '1 1 280px', minWidth: 0 }}>
             <DataList.Item>
-              <DataList.Label>{t('renders.files')}</DataList.Label>
+              <DataList.Label minWidth="0" style={{ flexBasis: 90 }}>{t('renders.files')}</DataList.Label>
               <DataList.Value>{job.outputs.length}</DataList.Value>
             </DataList.Item>
             <DataList.Item>
-              <DataList.Label>{t('renders.totalSize')}</DataList.Label>
+              <DataList.Label minWidth="0" style={{ flexBasis: 90 }}>{t('renders.totalSize')}</DataList.Label>
               <DataList.Value>{mb(total)}</DataList.Value>
             </DataList.Item>
             <DataList.Item>
-              <DataList.Label>{t('renders.elapsed')}</DataList.Label>
+              <DataList.Label minWidth="0" style={{ flexBasis: 90 }}>{t('renders.elapsed')}</DataList.Label>
               <DataList.Value>{duration(job, t) ?? '—'}</DataList.Value>
             </DataList.Item>
             <DataList.Item>
-              <DataList.Label>{t('common.resolution')}</DataList.Label>
+              <DataList.Label minWidth="0" style={{ flexBasis: 90 }}>{t('common.resolution')}</DataList.Label>
               <DataList.Value>
                 {job.options.width}×{job.options.height} @ {job.options.fps}
               </DataList.Value>
             </DataList.Item>
-            <DataList.Item>
-              <DataList.Label>{t('renders.options')}</DataList.Label>
+            {hasOptions && <DataList.Item>
+              <DataList.Label minWidth="0" style={{ flexBasis: 90 }}>{t('renders.options')}</DataList.Label>
               <DataList.Value>
                 <Flex gap="1" wrap="wrap">
                   {job.options.trueView && <Badge size="1">TrueView</Badge>}
@@ -166,17 +167,17 @@ function JobCard({ job, parsed, onChanged }: { job: RenderJob; parsed: ParsedDem
                   {job.options.voice && <Badge size="1">{t('renders.badge.voice')}</Badge>}
                 </Flex>
               </DataList.Value>
-            </DataList.Item>
+            </DataList.Item>}
             <DataList.Item>
-              <DataList.Label>{t('renders.location')}</DataList.Label>
+              <DataList.Label minWidth="0" style={{ flexBasis: 90 }}>{t('renders.location')}</DataList.Label>
               <DataList.Value>
-                <Text className="mono selectable" style={{ wordBreak: 'break-all' }}>
+                <Text className="mono selectable" style={{ overflowWrap: 'anywhere' }}>
                   {job.outputs[0]?.file.replace(/[\\/][^\\/]+$/, '')}
                 </Text>
               </DataList.Value>
             </DataList.Item>
           </DataList.Root>
-        </Grid>
+        </Flex>
       )}
 
       <Dialog.Root open={logOpen} onOpenChange={setLogOpen}>
