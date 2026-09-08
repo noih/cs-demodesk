@@ -56,7 +56,7 @@
       "parsed": "已解析",
       "error": "錯誤"
     },
-    "addTooltip": "加入 .dem 檔（會複製到 replays 目錄）",
+    "addTooltip": "加入 .dem 檔（保留原始位置）",
     "add": "加入 demo",
     "rescanTooltip": "重新掃描目錄",
     "rescan": "重新掃描",

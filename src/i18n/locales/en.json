@@ -56,7 +56,7 @@
       "parsed": "Parsed",
       "error": "Error"
     },
-    "addTooltip": "Add .dem files (copied into the replays folder)",
+    "addTooltip": "Add .dem files (keep original location)",
     "add": "Add demo",
     "rescanTooltip": "Rescan folders",
     "rescan": "Rescan",

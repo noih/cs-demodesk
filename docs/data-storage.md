@@ -28,3 +28,14 @@ request retries a failed demo. Removing a demo through the app removes its error
 record. Clearing saved analysis causes demos without errors to be parsed again.
 
 Verification: `cargo test -p demodesk-core`.
+
+Individually added demos stay at their original paths. The store records those
+paths in `registered-demos.json`; adding a file neither copies it nor adds its
+parent as a scan folder. Missing files remain registered for later availability.
+Demo IDs use the existing 12-character hash of the normalized full path, so
+same-named files in different directories have separate analysis records. The
+list tooltip shows the source path. Hashing reads only the path, not demo content.
+Moving a source file changes its ID; source relocation is not inferred.
+
+The registration regression covers same-named files, repeated registration,
+unchanged source contents, unselected siblings, and persistence across restart.

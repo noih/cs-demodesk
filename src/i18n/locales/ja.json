@@ -56,7 +56,7 @@
       "parsed": "解析済み",
       "error": "エラー"
     },
-    "addTooltip": ".dem ファイルを追加（replays フォルダーにコピーされます）",
+    "addTooltip": ".dem ファイルを追加（元の場所を維持）",
     "add": "デモを追加",
     "rescanTooltip": "フォルダーを再スキャン",
     "rescan": "再スキャン",

@@ -72,6 +72,7 @@ pub struct Engine {
     data_dir: PathBuf,
     notify: Arc<dyn Notify>,
     demos: Mutex<HashMap<String, DemoEntry>>,
+    registered_demos: Mutex<Vec<PathBuf>>,
     parsing: Mutex<HashSet<String>>,
     parser: Arc<DemoParser>,
     render_queue: Mutex<VecDeque<String>>,
@@ -97,11 +98,13 @@ impl Engine {
                 let _ = store.save_job(&job);
             }
         }
+        let registered_demos = store.registered_demos()?;
         let engine = Arc::new(Self {
             store,
             data_dir,
             notify,
             demos: Mutex::new(HashMap::new()),
+            registered_demos: Mutex::new(registered_demos),
             parsing: Mutex::new(HashSet::new()),
             parser: Arc::new(DemoParser::new()),
             render_queue: Mutex::new(VecDeque::new()),
@@ -221,9 +224,10 @@ impl Engine {
         path.extension().map(|e| e.to_string_lossy().eq_ignore_ascii_case("dem")).unwrap_or(false)
     }
 
-    /// Scan configured demo folders.
+    /// Scan configured folders plus individually registered files in their original locations.
     fn demo_paths(&self) -> Vec<PathBuf> {
-        let mut out = vec![];
+        let mut out: Vec<PathBuf> = self.registered_demos.lock().unwrap().iter()
+            .filter(|path| Self::is_dem(path) && path.is_file()).cloned().collect();
         for folder in self.replay_folders() {
             let Ok(rd) = std::fs::read_dir(&folder) else { continue };
             for entry in rd.flatten() {
@@ -331,38 +335,23 @@ impl Engine {
         self.get_demo(id).and_then(|(_, p)| p)
     }
 
+    /// Register the selected file in place. Only derived data belongs to the store.
     pub fn add_demo(self: &Arc<Self>, path: &Path) -> Result<DemoMeta> {
         if !path.is_file() || !Self::is_dem(path) {
             return Err(anyhow!("not a .dem file: {}", path.display()));
         }
-        let name = path.file_name().ok_or_else(|| anyhow!("not a file"))?.to_owned();
-        let folders = self.replay_folders();
-        let inside = path.parent().map(|parent| folders.iter().any(|f| Self::same_dir(f, parent))).unwrap_or(false);
-        let target = if inside {
-            path.to_path_buf()
-        } else {
-            let dest_dir = folders.first().ok_or_else(|| anyhow!("no demo folder: set the CS2 folder or add a demo folder in settings first"))?;
-            let dest = dest_dir.join(&name);
-            check_ascii_path(&dest)?;
-            if dest.exists() {
-                let same = std::fs::metadata(&dest).map(|m| m.len()).ok() == std::fs::metadata(path).map(|m| m.len()).ok();
-                if !same {
-                    return Err(anyhow!("{} already exists with a different size", dest.display()));
-                }
-            } else {
-                std::fs::copy(path, &dest).map_err(|e| anyhow!("copy to {}: {e}", dest.display()))?;
+        let path = std::path::absolute(path)?;
+        let id = Self::demo_id(&path);
+        {
+            let mut registered = self.registered_demos.lock().unwrap();
+            if !registered.iter().any(|p| Self::demo_id(p) == id) {
+                let mut updated = registered.clone();
+                updated.push(path);
+                self.store.save_registered_demos(&updated)?;
+                *registered = updated;
             }
-            dest
-        };
-        let id = Self::demo_id(&target);
-        self.list_demos().into_iter().find(|m| m.id == id).ok_or_else(|| anyhow!("demo not found after adding"))
-    }
-
-    fn same_dir(a: &Path, b: &Path) -> bool {
-        match (a.canonicalize(), b.canonicalize()) {
-            (Ok(x), Ok(y)) => x == y,
-            _ => a.to_string_lossy().eq_ignore_ascii_case(&b.to_string_lossy()),
         }
+        self.list_demos().into_iter().find(|m| m.id == id).ok_or_else(|| anyhow!("demo no longer available after registering"))
     }
 
     pub fn is_parsing(&self, id: &str) -> bool {
@@ -571,6 +560,12 @@ impl Engine {
         }
         self.store.delete_parsed(id);
         self.store.clear_parse_error(id)?;
+        {
+            let mut registered = self.registered_demos.lock().unwrap();
+            let updated: Vec<_> = registered.iter().filter(|p| Self::demo_id(p) != id).cloned().collect();
+            self.store.save_registered_demos(&updated)?;
+            *registered = updated;
+        }
         self.demos.lock().unwrap().remove(id);
         Ok(())
     }
@@ -824,6 +819,51 @@ mod tests {
         finished
     }
 
+    #[test]
+    fn registered_same_named_demos_stay_in_place_and_survive_restart() {
+        let temp = tempfile::tempdir().unwrap();
+        let data = temp.path().join("data");
+        let first = temp.path().join("first/match.dem");
+        let second = temp.path().join("second/match.dem");
+        let store = Store::open(data.clone()).unwrap();
+        store.save_settings(&Settings {
+            scan_game_replays: false,
+            cs2_dir: Some(temp.path().join("no-game").to_string_lossy().into_owned()),
+            ..Settings::default()
+        }).unwrap();
+        for (path, bytes) in [(&first, "first source"), (&second, "second source")] {
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, bytes).unwrap();
+            // Keep this registration test independent of the parser worker.
+            store.write_parse_error(&Engine::demo_id(path), bytes).unwrap();
+        }
+        let sibling = first.with_file_name("unselected.dem");
+        std::fs::write(&sibling, "unselected").unwrap();
+        let (send, _) = mpsc::channel();
+        let engine = Engine::new(data.clone(), Arc::new(Events(send))).unwrap();
+        let a = engine.add_demo(&first).unwrap();
+        let b = engine.add_demo(&second).unwrap();
+        assert_ne!(a.id, b.id);
+        assert_eq!(Path::new(&a.path), first);
+        assert_eq!(Path::new(&b.path), second);
+        assert_eq!(engine.add_demo(&first).unwrap().id, a.id);
+        assert_eq!(engine.list_demos().len(), 2);
+        assert_eq!(store.registered_demos().unwrap(), vec![first.clone(), second.clone()]);
+        assert!(engine.settings().replay_folders.is_empty());
+        assert_eq!(std::fs::read_to_string(&first).unwrap(), "first source");
+        assert_eq!(std::fs::read_to_string(&second).unwrap(), "second source");
+        assert_eq!(std::fs::read_dir(first.parent().unwrap()).unwrap().count(), 2);
+        assert_eq!(std::fs::read_dir(second.parent().unwrap()).unwrap().count(), 1);
+        assert!(!data.join("match.dem").exists());
+        drop(engine);
+        let (send, _) = mpsc::channel();
+        let restarted = Engine::new(data, Arc::new(Events(send))).unwrap();
+        let listed = restarted.list_demos();
+        assert_eq!(listed.len(), 2);
+        assert!(listed.iter().any(|demo| demo.id == a.id && demo.error.as_deref() == Some("first source")));
+        assert!(listed.iter().any(|demo| demo.id == b.id && demo.error.as_deref() == Some("second source")));
+    }
+
     fn complete_invalid_demo() -> Vec<u8> {
         let mut bytes = b"PBDEMS2\0".to_vec();
         bytes.extend_from_slice(&[0; 8]);
@@ -839,7 +879,7 @@ mod tests {
         let bytes = complete_invalid_demo();
         std::fs::write(&source, &bytes[..16]).unwrap();
         let store = Store::open(data.clone()).unwrap();
-        store.save_settings(&Settings { scan_game_replays: false, replay_folders: vec![temp.path().to_string_lossy().into_owned()], ..Settings::default() }).unwrap();
+        store.save_settings(&Settings { scan_game_replays: false, ..Settings::default() }).unwrap();
         let (send, receive) = mpsc::channel();
         let engine = Engine::new(data, Arc::new(Events(send))).unwrap();
         let demo = engine.add_demo(&source).unwrap();

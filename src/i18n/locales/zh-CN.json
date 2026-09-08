@@ -56,7 +56,7 @@
       "parsed": "已解析",
       "error": "错误"
     },
-    "addTooltip": "添加 .dem 文件（会复制到 replays 目录）",
+    "addTooltip": "添加 .dem 文件（保留原始位置）",
     "add": "添加 demo",
     "rescanTooltip": "重新扫描目录",
     "rescan": "重新扫描",

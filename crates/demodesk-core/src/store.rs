@@ -1,6 +1,7 @@
 //! Flat-file persistence under the app data folder. No database; every file can
 //! be deleted and is rebuilt on demand. What is on disk:
 //!   settings.json                 config (paths, folders)
+//!   registered-demos.json         original paths of individually added demos
 //!   parsed/<id>.summary.json      tiny parse summary for the sidebar (+ validity stamp)
 //!   parsed/<id>.json              full parse result, loaded when a demo is opened
 //!   parsed/<id>.replay.json       position stream for the 2D replay, built on first use
@@ -228,6 +229,17 @@ impl Store {
             fs::create_dir_all(root.join(d))?;
         }
         Ok(Self { root })
+    }
+
+    pub fn registered_demos(&self) -> Result<Vec<PathBuf>> {
+        match fs::read(self.root.join("registered-demos.json")) {
+            Ok(bytes) => Ok(serde_json::from_slice(&bytes)?),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(vec![]),
+            Err(e) => Err(e.into()),
+        }
+    }
+    pub fn save_registered_demos(&self, paths: &[PathBuf]) -> Result<()> {
+        write_atomic(&self.root.join("registered-demos.json"), &serde_json::to_vec_pretty(paths)?)
     }
 
     // ---- settings ----

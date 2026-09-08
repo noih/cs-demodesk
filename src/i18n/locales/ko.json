@@ -56,7 +56,7 @@
       "parsed": "분석 완료",
       "error": "오류"
     },
-    "addTooltip": ".dem 파일 추가 (리플레이 폴더로 복사됨)",
+    "addTooltip": ".dem 파일 추가 (원래 위치 유지)",
     "add": "데모 추가",
     "rescanTooltip": "폴더 다시 검색",
     "rescan": "다시 검색",
