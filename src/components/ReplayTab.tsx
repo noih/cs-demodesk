@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Box, Button, Callout, Flex, IconButton, Select, Spinner, Text, Tooltip } from '@radix-ui/themes';
 import { ChevronLeftIcon, ChevronRightIcon, MinusIcon, PauseIcon, PlayIcon, PlusIcon, TrackNextIcon, TrackPreviousIcon } from '@radix-ui/react-icons';
+import { useTranslation } from 'react-i18next';
+import i18n from '../i18n/index.ts';
 import { api, errorText, type DemoMeta, type MapAssets, type ParsedDemo, type RoundInfo, type Team } from '../api.ts';
 import { Clock, layerOf, Replay, roundAt, toImage, type TickState } from '../replay/engine.ts';
 import { DEFAULT_TOGGLES, draw, layout, teamColor, type DrawToggles, type View } from '../replay/draw.ts';
@@ -27,7 +29,7 @@ async function load(meta: DemoMeta, parsed: ParsedDemo): Promise<Loaded> {
         new Promise<HTMLImageElement>((resolve, reject) => {
           const img = new Image();
           img.onload = () => resolve(img);
-          img.onerror = () => reject(new Error(`無法載入 ${l.image}`));
+          img.onerror = () => reject(new Error(i18n.t('replay.imageLoadFailed', { file: l.image })));
           img.src = api.fileSrc(l.path);
         }),
     ),
@@ -36,6 +38,7 @@ async function load(meta: DemoMeta, parsed: ParsedDemo): Promise<Loaded> {
 }
 
 export function ReplayTab({ meta, parsed }: { meta: DemoMeta; parsed: ParsedDemo }) {
+  const { t } = useTranslation();
   const [loaded, setLoaded] = useState<Loaded>();
   const [error, setError] = useState<string>();
   const [attempt, setAttempt] = useState(0);
@@ -79,11 +82,11 @@ export function ReplayTab({ meta, parsed }: { meta: DemoMeta; parsed: ParsedDemo
         </Callout.Root>
         {needsTools ? (
           <Button onClick={() => void downloadTools()} disabled={settingUp}>
-            {settingUp && <Spinner size="1" />} 下載工具
+            {settingUp && <Spinner size="1" />} {t('replay.downloadTools')}
           </Button>
         ) : (
           <Button variant="soft" onClick={() => setAttempt((a) => a + 1)}>
-            重試
+            {t('common.retry')}
           </Button>
         )}
       </Flex>
@@ -92,7 +95,7 @@ export function ReplayTab({ meta, parsed }: { meta: DemoMeta; parsed: ParsedDemo
   if (!loaded) {
     return (
       <Flex align="center" gap="2" p="4">
-        <Spinner /> <Text color="gray">準備回放資料…</Text>
+        <Spinner /> <Text color="gray">{t('replay.preparing')}</Text>
       </Flex>
     );
   }
@@ -100,6 +103,7 @@ export function ReplayTab({ meta, parsed }: { meta: DemoMeta; parsed: ParsedDemo
 }
 
 function Player({ loaded }: { loaded: Loaded }) {
+  const { t } = useTranslation();
   const { replay, map, images } = loaded;
   const rounds = replay.parsed.rounds;
   const tr = replay.data.tickRate;
@@ -270,7 +274,7 @@ function Player({ loaded }: { loaded: Loaded }) {
   };
 
   const curRound = state.round;
-  const teamLabel = (side: Team) => (curRound && replay.ctKey(curRound) === (side === 'CT' ? 'B' : 'A') ? 'Team B' : 'Team A');
+  const teamLabel = (side: Team) => (curRound && replay.ctKey(curRound) === (side === 'CT' ? 'B' : 'A') ? t('common.teamB') : t('common.teamA'));
 
   return (
     <Flex direction="column" gap="2" style={{ height: '100%', minHeight: 0 }}>
@@ -278,15 +282,15 @@ function Player({ loaded }: { loaded: Loaded }) {
         {/* round strip: border colour = winner side */}
         <Flex gap="1" wrap="wrap" style={{ flex: 1 }}>
           {rounds.map((r) => (
-            <button key={r.round} className={`round-pill ${curRound?.round === r.round ? 'active' : ''}`} style={{ borderColor: r.winner ? teamColor(r.winner) : 'var(--gray-a6)' }} onClick={() => gotoRound(r)} title={`第 ${r.round} 回合`}>
+            <button key={r.round} className={`round-pill ${curRound?.round === r.round ? 'active' : ''}`} style={{ borderColor: r.winner ? teamColor(r.winner) : 'var(--gray-a6)' }} onClick={() => gotoRound(r)} title={t('common.roundN', { n: r.round })}>
               {r.round}
             </button>
           ))}
         </Flex>
         {/* same width/gutter as the side panel so the button lines up with its right edge */}
         <div className={panelOpen ? 'replay-side replay-side-head' : undefined}>
-          <Tooltip content={panelOpen ? '收合面板' : '展開面板'}>
-            <IconButton size="1" variant="soft" color="gray" onClick={() => setPanelOpen((v) => !v)} aria-label={panelOpen ? '收合面板' : '展開面板'}>
+          <Tooltip content={panelOpen ? t('replay.collapsePanel') : t('replay.expandPanel')}>
+            <IconButton size="1" variant="soft" color="gray" onClick={() => setPanelOpen((v) => !v)} aria-label={panelOpen ? t('replay.collapsePanel') : t('replay.expandPanel')}>
               {panelOpen ? <ChevronRightIcon /> : <ChevronLeftIcon />}
             </IconButton>
           </Tooltip>
@@ -299,7 +303,7 @@ function Player({ loaded }: { loaded: Loaded }) {
           <canvas ref={canvasRef} />
           {toggles.clock && curRound && (
             <div className="replay-hud replay-clock">
-              <div className="dim">第 {curRound.round} 回合</div>
+              <div className="dim">{t('common.roundN', { n: curRound.round })}</div>
               <div className={`replay-time ${state.bomb?.state === 'planted' ? 'bomb' : ''}`}>{state.clock}</div>
             </div>
           )}
@@ -319,10 +323,10 @@ function Player({ loaded }: { loaded: Loaded }) {
             </div>
           )}
           <div className="replay-hud replay-zoom">
-            <IconButton size="2" variant="surface" color="gray" onClick={() => setZoomTo(viewRef.current.zoom * ZOOM_STEP)} aria-label="放大">
+            <IconButton size="2" variant="surface" color="gray" onClick={() => setZoomTo(viewRef.current.zoom * ZOOM_STEP)} aria-label={t('replay.zoomIn')}>
               <PlusIcon />
             </IconButton>
-            <IconButton size="2" variant="surface" color="gray" onClick={() => setZoomTo(viewRef.current.zoom / ZOOM_STEP)} aria-label="縮小" disabled={zoom === 1}>
+            <IconButton size="2" variant="surface" color="gray" onClick={() => setZoomTo(viewRef.current.zoom / ZOOM_STEP)} aria-label={t('replay.zoomOut')} disabled={zoom === 1}>
               <MinusIcon />
             </IconButton>
           </div>
@@ -343,8 +347,8 @@ function Player({ loaded }: { loaded: Loaded }) {
 
       {/* transport */}
       <Flex align="center" gap="2">
-        <Tooltip content={playing ? '暫停 (Space)' : '播放 (Space)'}>
-          <IconButton onClick={() => play(!playing)} aria-label={playing ? '暫停' : '播放'}>
+        <Tooltip content={playing ? t('replay.pauseHint') : t('replay.playHint')}>
+          <IconButton onClick={() => play(!playing)} aria-label={playing ? t('replay.pause') : t('replay.play')}>
             {playing ? <PauseIcon /> : <PlayIcon />}
           </IconButton>
         </Tooltip>
@@ -365,14 +369,14 @@ function Player({ loaded }: { loaded: Loaded }) {
             ))}
           </Select.Content>
         </Select.Root>
-        <Tooltip content="上一回合 (PageUp)">
-          <IconButton variant="soft" onClick={() => stepRound(-1)} aria-label="上一回合">
+        <Tooltip content={t('replay.prevRoundHint')}>
+          <IconButton variant="soft" onClick={() => stepRound(-1)} aria-label={t('replay.prevRound')}>
             <TrackPreviousIcon />
           </IconButton>
         </Tooltip>
         <RoundTimeline replay={replay} round={curRound} tick={state.tick} onSeek={seek} />
-        <Tooltip content="下一回合 (PageDown)">
-          <IconButton variant="soft" onClick={() => stepRound(1)} aria-label="下一回合">
+        <Tooltip content={t('replay.nextRoundHint')}>
+          <IconButton variant="soft" onClick={() => stepRound(1)} aria-label={t('replay.nextRound')}>
             <TrackNextIcon />
           </IconButton>
         </Tooltip>

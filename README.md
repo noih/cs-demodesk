@@ -25,6 +25,8 @@ Score, round results, and per-player stats (K/D/A, ADR, headshots, utility damag
 - Round navigation, playback speed, follow a player
 - Multi-level maps shown one level per panel; radar images extracted from the local game files
 
+UI languages: English, 繁體中文, 简体中文, 日本語 - follows the system language, selectable in Settings.
+
 ## Game files are never modified
 
 Nothing is written into the game folder: no plugin, script, or cfg, and no game file is changed. Recording launches a separate CS2 process through [HLAE](https://github.com/advancedfx/advancedfx) with `-insecure` (the same as using HLAE manually), sends commands over the game's own netcon console, and keeps game settings in a separate `USRLOCALCSGO` folder so the player's settings are untouched. All third-party tools are downloaded into the app's own data folder:

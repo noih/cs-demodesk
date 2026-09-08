@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react';
 import { AlertDialog, Badge, Box, Button, Callout, DropdownMenu, Flex, Heading, IconButton, Spinner, Tabs, Text, Tooltip } from '@radix-ui/themes';
 import { DotsHorizontalIcon, ReloadIcon } from '@radix-ui/react-icons';
+import { Trans, useTranslation } from 'react-i18next';
 import { api, errorText, mb, type DemoMeta, type ParsedDemo, type RenderJob, type Status } from '../api.ts';
+import { fmtDate } from '../i18n/index.ts';
 import { HighlightsTab } from './HighlightsTab.tsx';
 import { PlayersTab } from './PlayersTab.tsx';
 import { RendersTab } from './RendersTab.tsx';
@@ -9,6 +11,7 @@ import { ChartsTab } from './ChartsTab.tsx';
 import { ReplayTab } from './ReplayTab.tsx';
 
 export function DemoView({ meta, jobs, status, onChanged, onRemoved }: { meta: DemoMeta; jobs: RenderJob[]; status?: Status; onChanged: () => Promise<void>; onRemoved: () => void }) {
+  const { t } = useTranslation();
   const [parsed, setParsed] = useState<ParsedDemo>();
   const [tab, setTab] = useState('highlights');
   const [confirmRemove, setConfirmRemove] = useState(false);
@@ -51,26 +54,26 @@ export function DemoView({ meta, jobs, status, onChanged, onRemoved }: { meta: D
           </Heading>
           <Flex gap="2" style={{ flex: 'none' }}>
             {meta.status === 'parsed' && (
-              <Tooltip content="重新解析">
-                <IconButton variant="soft" onClick={run(() => api.parse(meta.id))} aria-label="重新解析">
+              <Tooltip content={t('demoView.reparse')}>
+                <IconButton variant="soft" onClick={run(() => api.parse(meta.id))} aria-label={t('demoView.reparse')}>
                   <ReloadIcon />
                 </IconButton>
               </Tooltip>
             )}
             <DropdownMenu.Root>
               <DropdownMenu.Trigger>
-                <IconButton variant="soft" aria-label="更多">
+                <IconButton variant="soft" aria-label={t('common.more')}>
                   <DotsHorizontalIcon />
                 </IconButton>
               </DropdownMenu.Trigger>
               <DropdownMenu.Content align="end">
-                <DropdownMenu.Item onSelect={() => void api.reveal(meta.path)}>以檔案總管開啟</DropdownMenu.Item>
+                <DropdownMenu.Item onSelect={() => void api.reveal(meta.path)}>{t('common.openInExplorer')}</DropdownMenu.Item>
                 <DropdownMenu.Item disabled={meta.status !== 'parsed'} onSelect={run(() => api.clearAnalysis(meta.id))}>
-                  清除解析
+                  {t('demoView.clearAnalysis')}
                 </DropdownMenu.Item>
                 <DropdownMenu.Separator />
                 <DropdownMenu.Item color="red" disabled={meta.status === 'parsing'} onSelect={() => setConfirmRemove(true)}>
-                  刪除 demo 檔
+                  {t('demoView.deleteDemo')}
                 </DropdownMenu.Item>
               </DropdownMenu.Content>
             </DropdownMenu.Root>
@@ -86,7 +89,7 @@ export function DemoView({ meta, jobs, status, onChanged, onRemoved }: { meta: D
                 B {parsed.score.B}
               </Badge>
               <Text size="2" color="gray">
-                {parsed.rounds.length} 回合
+                {t('demoView.rounds', { count: parsed.rounds.length })}
               </Text>
               <Text size="2" color="gray">
                 ·
@@ -97,7 +100,7 @@ export function DemoView({ meta, jobs, status, onChanged, onRemoved }: { meta: D
             {meta.name}
           </Text>
           <Text size="2" color="gray">
-            · {new Date(meta.mtimeMs).toLocaleDateString()} · {mb(meta.bytes)}
+            · {fmtDate(meta.mtimeMs)} · {mb(meta.bytes)}
           </Text>
         </Flex>
       </Flex>
@@ -107,7 +110,7 @@ export function DemoView({ meta, jobs, status, onChanged, onRemoved }: { meta: D
           {meta.status === 'parsing' ? (
             <>
               <Spinner size="3" />
-              <Text color="gray">解析中…</Text>
+              <Text color="gray">{t('demoView.parsing')}</Text>
             </>
           ) : (
             <>
@@ -117,7 +120,7 @@ export function DemoView({ meta, jobs, status, onChanged, onRemoved }: { meta: D
                 </Callout.Root>
               )}
               <Button size="3" onClick={run(() => api.parse(meta.id))}>
-                <ReloadIcon /> {meta.status === 'error' ? '重新解析' : '解析'}
+                <ReloadIcon /> {meta.status === 'error' ? t('demoView.reparse') : t('demoView.parse')}
               </Button>
             </>
           )}
@@ -128,22 +131,22 @@ export function DemoView({ meta, jobs, status, onChanged, onRemoved }: { meta: D
         <Tabs.Root value={tab} onValueChange={setTab} style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
           <Tabs.List>
             <Tabs.Trigger value="highlights">
-              高光
+              {t('demoView.tabs.highlights')}
               <Badge ml="2" variant="soft" color="gray">
                 {parsed.highlights.length}
               </Badge>
             </Tabs.Trigger>
-            <Tabs.Trigger value="players">玩家數據</Tabs.Trigger>
-            <Tabs.Trigger value="charts">圖表</Tabs.Trigger>
+            <Tabs.Trigger value="players">{t('demoView.tabs.players')}</Tabs.Trigger>
+            <Tabs.Trigger value="charts">{t('demoView.tabs.charts')}</Tabs.Trigger>
             <Tabs.Trigger value="renders">
-              影片
+              {t('demoView.tabs.videos')}
               {jobs.length > 0 && (
                 <Badge ml="2" variant="soft" color={activeJobs ? 'amber' : 'gray'}>
-                  {activeJobs ? `${activeJobs} 進行中` : jobs.length}
+                  {activeJobs ? t('demoView.activeJobs', { n: activeJobs }) : jobs.length}
                 </Badge>
               )}
             </Tabs.Trigger>
-            <Tabs.Trigger value="2d">2D</Tabs.Trigger>
+            <Tabs.Trigger value="2d">{t('demoView.tabs.replay')}</Tabs.Trigger>
           </Tabs.List>
           <Box className="tab-body">
             <Tabs.Content value="highlights">
@@ -167,19 +170,19 @@ export function DemoView({ meta, jobs, status, onChanged, onRemoved }: { meta: D
 
       <AlertDialog.Root open={confirmRemove} onOpenChange={setConfirmRemove}>
         <AlertDialog.Content maxWidth="480px">
-          <AlertDialog.Title>刪除 demo 檔？</AlertDialog.Title>
+          <AlertDialog.Title>{t('demoView.deleteTitle')}</AlertDialog.Title>
           <AlertDialog.Description size="2">
-            會從磁碟刪除 <span className="mono selectable">{meta.path}</span>，無法復原。已輸出的影片保留。
+            <Trans i18nKey="demoView.deleteBody" components={{ path: <span className="mono selectable">{meta.path}</span> }} />
           </AlertDialog.Description>
           <Flex gap="3" mt="4" justify="end">
             <AlertDialog.Cancel>
               <Button variant="soft" color="gray">
-                取消
+                {t('common.cancel')}
               </Button>
             </AlertDialog.Cancel>
             <AlertDialog.Action>
               <Button color="red" onClick={() => void doRemove()}>
-                刪除檔案
+                {t('demoView.deleteConfirm')}
               </Button>
             </AlertDialog.Action>
           </Flex>

@@ -1,12 +1,15 @@
 import { useState } from 'react';
 import { AlertDialog, Badge, Box, Button, Callout, Card, DataList, Dialog, DropdownMenu, Flex, Grid, Heading, IconButton, Link, Progress, Spinner, Text } from '@radix-ui/themes';
 import { DotsHorizontalIcon, ExternalLinkIcon, FileTextIcon, OpenInNewWindowIcon } from '@radix-ui/react-icons';
+import { useTranslation } from 'react-i18next';
+import type { TFunction } from 'i18next';
 import { api, errorText, mb, type ParsedDemo, type RenderJob } from '../api.ts';
 import { LogView } from './LogView.tsx';
+import { fmtDateTime } from '../i18n/index.ts';
 
-const LABEL: Record<RenderJob['status'], string> = { queued: '排隊中', running: '渲染中', done: '完成', error: '失敗', cancelled: '已取消' };
 const COLOR: Record<RenderJob['status'], 'gray' | 'amber' | 'green' | 'red'> = { queued: 'amber', running: 'amber', done: 'green', error: 'red', cancelled: 'gray' };
-const STAGE_LABEL: Record<string, string> = { starting: '準備中', recording: '錄影中（CS2）', encoding: '編碼中' };
+const STAGES = ['starting', 'recording', 'encoding'] as const;
+const isStage = (s: string): s is (typeof STAGES)[number] => (STAGES as readonly string[]).includes(s);
 
 /** "[3/5] recording …" or "encoding 2/4" → 0..1, undefined when the stage carries no counter. */
 function progressOf(job: RenderJob): number | undefined {
@@ -17,14 +20,15 @@ function progressOf(job: RenderJob): number | undefined {
   return total > 0 ? Math.min(1, cur / total) : undefined;
 }
 
-function duration(job: RenderJob): string | undefined {
+function duration(job: RenderJob, t: TFunction): string | undefined {
   if (!job.startedAt) return undefined;
   const end = job.finishedAt ? new Date(job.finishedAt) : new Date();
   const sec = Math.max(0, Math.round((end.getTime() - new Date(job.startedAt).getTime()) / 1000));
-  return sec < 60 ? `${sec} 秒` : `${Math.floor(sec / 60)} 分 ${sec % 60} 秒`;
+  return sec < 60 ? t('common.seconds', { n: sec }) : t('common.minutesSeconds', { m: Math.floor(sec / 60), s: sec % 60 });
 }
 
 function JobCard({ job, parsed, onChanged }: { job: RenderJob; parsed: ParsedDemo; onChanged: () => Promise<void> }) {
+  const { t } = useTranslation();
   const [logOpen, setLogOpen] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const titleOf = (id?: string) => parsed.highlights.find((h) => h.id === id)?.title;
@@ -38,38 +42,38 @@ function JobCard({ job, parsed, onChanged }: { job: RenderJob; parsed: ParsedDem
     <Card>
       <Flex align="center" gap="3" wrap="wrap">
         <Badge color={COLOR[job.status]} size="2">
-          {LABEL[job.status]}
+          {t(`renders.status.${job.status}`)}
         </Badge>
-        <Heading size="3">{new Date(job.createdAt).toLocaleString()}</Heading>
+        <Heading size="3">{fmtDateTime(job.createdAt)}</Heading>
         <Text size="2" color="gray">
-          {job.highlightIds.length} 段 · {job.options.maxSizeMb ? `≤ ${job.options.maxSizeMb} MB` : '大小不限'} · {job.options.height}p{job.options.fps} · {job.options.codec}
+          {t('renders.summary', { n: job.highlightIds.length })} · {job.options.maxSizeMb ? t('renders.sizeLimit', { mb: job.options.maxSizeMb }) : t('renders.noSizeLimit')} · {job.options.height}p{job.options.fps} · {job.options.codec}
         </Text>
         <Box style={{ flex: 1 }} />
         {active && (
           <Button size="1" variant="soft" color="red" onClick={act(() => api.cancel(job.id))}>
-            取消
+            {t('common.cancel')}
           </Button>
         )}
         {revealTarget && (
           <Button size="1" variant="soft" onClick={() => void api.reveal(revealTarget)}>
-            <OpenInNewWindowIcon /> 開啟目錄
+            <OpenInNewWindowIcon /> {t('renders.openFolder')}
           </Button>
         )}
         <DropdownMenu.Root>
           <DropdownMenu.Trigger>
-            <IconButton size="1" variant="soft" aria-label="更多">
+            <IconButton size="1" variant="soft" aria-label={t('common.more')}>
               <DotsHorizontalIcon />
             </IconButton>
           </DropdownMenu.Trigger>
           <DropdownMenu.Content align="end">
             <DropdownMenu.Item onSelect={() => setLogOpen(true)}>
-              <FileTextIcon /> 檢視 log（{job.log.length} 行）
+              <FileTextIcon /> {t('renders.viewLog', { n: job.log.length })}
             </DropdownMenu.Item>
             {!active && (
               <>
                 <DropdownMenu.Separator />
                 <DropdownMenu.Item color="red" onSelect={() => setConfirmDelete(true)}>
-                  刪除這次輸出（含影片）
+                  {t('renders.deleteJob')}
                 </DropdownMenu.Item>
               </>
             )}
@@ -83,7 +87,7 @@ function JobCard({ job, parsed, onChanged }: { job: RenderJob; parsed: ParsedDem
             <Flex align="center" gap="2">
               <Spinner size="1" />
               <Text size="2" color="amber">
-                {STAGE_LABEL[job.stage ?? ''] ?? job.stage ?? (job.status === 'queued' ? '等待前一個工作完成…' : '準備中…')}
+                {job.stage ? (isStage(job.stage) ? t(`renders.stage.${job.stage}`) : job.stage) : job.status === 'queued' ? t('renders.waitingPrevious') : t('renders.starting')}
               </Text>
               {job.log.length > 0 && (
                 <Text size="1" color="gray" truncate style={{ maxWidth: 520 }}>
@@ -92,7 +96,7 @@ function JobCard({ job, parsed, onChanged }: { job: RenderJob; parsed: ParsedDem
               )}
             </Flex>
             <Text size="1" color="gray">
-              {duration(job)}
+              {duration(job, t)}
             </Text>
           </Flex>
           {pct !== undefined && <Progress value={Math.round(pct * 100)} color="amber" />}
@@ -110,7 +114,7 @@ function JobCard({ job, parsed, onChanged }: { job: RenderJob; parsed: ParsedDem
           {/* same small preview for every file (merged video included); the player is one click away */}
           <Grid columns={{ initial: '1', sm: '2', xl: '3' }} gap="3">
             {job.outputs.map((o) => {
-              const title = o.isFinal ? '合併影片' : (titleOf(o.highlightId) ?? o.title);
+              const title = o.isFinal ? t('renders.merged') : (titleOf(o.highlightId) ?? o.title);
               return (
                 <Box key={o.file}>
                   <video controls preload="metadata" src={api.fileSrc(o.file)} />
@@ -120,7 +124,7 @@ function JobCard({ job, parsed, onChanged }: { job: RenderJob; parsed: ParsedDem
                   <Text as="div" size="1" color="gray">
                     {mb(o.bytes)} ·{' '}
                     <Link size="1" href="#" onClick={(e) => (e.preventDefault(), void api.open(o.file))}>
-                      在播放器開啟 <ExternalLinkIcon style={{ verticalAlign: '-2px' }} />
+                      {t('renders.openInPlayer')} <ExternalLinkIcon style={{ verticalAlign: '-2px' }} />
                     </Link>
                   </Text>
                 </Box>
@@ -129,42 +133,42 @@ function JobCard({ job, parsed, onChanged }: { job: RenderJob; parsed: ParsedDem
           </Grid>
           <DataList.Root size="1">
             <DataList.Item>
-              <DataList.Label>檔案數</DataList.Label>
+              <DataList.Label>{t('renders.files')}</DataList.Label>
               <DataList.Value>{job.outputs.length}</DataList.Value>
             </DataList.Item>
             <DataList.Item>
-              <DataList.Label>總大小</DataList.Label>
+              <DataList.Label>{t('renders.totalSize')}</DataList.Label>
               <DataList.Value>{mb(total)}</DataList.Value>
             </DataList.Item>
             <DataList.Item>
-              <DataList.Label>耗時</DataList.Label>
-              <DataList.Value>{duration(job) ?? '—'}</DataList.Value>
+              <DataList.Label>{t('renders.elapsed')}</DataList.Label>
+              <DataList.Value>{duration(job, t) ?? '—'}</DataList.Value>
             </DataList.Item>
             <DataList.Item>
-              <DataList.Label>解析度</DataList.Label>
+              <DataList.Label>{t('common.resolution')}</DataList.Label>
               <DataList.Value>
                 {job.options.width}×{job.options.height} @ {job.options.fps}
               </DataList.Value>
             </DataList.Item>
             <DataList.Item>
-              <DataList.Label>選項</DataList.Label>
+              <DataList.Label>{t('renders.options')}</DataList.Label>
               <DataList.Value>
                 <Flex gap="1" wrap="wrap">
                   {job.options.trueView && <Badge size="1">TrueView</Badge>}
-                  {!job.options.hud && <Badge size="1">無基本介面</Badge>}
-                  {job.options.hud && !job.options.crosshair && <Badge size="1">無準星</Badge>}
-                  {!job.options.radar && <Badge size="1">無雷達</Badge>}
-                  {!job.options.killFeed && <Badge size="1">無擊殺訊息</Badge>}
-                  {!job.options.viewmodel && <Badge size="1">無手持武器</Badge>}
-                  {!job.options.tracers && <Badge size="1">無曳光彈</Badge>}
-                  {job.options.chat && <Badge size="1">聊天</Badge>}
+                  {!job.options.hud && <Badge size="1">{t('renders.badge.noHud')}</Badge>}
+                  {job.options.hud && !job.options.crosshair && <Badge size="1">{t('renders.badge.noCrosshair')}</Badge>}
+                  {!job.options.radar && <Badge size="1">{t('renders.badge.noRadar')}</Badge>}
+                  {!job.options.killFeed && <Badge size="1">{t('renders.badge.noKillFeed')}</Badge>}
+                  {!job.options.viewmodel && <Badge size="1">{t('renders.badge.noViewmodel')}</Badge>}
+                  {!job.options.tracers && <Badge size="1">{t('renders.badge.noTracers')}</Badge>}
+                  {job.options.chat && <Badge size="1">{t('renders.badge.chat')}</Badge>}
                   {job.options.xray && <Badge size="1">X-ray</Badge>}
-                  {job.options.voice && <Badge size="1">語音</Badge>}
+                  {job.options.voice && <Badge size="1">{t('renders.badge.voice')}</Badge>}
                 </Flex>
               </DataList.Value>
             </DataList.Item>
             <DataList.Item>
-              <DataList.Label>位置</DataList.Label>
+              <DataList.Label>{t('renders.location')}</DataList.Label>
               <DataList.Value>
                 <Text className="mono selectable" style={{ wordBreak: 'break-all' }}>
                   {job.outputs[0]?.file.replace(/[\\/][^\\/]+$/, '')}
@@ -177,14 +181,14 @@ function JobCard({ job, parsed, onChanged }: { job: RenderJob; parsed: ParsedDem
 
       <Dialog.Root open={logOpen} onOpenChange={setLogOpen}>
         <Dialog.Content maxWidth="900px">
-          <Dialog.Title>渲染 log</Dialog.Title>
+          <Dialog.Title>{t('renders.logTitle')}</Dialog.Title>
           <Dialog.Description size="2" color="gray">
-            {new Date(job.createdAt).toLocaleString()} · {LABEL[job.status]}
+            {fmtDateTime(job.createdAt)} · {t(`renders.status.${job.status}`)}
           </Dialog.Description>
-          <LogView lines={job.log} empty="（尚無 log）" />
+          <LogView lines={job.log} empty={t('renders.logEmpty')} />
           <Flex justify="end" mt="3">
             <Dialog.Close>
-              <Button variant="soft">關閉</Button>
+              <Button variant="soft">{t('common.close')}</Button>
             </Dialog.Close>
           </Flex>
         </Dialog.Content>
@@ -192,17 +196,17 @@ function JobCard({ job, parsed, onChanged }: { job: RenderJob; parsed: ParsedDem
 
       <AlertDialog.Root open={confirmDelete} onOpenChange={setConfirmDelete}>
         <AlertDialog.Content maxWidth="440px">
-          <AlertDialog.Title>刪除這次輸出？</AlertDialog.Title>
-          <AlertDialog.Description size="2">會刪掉這次工作的 {job.outputs.length} 個影片檔與紀錄；demo 與分析結果不受影響。</AlertDialog.Description>
+          <AlertDialog.Title>{t('renders.deleteTitle')}</AlertDialog.Title>
+          <AlertDialog.Description size="2">{t('renders.deleteBody', { n: job.outputs.length })}</AlertDialog.Description>
           <Flex gap="3" mt="4" justify="end">
             <AlertDialog.Cancel>
               <Button variant="soft" color="gray">
-                取消
+                {t('common.cancel')}
               </Button>
             </AlertDialog.Cancel>
             <AlertDialog.Action>
               <Button color="red" onClick={act(() => api.deleteJob(job.id))}>
-                刪除
+                {t('common.delete')}
               </Button>
             </AlertDialog.Action>
           </Flex>
@@ -213,10 +217,11 @@ function JobCard({ job, parsed, onChanged }: { job: RenderJob; parsed: ParsedDem
 }
 
 export function RendersTab({ jobs, parsed, onChanged }: { jobs: RenderJob[]; parsed: ParsedDemo; onChanged: () => Promise<void> }) {
+  const { t } = useTranslation();
   if (jobs.length === 0) {
     return (
       <Text as="p" size="2" color="gray">
-        還沒有輸出的影片。
+        {t('renders.empty')}
       </Text>
     );
   }

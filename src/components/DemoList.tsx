@@ -1,11 +1,12 @@
 import { useMemo, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Badge, Box, Flex, IconButton, Text, TextField, Tooltip } from '@radix-ui/themes';
 import { Cross2Icon, GearIcon, MagnifyingGlassIcon, PlusIcon, ReloadIcon } from '@radix-ui/react-icons';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { open } from '@tauri-apps/plugin-dialog';
 import { api, errorText, mb, type DemoMeta } from '../api.ts';
+import { fmtDate, fmtTime } from '../i18n/index.ts';
 
-const STATUS_LABEL: Record<DemoMeta['status'], string> = { new: '未解析', parsing: '解析中', parsed: '已解析', error: '錯誤' };
 const STATUS_COLOR: Record<DemoMeta['status'], 'gray' | 'amber' | 'green' | 'red'> = { new: 'gray', parsing: 'amber', parsed: 'green', error: 'red' };
 const ROW_HEIGHT = 74;
 
@@ -38,6 +39,7 @@ export function DemoList({
   onToggleSettings: () => void;
   onChanged: () => Promise<void>;
 }) {
+  const { t } = useTranslation();
   const [busy, setBusy] = useState(false);
   const [query, setQuery] = useState('');
   const [from, setFrom] = useState('');
@@ -99,43 +101,43 @@ export function DemoList({
     <Flex direction="column" style={{ flex: 1, minHeight: 0 }}>
       <Flex direction="column" gap="2" px="3" py="3">
         <Flex align="center" gap="2">
-          <Tooltip content="加入 .dem 檔（會複製到 replays 目錄）">
-            <IconButton size="2" onClick={() => void addFiles()} disabled={busy} aria-label="加入 demo">
+          <Tooltip content={t('demoList.addTooltip')}>
+            <IconButton size="2" onClick={() => void addFiles()} disabled={busy} aria-label={t('demoList.add')}>
               <PlusIcon />
             </IconButton>
           </Tooltip>
-          <Tooltip content="重新掃描目錄">
-            <IconButton size="2" variant="soft" onClick={() => void rescan()} disabled={busy} aria-label="重新掃描">
+          <Tooltip content={t('demoList.rescanTooltip')}>
+            <IconButton size="2" variant="soft" onClick={() => void rescan()} disabled={busy} aria-label={t('demoList.rescan')}>
               <ReloadIcon />
             </IconButton>
           </Tooltip>
           <Text size="2" color="gray" style={{ flex: 1 }}>
-            {filtered ? `${visible.length} / ${demos.length}` : demos.length} 個 demo
+            {filtered ? t('demoList.countFiltered', { shown: visible.length, total: demos.length }) : t('demoList.count', { count: demos.length })}
           </Text>
-          <Tooltip content="設定">
-            <IconButton size="2" variant={settingsOpen ? 'solid' : 'soft'} onClick={onToggleSettings} aria-label="設定">
+          <Tooltip content={t('common.settings')}>
+            <IconButton size="2" variant={settingsOpen ? 'solid' : 'soft'} onClick={onToggleSettings} aria-label={t('common.settings')}>
               <GearIcon />
             </IconButton>
           </Tooltip>
         </Flex>
-        <TextField.Root size="1" placeholder="搜尋檔名 / 地圖 / 玩家" value={query} onChange={(e) => setQuery(e.target.value)}>
+        <TextField.Root size="1" placeholder={t('demoList.searchPlaceholder')} value={query} onChange={(e) => setQuery(e.target.value)}>
           <TextField.Slot>
             <MagnifyingGlassIcon />
           </TextField.Slot>
           {query && (
             <TextField.Slot side="right">
-              <IconButton size="1" variant="ghost" color="gray" onClick={() => setQuery('')} aria-label="清除搜尋">
+              <IconButton size="1" variant="ghost" color="gray" onClick={() => setQuery('')} aria-label={t('demoList.clearSearch')}>
                 <Cross2Icon />
               </IconButton>
             </TextField.Slot>
           )}
         </TextField.Root>
         <Flex align="center" gap="1">
-          <TextField.Root size="1" type="date" value={from} max={to || undefined} onChange={(e) => setFrom(e.target.value)} style={{ flex: 1, minWidth: 0 }} aria-label="起始日期" />
+          <TextField.Root size="1" type="date" value={from} max={to || undefined} onChange={(e) => setFrom(e.target.value)} style={{ flex: 1, minWidth: 0 }} aria-label={t('demoList.from')} />
           <Text size="1" color="gray">
             –
           </Text>
-          <TextField.Root size="1" type="date" value={to} min={from || undefined} onChange={(e) => setTo(e.target.value)} style={{ flex: 1, minWidth: 0 }} aria-label="結束日期" />
+          <TextField.Root size="1" type="date" value={to} min={from || undefined} onChange={(e) => setTo(e.target.value)} style={{ flex: 1, minWidth: 0 }} aria-label={t('demoList.to')} />
           {(from || to) && (
             <IconButton
               size="1"
@@ -145,7 +147,7 @@ export function DemoList({
                 setFrom('');
                 setTo('');
               }}
-              aria-label="清除日期"
+              aria-label={t('demoList.clearDates')}
             >
               <Cross2Icon />
             </IconButton>
@@ -166,20 +168,20 @@ export function DemoList({
                         {d.mapName ?? shortName(d.name)}
                       </Text>
                       <Badge size="1" color={STATUS_COLOR[d.status]} variant="soft" style={{ flex: 'none' }}>
-                        {STATUS_LABEL[d.status]}
+                        {t(`demoList.status.${d.status}`)}
                       </Badge>
                     </Flex>
                     <Text as="div" size="1" color="gray" truncate>
                       {d.summary ? (
                         <>
-                          <Text color="blue">{d.summary.scoreA}</Text> – <Text color="orange">{d.summary.scoreB}</Text> · {d.summary.highlights} 個高光
+                          <Text color="blue">{d.summary.scoreA}</Text> – <Text color="orange">{d.summary.scoreB}</Text> · {t('demoList.highlights', { count: d.summary.highlights })}
                         </>
                       ) : (
                         shortName(d.name)
                       )}
                     </Text>
                     <Text as="div" size="1" color="gray" truncate>
-                      {new Date(d.mtimeMs).toLocaleDateString()} {new Date(d.mtimeMs).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} · {mb(d.bytes)}
+                      {fmtDate(d.mtimeMs)} {fmtTime(d.mtimeMs)} · {mb(d.bytes)}
                     </Text>
                   </div>
                 </Tooltip>
@@ -189,7 +191,7 @@ export function DemoList({
         ) : (
           <Box p="4">
             <Text size="2" color="gray">
-              {demos.length === 0 ? '還沒有 demo。按 + 加入 .dem 檔，或到設定指定目錄。' : '沒有符合條件的 demo。'}
+              {demos.length === 0 ? t('demoList.empty') : t('demoList.noMatch')}
             </Text>
           </Box>
         )}

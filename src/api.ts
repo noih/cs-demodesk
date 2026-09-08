@@ -273,6 +273,8 @@ export interface DoctorReport {
   paths: ToolPaths;
 }
 export interface Settings {
+  /** UI language code, or null = follow the system language */
+  language: string | null;
   cs2Dir: string | null;
   replayFolders: string[];
   scanGameReplays: boolean;

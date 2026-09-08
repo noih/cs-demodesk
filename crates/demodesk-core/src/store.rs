@@ -20,6 +20,9 @@ use std::path::{Path, PathBuf};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Settings {
+    /// UI language (en / zh-TW / zh-CN / ja); None = follow the system language
+    #[serde(default)]
+    pub language: Option<String>,
     /// CS2 install folder ("…\steamapps\common\Counter-Strike Global Offensive")
     pub cs2_dir: Option<String>,
     /// Extra folders to scan for .dem files
@@ -33,7 +36,7 @@ pub struct Settings {
 
 impl Default for Settings {
     fn default() -> Self {
-        Self { cs2_dir: None, replay_folders: vec![], scan_game_replays: true, hlae_exe: None, ffmpeg_exe: None, tools_dir: None }
+        Self { language: None, cs2_dir: None, replay_folders: vec![], scan_game_replays: true, hlae_exe: None, ffmpeg_exe: None, tools_dir: None }
     }
 }
 
@@ -47,6 +50,7 @@ impl Settings {
                 *v = if t.is_empty() { None } else { Some(t) };
             }
         };
+        trim(&mut self.language);
         trim(&mut self.cs2_dir);
         trim(&mut self.hlae_exe);
         trim(&mut self.ffmpeg_exe);

@@ -1,8 +1,10 @@
 import { Badge, Card, Flex, Grid, Heading, Table, Text } from '@radix-ui/themes';
+import { useTranslation } from 'react-i18next';
 import type { ParsedDemo, PlayerStats } from '../api.ts';
 import { playerColors } from '../charts/EChart.tsx';
 
 function TeamTable({ label, color, score, players, colors }: { label: string; color: 'blue' | 'orange'; score: number; players: PlayerStats[]; colors: Map<string, string> }) {
+  const { t } = useTranslation();
   return (
     <Card>
       <Flex align="center" gap="2" mb="2">
@@ -11,25 +13,25 @@ function TeamTable({ label, color, score, players, colors }: { label: string; co
         </Badge>
         <Heading size="4">{score}</Heading>
         <Text size="1" color="gray">
-          {players.reduce((s, p) => s + p.kills, 0)} 擊殺
+          {t('players.kills', { count: players.reduce((s, p) => s + p.kills, 0) })}
         </Text>
       </Flex>
       <Table.Root className="nowrap-headers" size="1" layout="fixed">
         <Table.Header>
           <Table.Row>
-            <Table.ColumnHeaderCell>玩家</Table.ColumnHeaderCell>
+            <Table.ColumnHeaderCell>{t('common.player')}</Table.ColumnHeaderCell>
             <Table.ColumnHeaderCell align="right" width="40px">K</Table.ColumnHeaderCell>
             <Table.ColumnHeaderCell align="right" width="40px">D</Table.ColumnHeaderCell>
             <Table.ColumnHeaderCell align="right" width="40px">A</Table.ColumnHeaderCell>
             <Table.ColumnHeaderCell align="right" width="52px">K/D</Table.ColumnHeaderCell>
             <Table.ColumnHeaderCell align="right" width="52px">HS%</Table.ColumnHeaderCell>
-            <Table.ColumnHeaderCell align="right" width="64px">傷害</Table.ColumnHeaderCell>
+            <Table.ColumnHeaderCell align="right" width="64px">{t('common.damage')}</Table.ColumnHeaderCell>
             <Table.ColumnHeaderCell align="right" width="56px">ADR</Table.ColumnHeaderCell>
-            <Table.ColumnHeaderCell align="right" width="72px">道具傷害</Table.ColumnHeaderCell>
-            <Table.ColumnHeaderCell align="right" width="84px">多殺</Table.ColumnHeaderCell>
-            <Table.ColumnHeaderCell align="right" width="60px">Clutch</Table.ColumnHeaderCell>
-            <Table.ColumnHeaderCell align="right" width="48px">高光</Table.ColumnHeaderCell>
-            <Table.ColumnHeaderCell align="right" width="60px">最高分</Table.ColumnHeaderCell>
+            <Table.ColumnHeaderCell align="right" width="72px">{t('common.utilityDamage')}</Table.ColumnHeaderCell>
+            <Table.ColumnHeaderCell align="right" width="84px">{t('common.multiKills')}</Table.ColumnHeaderCell>
+            <Table.ColumnHeaderCell align="right" width="60px">{t('common.clutch')}</Table.ColumnHeaderCell>
+            <Table.ColumnHeaderCell align="right" width="48px">{t('common.highlights')}</Table.ColumnHeaderCell>
+            <Table.ColumnHeaderCell align="right" width="60px">{t('players.best')}</Table.ColumnHeaderCell>
           </Table.Row>
         </Table.Header>
         <Table.Body>
@@ -72,6 +74,7 @@ function TeamTable({ label, color, score, players, colors }: { label: string; co
 }
 
 export function PlayersTab({ parsed }: { parsed: ParsedDemo }) {
+  const { t } = useTranslation();
   const a = parsed.stats.filter((p) => p.team === 'A');
   const b = parsed.stats.filter((p) => p.team === 'B');
   const colors = playerColors(parsed.stats);
@@ -79,11 +82,11 @@ export function PlayersTab({ parsed }: { parsed: ParsedDemo }) {
     <Flex direction="column" gap="2">
       {/* two tables side by side only when each gets its full column widths; otherwise stacked, full width */}
       <Grid columns="repeat(auto-fit, minmax(820px, 1fr))" gap="4">
-        <TeamTable label="Team A（上半場 CT）" color="blue" score={parsed.score.A} players={a} colors={colors} />
-        <TeamTable label="Team B（上半場 T）" color="orange" score={parsed.score.B} players={b} colors={colors} />
+        <TeamTable label={t('players.teamA')} color="blue" score={parsed.score.A} players={a} colors={colors} />
+        <TeamTable label={t('players.teamB')} color="orange" score={parsed.score.B} players={b} colors={colors} />
       </Grid>
       <Text size="1" color="gray">
-        多殺欄位為 2k / 3k / 4k / 5k 的回合數
+        {t('players.multiKillNote')}
       </Text>
     </Flex>
   );

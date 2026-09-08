@@ -1,6 +1,6 @@
 {
   "name": "cs2-demodesk",
-  "version": "1.0.0",
+  "version": "0.1.0",
   "private": true,
   "license": "AGPL-3.0-only",
   "type": "module",
@@ -24,8 +24,10 @@
     "@tauri-apps/api": "^2.11.1",
     "@tauri-apps/plugin-dialog": "^2.7.3",
     "echarts": "^6.1.0",
+    "i18next": "^26.4.2",
     "react": "^19.2.8",
-    "react-dom": "^19.2.8"
+    "react-dom": "^19.2.8",
+    "react-i18next": "^17.0.13"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.11.4",

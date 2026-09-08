@@ -1,12 +1,15 @@
 import { useCallback, useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Box, Button, Callout, Flex, Spinner, Text } from '@radix-ui/themes';
 import { ExclamationTriangleIcon } from '@radix-ui/react-icons';
 import { api, errorText, type DemoMeta, type RenderJob, type Status } from './api.ts';
+import { applyLanguage } from './i18n/index.ts';
 import { DemoList } from './components/DemoList.tsx';
 import { DemoView } from './components/DemoView.tsx';
 import { SettingsView } from './components/SettingsView.tsx';
 
 export function App() {
+  const { t } = useTranslation();
   const [status, setStatus] = useState<Status>();
   const [demos, setDemos] = useState<DemoMeta[]>([]);
   const [jobs, setJobs] = useState<RenderJob[]>([]);
@@ -28,7 +31,9 @@ export function App() {
 
   useEffect(() => {
     void refresh();
-    const t = setInterval(() => void refresh(), 5000);
+    // language: settings.json wins over the system language
+    void api.settings().then((s) => applyLanguage(s.settings.language)).catch(() => undefined);
+    const timer = setInterval(() => void refresh(), 5000);
     let unlisten: (() => void) | undefined;
     void api
       .onEvent((ev) => {
@@ -38,7 +43,7 @@ export function App() {
       })
       .then((u) => (unlisten = u));
     return () => {
-      clearInterval(t);
+      clearInterval(timer);
       unlisten?.();
     };
   }, [refresh]);
@@ -68,21 +73,21 @@ export function App() {
                 <Callout.Icon>
                   <ExclamationTriangleIcon />
                 </Callout.Icon>
-                <Callout.Text>連不上後端：{error}</Callout.Text>
+                <Callout.Text>{t('app.backendError', { error })}</Callout.Text>
               </Callout.Root>
             ) : status && !status.ok ? (
               <Callout.Root color="red" size="1" style={{ cursor: 'pointer' }} onClick={() => setShowSettings(true)}>
                 <Callout.Icon>
                   <ExclamationTriangleIcon />
                 </Callout.Icon>
-                <Callout.Text>渲染環境未就緒 — 開啟設定</Callout.Text>
+                <Callout.Text>{t('app.renderNotReady')}</Callout.Text>
               </Callout.Root>
             ) : (
               <Callout.Root color="amber" size="1">
                 <Callout.Icon>
                   <Spinner size="1" />
                 </Callout.Icon>
-                <Callout.Text>渲染中 {runningJobs}</Callout.Text>
+                <Callout.Text>{t('app.rendering', { n: runningJobs })}</Callout.Text>
               </Callout.Root>
             )}
           </Box>
@@ -97,11 +102,11 @@ export function App() {
           <Flex align="center" justify="center" style={{ height: '100%' }}>
             <Box>
               <Text as="p" color="gray" size="3">
-                選一個 demo
+                {t('app.pickDemo')}
               </Text>
               {status && !status.ok && (
                 <Button mt="3" onClick={() => setShowSettings(true)}>
-                  前往設定
+                  {t('app.goToSettings')}
                 </Button>
               )}
             </Box>

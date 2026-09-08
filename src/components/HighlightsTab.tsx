@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { Badge, Box, Button, Callout, Checkbox, DataList, Dialog, Flex, Grid, SegmentedControl, Select, Slider, Switch, Table, Text } from '@radix-ui/themes';
 import { VideoIcon } from '@radix-ui/react-icons';
+import { useTranslation } from 'react-i18next';
 import { api, clock, errorText, DEFAULT_RENDER_OPTIONS, type DemoMeta, type Highlight, type ParsedDemo, type RenderOptions, type Status } from '../api.ts';
 
 const RESOLUTIONS = [
@@ -9,12 +10,15 @@ const RESOLUTIONS = [
   { label: '1440p', width: 2560, height: 1440 },
 ];
 const HOT_TAGS = new Set(['ace', '4k', 'clutch', 'knife', 'noscope']);
+/** HUD switches in the export dialog, in display order. */
+const HUD_TOGGLES = ['hud', 'crosshair', 'radar', 'killFeed', 'chat', 'viewmodel', 'tracers', 'xray', 'trueView'] as const;
 
 function summaryOf(h: Highlight): string {
   return h.title.replace(`${h.player.name} — `, '').replace(/ · R\d+$/, '');
 }
 
 export function HighlightsTab({ meta, parsed, status, rendering, onRendered }: { meta: DemoMeta; parsed: ParsedDemo; status?: Status; rendering: boolean; onRendered: () => void }) {
+  const { t } = useTranslation();
   const [playerFilter, setPlayerFilter] = useState<string>('all');
   const [minScore, setMinScore] = useState(3);
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -54,7 +58,7 @@ export function HighlightsTab({ meta, parsed, status, rendering, onRendered }: {
         <Select.Root value={playerFilter} onValueChange={setPlayerFilter}>
           <Select.Trigger style={{ minWidth: 200 }} />
           <Select.Content>
-            <Select.Item value="all">所有玩家</Select.Item>
+            <Select.Item value="all">{t('highlights.allPlayers')}</Select.Item>
             {parsed.stats.map((p) => (
               <Select.Item key={p.steamid} value={p.steamid}>
                 {p.name} ({p.kills}K/{p.deaths}D)
@@ -64,19 +68,19 @@ export function HighlightsTab({ meta, parsed, status, rendering, onRendered }: {
         </Select.Root>
         <Flex align="center" gap="3" style={{ width: 260 }}>
           <Text size="2" style={{ whiteSpace: 'nowrap' }}>
-            最低分數 {minScore}
+            {t('highlights.minScore', { n: minScore })}
           </Text>
           <Slider min={0} max={15} step={1} value={[minScore]} onValueChange={([v]) => setMinScore(v ?? 0)} style={{ flex: 1 }} />
         </Flex>
         <Box style={{ flex: 1 }} />
         <Text size="2" color="gray">
-          {visible.length} / {parsed.highlights.length} 段
+          {t('highlights.shown', { shown: visible.length, total: parsed.highlights.length })}
         </Text>
         <Button variant="soft" size="2" onClick={() => setSelected(new Set(allVisibleSelected ? [] : visible.map((h) => h.id)))}>
-          {allVisibleSelected ? '取消全選' : '全選'}
+          {allVisibleSelected ? t('highlights.deselectAll') : t('highlights.selectAll')}
         </Button>
         <Button size="2" disabled={selected.size === 0 || rendering} onClick={() => setDialog(true)}>
-          <VideoIcon /> {rendering ? '輸出中…' : `輸出${selected.size ? ` ${selected.size} 段` : ''}`}
+          <VideoIcon /> {rendering ? t('highlights.exporting') : selected.size ? t('highlights.exportN', { n: selected.size }) : t('highlights.export')}
         </Button>
       </Flex>
 
@@ -84,13 +88,13 @@ export function HighlightsTab({ meta, parsed, status, rendering, onRendered }: {
         <Table.Header>
           <Table.Row>
             <Table.ColumnHeaderCell width="36px" />
-            <Table.ColumnHeaderCell align="right">分數</Table.ColumnHeaderCell>
-            <Table.ColumnHeaderCell align="right">回合</Table.ColumnHeaderCell>
-            <Table.ColumnHeaderCell>時間</Table.ColumnHeaderCell>
-            <Table.ColumnHeaderCell align="right">長度</Table.ColumnHeaderCell>
-            <Table.ColumnHeaderCell>玩家</Table.ColumnHeaderCell>
-            <Table.ColumnHeaderCell>內容</Table.ColumnHeaderCell>
-            <Table.ColumnHeaderCell>標籤</Table.ColumnHeaderCell>
+            <Table.ColumnHeaderCell align="right">{t('highlights.col.score')}</Table.ColumnHeaderCell>
+            <Table.ColumnHeaderCell align="right">{t('highlights.col.round')}</Table.ColumnHeaderCell>
+            <Table.ColumnHeaderCell>{t('highlights.col.time')}</Table.ColumnHeaderCell>
+            <Table.ColumnHeaderCell align="right">{t('highlights.col.length')}</Table.ColumnHeaderCell>
+            <Table.ColumnHeaderCell>{t('highlights.col.player')}</Table.ColumnHeaderCell>
+            <Table.ColumnHeaderCell>{t('highlights.col.what')}</Table.ColumnHeaderCell>
+            <Table.ColumnHeaderCell>{t('highlights.col.tags')}</Table.ColumnHeaderCell>
           </Table.Row>
         </Table.Header>
         <Table.Body>
@@ -113,9 +117,9 @@ export function HighlightsTab({ meta, parsed, status, rendering, onRendered }: {
               <Table.Cell style={{ whiteSpace: 'nowrap' }}>{summaryOf(h)}</Table.Cell>
               <Table.Cell>
                 <Flex gap="1" wrap="wrap">
-                  {h.tags.map((t) => (
-                    <Badge key={t} size="1" color={HOT_TAGS.has(t) ? 'amber' : 'gray'} variant={HOT_TAGS.has(t) ? 'solid' : 'soft'}>
-                      {t}
+                  {h.tags.map((tag) => (
+                    <Badge key={tag} size="1" color={HOT_TAGS.has(tag) ? 'amber' : 'gray'} variant={HOT_TAGS.has(tag) ? 'solid' : 'soft'}>
+                      {tag}
                     </Badge>
                   ))}
                 </Flex>
@@ -125,7 +129,7 @@ export function HighlightsTab({ meta, parsed, status, rendering, onRendered }: {
           {visible.length === 0 && (
             <Table.Row>
               <Table.Cell colSpan={8}>
-                <Text color="gray">沒有符合條件的高光，試著降低最低分數。</Text>
+                <Text color="gray">{t('highlights.empty')}</Text>
               </Table.Cell>
             </Table.Row>
           )}
@@ -134,9 +138,9 @@ export function HighlightsTab({ meta, parsed, status, rendering, onRendered }: {
 
       <Dialog.Root open={dialog} onOpenChange={setDialog}>
         <Dialog.Content maxWidth="1000px">
-          <Dialog.Title>輸出影片</Dialog.Title>
+          <Dialog.Title>{t('highlights.dialogTitle')}</Dialog.Title>
           <Dialog.Description size="2" color="gray">
-            {chosen.length} 段 · 約 {Math.round(selectedSeconds)} 秒
+            {t('highlights.summary', { n: chosen.length, seconds: Math.round(selectedSeconds) })}
           </Dialog.Description>
           <Grid columns={{ initial: '1', sm: '260px 260px minmax(0, 1fr)' }} gap="5" mt="4" align="start">
             <Flex direction="column" gap="3">
@@ -144,24 +148,25 @@ export function HighlightsTab({ meta, parsed, status, rendering, onRendered }: {
                 <Text as="label" size="2">
                   <Flex gap="2" align="center">
                     <Switch size="1" checked={opts.merge} onCheckedChange={(v) => setOpts({ ...opts, merge: v })} />
-                    合併成一支影片
+                    {t('highlights.merge')}
                   </Flex>
                 </Text>
               )}
               <Box>
                 <Text as="div" size="1" color="gray" mb="1">
-                  檔案大小上限{chosen.length > 1 && (opts.merge ? '（合併後）' : '（每段各自）')}
+                  {t('highlights.sizeLimit')}
+                  {chosen.length > 1 && (opts.merge ? t('highlights.sizeMerged') : t('highlights.sizeEach'))}
                 </Text>
                 <SegmentedControl.Root size="1" value={String(opts.maxSizeMb)} onValueChange={(v) => setOpts({ ...opts, maxSizeMb: v === 'null' ? null : Number(v) })} style={{ width: '100%' }}>
                   <SegmentedControl.Item value="10">10 MB</SegmentedControl.Item>
                   <SegmentedControl.Item value="20">20 MB</SegmentedControl.Item>
                   <SegmentedControl.Item value="50">50 MB</SegmentedControl.Item>
-                  <SegmentedControl.Item value="null">不限</SegmentedControl.Item>
+                  <SegmentedControl.Item value="null">{t('highlights.unlimited')}</SegmentedControl.Item>
                 </SegmentedControl.Root>
               </Box>
               <Box>
                 <Text as="div" size="1" color="gray" mb="1">
-                  解析度
+                  {t('common.resolution')}
                 </Text>
                 <SegmentedControl.Root
                   size="1"
@@ -190,7 +195,7 @@ export function HighlightsTab({ meta, parsed, status, rendering, onRendered }: {
               </Box>
               <Box>
                 <Text as="div" size="1" color="gray" mb="1">
-                  編碼器
+                  {t('highlights.encoder')}
                 </Text>
                 <Select.Root value={opts.codec} onValueChange={(v) => setOpts({ ...opts, codec: v })} size="1">
                   <Select.Trigger style={{ width: '100%' }} />
@@ -205,21 +210,9 @@ export function HighlightsTab({ meta, parsed, status, rendering, onRendered }: {
             </Flex>
             <Flex direction="column" gap="3">
               <DataList.Root size="1">
-                {(
-                  [
-                    ['hud', '基本介面（血量、彈藥、比分）'],
-                    ['crosshair', '準星'],
-                    ['radar', '雷達'],
-                    ['killFeed', '擊殺訊息'],
-                    ['chat', '聊天'],
-                    ['viewmodel', '手持武器'],
-                    ['tracers', '曳光彈'],
-                    ['xray', 'X-ray'],
-                    ['trueView', 'TrueView（以 client 端畫面為準）'],
-                  ] as const
-                ).map(([key, label]) => (
+                {HUD_TOGGLES.map((key) => (
                   <DataList.Item key={key} align="center">
-                    <DataList.Label>{label}</DataList.Label>
+                    <DataList.Label>{t(`highlights.toggle.${key}`)}</DataList.Label>
                     <DataList.Value>
                       <Switch size="1" checked={opts[key]} disabled={key === 'crosshair' && !opts.hud} onCheckedChange={(v) => setOpts({ ...opts, [key]: v })} />
                     </DataList.Value>
@@ -228,26 +221,26 @@ export function HighlightsTab({ meta, parsed, status, rendering, onRendered }: {
               </DataList.Root>
               <Box>
                 <Text as="div" size="1" color="gray" mb="1">
-                  介面大小 {opts.hudScale.toFixed(2)}
+                  {t('highlights.hudScale', { n: opts.hudScale.toFixed(2) })}
                 </Text>
                 <Slider min={0.5} max={0.95} step={0.05} value={[opts.hudScale]} onValueChange={([v]) => setOpts({ ...opts, hudScale: v ?? 0.85 })} />
               </Box>
             </Flex>
             <Box>
               <Text as="div" size="1" color="gray" mb="1">
-                片段
+                {t('highlights.clips')}
               </Text>
               <Box style={{ maxHeight: 340, overflow: 'auto', border: '1px solid var(--gray-a5)', borderRadius: 'var(--radius-2)' }}>
                 <Table.Root className="nowrap-headers" size="1">
                   <Table.Header>
                     <Table.Row>
                       <Table.ColumnHeaderCell align="right" width="48px">
-                        回合
+                        {t('highlights.col.round')}
                       </Table.ColumnHeaderCell>
-                      <Table.ColumnHeaderCell>玩家</Table.ColumnHeaderCell>
-                      <Table.ColumnHeaderCell>內容</Table.ColumnHeaderCell>
+                      <Table.ColumnHeaderCell>{t('highlights.col.player')}</Table.ColumnHeaderCell>
+                      <Table.ColumnHeaderCell>{t('highlights.col.what')}</Table.ColumnHeaderCell>
                       <Table.ColumnHeaderCell align="right" width="48px">
-                        長度
+                        {t('highlights.col.length')}
                       </Table.ColumnHeaderCell>
                     </Table.Row>
                   </Table.Header>
@@ -273,21 +266,21 @@ export function HighlightsTab({ meta, parsed, status, rendering, onRendered }: {
           </Grid>
           {status && !status.ok && (
             <Callout.Root color="red" size="1" mt="4">
-              <Callout.Text>渲染環境未就緒，請先到設定完成工具下載。</Callout.Text>
+              <Callout.Text>{t('highlights.notReady')}</Callout.Text>
             </Callout.Root>
           )}
           <Flex justify="between" align="center" mt="4" gap="3">
             <Text size="1" color="gray">
-              錄影時 CS2 會在背景隱藏執行，請不要手動結束它。
+              {t('highlights.hiddenGame')}
             </Text>
             <Flex gap="3">
               <Dialog.Close>
                 <Button variant="soft" color="gray">
-                  取消
+                  {t('common.cancel')}
                 </Button>
               </Dialog.Close>
               <Button disabled={submitting || !status?.ok} onClick={() => void render()}>
-                {submitting ? '送出中…' : '輸出'}
+                {submitting ? t('highlights.submitting') : t('highlights.export')}
               </Button>
             </Flex>
           </Flex>

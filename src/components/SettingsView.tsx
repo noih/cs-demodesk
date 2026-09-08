@@ -1,15 +1,18 @@
 import { useCallback, useEffect, useState } from 'react';
-import { AlertDialog, Badge, Box, Button, Callout, Card, DataList, Dialog, Flex, Grid, Heading, IconButton, Switch, Text, TextField, Tooltip } from '@radix-ui/themes';
+import { AlertDialog, Badge, Box, Button, Callout, Card, DataList, Dialog, Flex, Grid, Heading, IconButton, Select, Switch, Text, TextField, Tooltip } from '@radix-ui/themes';
 import { CheckCircledIcon, Cross2Icon, CrossCircledIcon, ExclamationTriangleIcon, ExternalLinkIcon, OpenInNewWindowIcon, PlusIcon } from '@radix-ui/react-icons';
 import { open } from '@tauri-apps/plugin-dialog';
+import { useTranslation } from 'react-i18next';
 import { api, errorText, mb, type Settings, type SettingsResponse } from '../api.ts';
 import { AboutDialog } from './AboutDialog.tsx';
 import { LogView } from './LogView.tsx';
+import i18n, { applyLanguage, LANGUAGE_NAMES, LANGUAGES } from '../i18n/index.ts';
 
 type PickOptions = { directory?: boolean; filters?: Array<{ name: string; extensions: string[] }> };
 
 /** Text field + browse button; empty means "use the auto-detected value" (shown as placeholder). */
 function PathField({ label, value, placeholder, hint, onChange, pick }: { label: string; value: string; placeholder?: string; hint?: string; onChange: (v: string) => void; pick: PickOptions }) {
+  const { t } = useTranslation();
   const browse = async () => {
     const picked = await open({ multiple: false, directory: pick.directory ?? false, filters: pick.filters });
     if (typeof picked === 'string') onChange(picked);
@@ -22,25 +25,25 @@ function PathField({ label, value, placeholder, hint, onChange, pick }: { label:
         </Text>
         {value ? (
           <Badge size="1" color="amber" variant="soft">
-            手動指定
+            {t('settings.manual')}
           </Badge>
         ) : (
           <Badge size="1" color="gray" variant="soft">
-            {placeholder ? '自動偵測' : '未設定'}
+            {placeholder ? t('settings.autoDetected') : t('settings.notSet')}
           </Badge>
         )}
       </Flex>
-      <TextField.Root value={value} placeholder={placeholder ?? '（未偵測到，請手動指定）'} onChange={(e) => onChange(e.target.value)} className="mono">
+      <TextField.Root value={value} placeholder={placeholder ?? t('settings.notDetected')} onChange={(e) => onChange(e.target.value)} className="mono">
         <TextField.Slot side="right" pr="1">
           {value && (
-            <Tooltip content="清除，改回自動偵測">
-              <IconButton size="1" variant="ghost" color="gray" onClick={() => onChange('')} aria-label="清除">
+            <Tooltip content={t('settings.clearToAuto')}>
+              <IconButton size="1" variant="ghost" color="gray" onClick={() => onChange('')} aria-label={t('settings.clear')}>
                 <Cross2Icon />
               </IconButton>
             </Tooltip>
           )}
           <Button size="1" variant="soft" onClick={() => void browse()}>
-            瀏覽…
+            {t('settings.browse')}
           </Button>
         </TextField.Slot>
       </TextField.Root>
@@ -53,8 +56,9 @@ function PathField({ label, value, placeholder, hint, onChange, pick }: { label:
   );
 }
 
-/** One line of the 資料存放 card: name, path, size and a confirmed "清空". */
-function StorageRow({ label, path, bytes, confirm, onClear }: { label: string; path: string; bytes: number; confirm: string; onClear: () => Promise<void> }) {
+/** One line of the storage card: name, path, size and a confirmed "empty". */
+function StorageRow({ label, what, path, bytes, confirm, onClear }: { label: string; what: string; path: string; bytes: number; confirm: string; onClear: () => Promise<void> }) {
+  const { t } = useTranslation();
   // one line: label + size | path | open | clear — so the button lines up with the path
   return (
     <Flex align="center" gap="3">
@@ -64,27 +68,27 @@ function StorageRow({ label, path, bytes, confirm, onClear }: { label: string; p
       <Text size="1" color="gray" className="mono selectable" truncate title={path} style={{ flex: 1, minWidth: 0 }}>
         {path}
       </Text>
-      <IconButton size="1" variant="ghost" color="gray" aria-label="以檔案總管開啟" onClick={() => void api.open(path)}>
+      <IconButton size="1" variant="ghost" color="gray" aria-label={t('common.openInExplorer')} onClick={() => void api.open(path)}>
         <OpenInNewWindowIcon />
       </IconButton>
       <AlertDialog.Root>
         <AlertDialog.Trigger>
           <Button size="1" variant="soft" color="red" disabled={bytes === 0}>
-            清空
+            {t('settings.empty')}
           </Button>
         </AlertDialog.Trigger>
         <AlertDialog.Content maxWidth="420px">
-          <AlertDialog.Title>清空{label}？</AlertDialog.Title>
+          <AlertDialog.Title>{t('settings.emptyTitle', { what })}</AlertDialog.Title>
           <AlertDialog.Description size="2">{confirm}</AlertDialog.Description>
           <Flex gap="3" mt="4" justify="end">
             <AlertDialog.Cancel>
               <Button variant="soft" color="gray">
-                取消
+                {t('common.cancel')}
               </Button>
             </AlertDialog.Cancel>
             <AlertDialog.Action>
               <Button color="red" onClick={() => void onClear()}>
-                清空
+                {t('settings.empty')}
               </Button>
             </AlertDialog.Action>
           </Flex>
@@ -97,11 +101,12 @@ function StorageRow({ label, path, bytes, confirm, onClear }: { label: string; p
 /** Where a downloaded tool comes from; shown as a link icon after its name. */
 const SOURCES = {
   hlae: { repo: 'advancedfx/advancedfx', url: 'https://github.com/advancedfx/advancedfx/releases' },
-  ffmpeg: { repo: 'BtbN/FFmpeg-Builds（win64 gpl）', url: 'https://github.com/BtbN/FFmpeg-Builds/releases' },
+  ffmpeg: { repo: 'BtbN/FFmpeg-Builds (win64 gpl)', url: 'https://github.com/BtbN/FFmpeg-Builds/releases' },
   vrf: { repo: 'ValveResourceFormat/ValveResourceFormat', url: 'https://github.com/ValveResourceFormat/ValveResourceFormat/releases' },
 };
 
 function CheckRow({ label, value, ok, extra, source }: { label: string; value?: string | number; ok?: boolean; extra?: string; source?: { repo: string; url: string } }) {
+  const { t } = useTranslation();
   return (
     <DataList.Item>
       <DataList.Label minWidth="96px">
@@ -109,8 +114,8 @@ function CheckRow({ label, value, ok, extra, source }: { label: string; value?: 
           {ok === undefined ? null : ok ? <CheckCircledIcon color="var(--green-9)" /> : <CrossCircledIcon color="var(--red-9)" />}
           {label}
           {source && (
-            <Tooltip content={`下載來源：GitHub ${source.repo}`}>
-              <IconButton size="1" variant="ghost" color="gray" aria-label="下載來源" ml="2" onClick={() => void api.openUrl(source.url)}>
+            <Tooltip content={t('settings.source', { repo: source.repo })}>
+              <IconButton size="1" variant="ghost" color="gray" aria-label={t('settings.sourceLabel')} ml="2" onClick={() => void api.openUrl(source.url)}>
                 <ExternalLinkIcon />
               </IconButton>
             </Tooltip>
@@ -119,7 +124,7 @@ function CheckRow({ label, value, ok, extra, source }: { label: string; value?: 
       </DataList.Label>
       <DataList.Value>
         <Text className="mono selectable" color={ok === false ? 'red' : undefined} style={{ wordBreak: 'break-all' }}>
-          {value ?? '（找不到）'}
+          {value ?? t('settings.notFound')}
           {extra && (
             <Text color="gray" className="mono">
               {' '}
@@ -133,8 +138,9 @@ function CheckRow({ label, value, ok, extra, source }: { label: string; value?: 
 }
 
 export function SettingsView({ onChanged }: { onChanged: () => Promise<void> }) {
+  const { t } = useTranslation();
   const [data, setData] = useState<SettingsResponse>();
-  const [form, setForm] = useState<Settings>({ cs2Dir: null, replayFolders: [], scanGameReplays: true, hlaeExe: null, ffmpegExe: null, toolsDir: null });
+  const [form, setForm] = useState<Settings>({ language: null, cs2Dir: null, replayFolders: [], scanGameReplays: true, hlaeExe: null, ffmpegExe: null, toolsDir: null });
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ ok: boolean; text: string }>();
   const [setupLog, setSetupLog] = useState<string[]>([]);
@@ -156,7 +162,7 @@ export function SettingsView({ onChanged }: { onChanged: () => Promise<void> }) 
         if (ev.type === 'setup-log') setSetupLog((l) => [...l, ev.line].slice(-300));
         if (ev.type === 'setup-finished') {
           void load();
-          setMessage(ev.ok ? { ok: true, text: '工具下載完成。' } : { ok: false, text: `下載失敗：${ev.error ?? '未知錯誤'}` });
+          setMessage(ev.ok ? { ok: true, text: i18n.t('settings.downloadDone') } : { ok: false, text: i18n.t('settings.downloadFailed', { error: ev.error ?? i18n.t('settings.unknownError') }) });
         }
       })
       .then((u) => (unlisten = u));
@@ -170,7 +176,8 @@ export function SettingsView({ onChanged }: { onChanged: () => Promise<void> }) 
       const r = await api.saveSettings(form);
       setData(r);
       setForm(r.settings);
-      setMessage({ ok: true, text: '已儲存。' });
+      applyLanguage(r.settings.language);
+      setMessage({ ok: true, text: t('settings.saved') });
       await onChanged();
     } catch (e) {
       setMessage({ ok: false, text: errorText(e) });
@@ -183,7 +190,7 @@ export function SettingsView({ onChanged }: { onChanged: () => Promise<void> }) 
     setMessage(undefined);
     try {
       const r = await load();
-      setMessage(r.doctor.ok ? { ok: true, text: '渲染環境就緒。' } : { ok: false, text: `尚未就緒：${r.doctor.problems.join('；')}` });
+      setMessage(r.doctor.ok ? { ok: true, text: t('settings.envReady') } : { ok: false, text: t('settings.envNotReady', { problems: r.doctor.problems.join('; ') }) });
       await onChanged();
     } catch (e) {
       setMessage({ ok: false, text: errorText(e) });
@@ -192,7 +199,7 @@ export function SettingsView({ onChanged }: { onChanged: () => Promise<void> }) 
   const clear = (what: string, fn: () => Promise<number>) => async () => {
     try {
       const freed = await fn();
-      setMessage({ ok: true, text: `已清空${what}（${mb(freed)}）。` });
+      setMessage({ ok: true, text: t('settings.cleared', { what, size: mb(freed) }) });
       await load();
       await onChanged();
     } catch (e) {
@@ -212,7 +219,7 @@ export function SettingsView({ onChanged }: { onChanged: () => Promise<void> }) 
     }
   };
 
-  if (!data) return <Text color="gray">載入設定…</Text>;
+  if (!data) return <Text color="gray">{t('settings.loading')}</Text>;
   const d = data.doctor;
   const set = (patch: Partial<Settings>) => setForm({ ...form, ...patch });
   const dirty = JSON.stringify(form) !== JSON.stringify(data.settings);
@@ -223,15 +230,15 @@ export function SettingsView({ onChanged }: { onChanged: () => Promise<void> }) 
     <Flex direction="column" gap="4">
       <Flex justify="between" align="center" gap="3" wrap="wrap">
         <Box>
-          <Heading size="6">設定</Heading>
+          <Heading size="6">{t('settings.title')}</Heading>
           <Text size="2" color="gray">
-            留空即自動偵測。
+            {t('settings.hint')}
           </Text>
         </Box>
         <Flex gap="2" align="center">
           <AboutDialog />
           <Button onClick={() => void save()} disabled={saving || !dirty}>
-            {saving ? '儲存中…' : '儲存'}
+            {saving ? t('settings.saving') : t('common.save')}
           </Button>
         </Flex>
       </Flex>
@@ -247,18 +254,37 @@ export function SettingsView({ onChanged }: { onChanged: () => Promise<void> }) 
         {/* ---- left column: game & demos, output ---- */}
         <Flex direction="column" gap="4">
           <Card>
+            <Flex justify="between" align="center" gap="3">
+              <Text size="2" weight="medium">
+                {t('settings.language')}
+              </Text>
+              <Select.Root value={form.language ?? 'auto'} onValueChange={(v) => set({ language: v === 'auto' ? null : v })}>
+                <Select.Trigger style={{ minWidth: 160 }} />
+                <Select.Content>
+                  <Select.Item value="auto">{t('settings.languageAuto')}</Select.Item>
+                  {LANGUAGES.map((l) => (
+                    <Select.Item key={l} value={l}>
+                      {LANGUAGE_NAMES[l]}
+                    </Select.Item>
+                  ))}
+                </Select.Content>
+              </Select.Root>
+            </Flex>
+          </Card>
+
+          <Card>
             <Heading size="3" mb="3">
-              遊戲與 demo
+              {t('settings.gameSection')}
             </Heading>
             <Flex direction="column" gap="3">
-              <PathField label="CS2 安裝目錄" value={form.cs2Dir ?? ''} placeholder={data.detected.cs2Dir} onChange={(v) => set({ cs2Dir: v || null })} pick={{ directory: true }} />
+              <PathField label={t('settings.cs2Dir')} value={form.cs2Dir ?? ''} placeholder={data.detected.cs2Dir} onChange={(v) => set({ cs2Dir: v || null })} pick={{ directory: true }} />
               <Flex justify="between" align="center" gap="3">
                 <Box style={{ minWidth: 0 }}>
                   <Text as="div" size="2" weight="medium">
-                    掃描遊戲的 replays 目錄
+                    {t('settings.scanGameReplays')}
                   </Text>
                   <Text as="div" size="1" color="gray" truncate className="mono" title={gameReplays}>
-                    {gameReplays ?? '（找不到 CS2，無法推算）'}
+                    {gameReplays ?? t('settings.noCs2')}
                   </Text>
                 </Box>
                 <Switch checked={form.scanGameReplays} onCheckedChange={(v) => set({ scanGameReplays: v })} />
@@ -266,7 +292,7 @@ export function SettingsView({ onChanged }: { onChanged: () => Promise<void> }) 
               <Box>
                 <Flex justify="between" align="center" mb="1">
                   <Text size="2" weight="medium">
-                    額外的 demo 目錄
+                    {t('settings.extraFolders')}
                   </Text>
                   <Button
                     size="1"
@@ -277,12 +303,12 @@ export function SettingsView({ onChanged }: { onChanged: () => Promise<void> }) 
                       })
                     }
                   >
-                    <PlusIcon /> 加入目錄
+                    <PlusIcon /> {t('settings.addFolder')}
                   </Button>
                 </Flex>
                 {folders.length === 0 ? (
                   <Text size="1" color="gray">
-                    無
+                    {t('common.none')}
                   </Text>
                 ) : (
                   <Flex direction="column" gap="1">
@@ -291,7 +317,7 @@ export function SettingsView({ onChanged }: { onChanged: () => Promise<void> }) 
                         <Text size="2" className="mono selectable" truncate style={{ flex: 1 }} title={f}>
                           {f}
                         </Text>
-                        <IconButton size="1" variant="ghost" color="gray" aria-label="移除" onClick={() => set({ replayFolders: folders.filter((x) => x !== f) })}>
+                        <IconButton size="1" variant="ghost" color="gray" aria-label={t('settings.removeFolder')} onClick={() => set({ replayFolders: folders.filter((x) => x !== f) })}>
                           <Cross2Icon />
                         </IconButton>
                       </Flex>
@@ -304,12 +330,12 @@ export function SettingsView({ onChanged }: { onChanged: () => Promise<void> }) 
 
           <Card>
             <Heading size="3" mb="3">
-              資料存放
+              {t('settings.storageSection')}
             </Heading>
             <Flex direction="column" gap="3">
-              <StorageRow label="解析目錄" path={`${data.dataDir}\\parsed`} bytes={data.parsedBytes} confirm="所有 demo 會回到「尚未解析」；demo 檔與影片不受影響。" onClear={clear('解析資料', api.clearAllAnalysis)} />
-              <StorageRow label="影片目錄" path={`${data.dataDir}\\clips`} bytes={data.clipsBytes} confirm="會刪掉所有輸出過的影片與紀錄；demo 檔與解析資料不受影響。" onClear={clear('影片', api.clearAllClips)} />
-              <StorageRow label="雷達圖目錄" path={`${data.dataDir}\\radar`} bytes={data.radarBytes} confirm="下次開 2D 回放時會再從遊戲檔案抽出。" onClear={clear('雷達圖', api.clearRadar)} />
+              <StorageRow label={t('settings.parsedDir')} what={t('settings.clearParsedWhat')} path={`${data.dataDir}\\parsed`} bytes={data.parsedBytes} confirm={t('settings.clearParsedConfirm')} onClear={clear(t('settings.clearParsedWhat'), api.clearAllAnalysis)} />
+              <StorageRow label={t('settings.clipsDir')} what={t('settings.clearClipsWhat')} path={`${data.dataDir}\\clips`} bytes={data.clipsBytes} confirm={t('settings.clearClipsConfirm')} onClear={clear(t('settings.clearClipsWhat'), api.clearAllClips)} />
+              <StorageRow label={t('settings.radarDir')} what={t('settings.clearRadarWhat')} path={`${data.dataDir}\\radar`} bytes={data.radarBytes} confirm={t('settings.clearRadarConfirm')} onClear={clear(t('settings.clearRadarWhat'), api.clearRadar)} />
             </Flex>
           </Card>
         </Flex>
@@ -318,18 +344,18 @@ export function SettingsView({ onChanged }: { onChanged: () => Promise<void> }) 
         <Flex direction="column" gap="4">
           <Card>
             <Flex justify="between" align="center" mb="3" gap="2">
-              <Heading size="3">渲染工具</Heading>
+              <Heading size="3">{t('settings.toolsSection')}</Heading>
               <Badge color={d.ok ? 'green' : 'red'} size="2">
-                {d.ok ? '就緒' : '未就緒'}
+                {d.ok ? t('settings.ready') : t('settings.notReady')}
               </Badge>
             </Flex>
             <Flex direction="column" gap="3">
               <PathField label="HLAE.exe" value={form.hlaeExe ?? ''} placeholder={d.paths.hlaeExe} onChange={(v) => set({ hlaeExe: v || null })} pick={{ filters: [{ name: 'HLAE', extensions: ['exe'] }] }} />
               <PathField label="ffmpeg.exe" value={form.ffmpegExe ?? ''} placeholder={d.paths.ffmpegExe} onChange={(v) => set({ ffmpegExe: v || null })} pick={{ filters: [{ name: 'ffmpeg', extensions: ['exe'] }] }} />
-              <PathField label="工具下載位置" value={form.toolsDir ?? ''} placeholder={d.paths.toolsDir} onChange={(v) => set({ toolsDir: v || null })} pick={{ directory: true }} />
+              <PathField label={t('settings.toolsDir')} value={form.toolsDir ?? ''} placeholder={d.paths.toolsDir} onChange={(v) => set({ toolsDir: v || null })} pick={{ directory: true }} />
               <Flex gap="2" wrap="wrap" align="center">
                 <Button variant="soft" onClick={() => (data.setup.running ? setLogOpen(true) : void runSetup())}>
-                  {data.setup.running ? '下載中…（看進度）' : '下載工具（HLAE / FFmpeg / Source 2 Viewer）'}
+                  {data.setup.running ? t('settings.downloading') : t('settings.downloadTools')}
                 </Button>
               </Flex>
             </Flex>
@@ -337,9 +363,9 @@ export function SettingsView({ onChanged }: { onChanged: () => Promise<void> }) 
 
           <Card>
             <Flex justify="between" align="center" mb="3">
-              <Heading size="3">檢查結果</Heading>
+              <Heading size="3">{t('settings.checkSection')}</Heading>
               <Button size="1" variant="soft" color="gray" onClick={() => void check()}>
-                重新檢查
+                {t('settings.recheck')}
               </Button>
             </Flex>
             <DataList.Root size="1">
@@ -369,14 +395,14 @@ export function SettingsView({ onChanged }: { onChanged: () => Promise<void> }) 
 
       <Dialog.Root open={logOpen} onOpenChange={setLogOpen}>
         <Dialog.Content maxWidth="900px">
-          <Dialog.Title>工具下載 log</Dialog.Title>
+          <Dialog.Title>{t('settings.setupLogTitle')}</Dialog.Title>
           <Dialog.Description size="2" color="gray">
-            {data.setup.running ? '下載進行中…' : '已結束'}
+            {data.setup.running ? t('settings.setupRunning') : t('settings.setupFinished')}
           </Dialog.Description>
-          <LogView lines={setupLog} empty="（等待輸出…）" />
+          <LogView lines={setupLog} empty={t('settings.setupLogEmpty')} />
           <Flex justify="end" mt="3">
             <Dialog.Close>
-              <Button variant="soft">關閉</Button>
+              <Button variant="soft">{t('common.close')}</Button>
             </Dialog.Close>
           </Flex>
         </Dialog.Content>
