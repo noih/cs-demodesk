@@ -45,12 +45,12 @@ export function AboutDialog() {
           {t('about.tagline')}
         </Dialog.Description>
 
-        <Flex align="center" gap="2" mt="4">
+        <Flex align="center" gap="2" mt="4" wrap="wrap">
           <Text size="2">{t('about.author')}</Text>
           <Text size="2" color="gray" className="mono">
-            github.com/noih
+            github.com/noih/cs-demodesk
           </Text>
-          <LinkIcon url="https://github.com/noih" label={t('about.openGithub')} />
+          <LinkIcon url="https://github.com/noih/cs-demodesk" label={t('about.openGithub')} />
           <Text size="2" color="gray">
             · AGPL-3.0
           </Text>
