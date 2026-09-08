@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { AlertDialog, Badge, Box, Button, Callout, Card, DataList, Dialog, DropdownMenu, Flex, Grid, Heading, IconButton, Link, Progress, Spinner, Text } from '@radix-ui/themes';
 import { DotsHorizontalIcon, ExternalLinkIcon, FileTextIcon, OpenInNewWindowIcon } from '@radix-ui/react-icons';
 import { useTranslation } from 'react-i18next';
@@ -20,9 +20,9 @@ function progressOf(job: RenderJob): number | undefined {
   return total > 0 ? Math.min(1, cur / total) : undefined;
 }
 
-function duration(job: RenderJob, t: TFunction): string | undefined {
+function duration(job: RenderJob, t: TFunction, now: number): string | undefined {
   if (!job.startedAt) return undefined;
-  const end = job.finishedAt ? new Date(job.finishedAt) : new Date();
+  const end = job.finishedAt ? new Date(job.finishedAt) : new Date(now);
   const sec = Math.max(0, Math.round((end.getTime() - new Date(job.startedAt).getTime()) / 1000));
   return sec < 60 ? t('common.seconds', { n: sec }) : t('common.minutesSeconds', { m: Math.floor(sec / 60), s: sec % 60 });
 }
@@ -34,6 +34,12 @@ function JobCard({ job, parsed, onChanged }: { job: RenderJob; parsed: ParsedDem
   const titleOf = (id?: string) => parsed.highlights.find((h) => h.id === id)?.title;
   const act = (fn: () => Promise<unknown>) => () => void fn().then(onChanged).catch((e) => alert(errorText(e)));
   const active = job.status === 'queued' || job.status === 'running';
+  const [now, setNow] = useState(Date.now);
+  useEffect(() => {
+    if (job.status !== 'running' || job.finishedAt) return;
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [job.status, job.finishedAt]);
   const pct = progressOf(job);
   const total = job.outputs.reduce((s, o) => s + o.bytes, 0);
   const revealTarget = job.outputs[0]?.file;
@@ -97,7 +103,7 @@ function JobCard({ job, parsed, onChanged }: { job: RenderJob; parsed: ParsedDem
               )}
             </Flex>
             <Text size="1" color="gray">
-              {duration(job, t)}
+              {duration(job, t, now)}
             </Text>
           </Flex>
           {pct !== undefined && <Progress value={Math.round(pct * 100)} color="amber" />}
@@ -143,7 +149,7 @@ function JobCard({ job, parsed, onChanged }: { job: RenderJob; parsed: ParsedDem
             </DataList.Item>
             <DataList.Item>
               <DataList.Label minWidth="0" style={{ flexBasis: 90 }}>{t('renders.elapsed')}</DataList.Label>
-              <DataList.Value>{duration(job, t) ?? '—'}</DataList.Value>
+              <DataList.Value>{duration(job, t, now) ?? '—'}</DataList.Value>
             </DataList.Item>
             <DataList.Item>
               <DataList.Label minWidth="0" style={{ flexBasis: 90 }}>{t('common.resolution')}</DataList.Label>
