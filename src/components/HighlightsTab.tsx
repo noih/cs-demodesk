@@ -17,7 +17,7 @@ function summaryOf(h: Highlight): string {
   return h.title.replace(`${h.player.name} — `, '').replace(/ · R\d+$/, '');
 }
 
-export function HighlightsTab({ meta, parsed, status, rendering, onRendered }: { meta: DemoMeta; parsed: ParsedDemo; status?: Status; rendering: boolean; onRendered: () => void }) {
+export function HighlightsTab({ meta, parsed, status, onRendered }: { meta: DemoMeta; parsed: ParsedDemo; status?: Status; onRendered: () => void }) {
   const { t } = useTranslation();
   const [playerFilter, setPlayerFilter] = useState<string>('all');
   const [minScore, setMinScore] = useState(3);
@@ -39,6 +39,7 @@ export function HighlightsTab({ meta, parsed, status, rendering, onRendered }: {
   const selectedSeconds = chosen.reduce((s, h) => s + (h.endTick - h.startTick) / tr, 0);
 
   const render = async () => {
+    if (submitting) return;
     setSubmitting(true);
     try {
       await api.render(meta.id, [...selected], opts);
@@ -79,8 +80,8 @@ export function HighlightsTab({ meta, parsed, status, rendering, onRendered }: {
         <Button variant="soft" size="2" onClick={() => setSelected(new Set(allVisibleSelected ? [] : visible.map((h) => h.id)))}>
           {allVisibleSelected ? t('highlights.deselectAll') : t('highlights.selectAll')}
         </Button>
-        <Button size="2" disabled={selected.size === 0 || rendering} onClick={() => setDialog(true)}>
-          <VideoIcon /> {rendering ? t('highlights.exporting') : selected.size ? t('highlights.exportN', { n: selected.size }) : t('highlights.export')}
+        <Button size="2" disabled={selected.size === 0 || submitting} onClick={() => setDialog(true)}>
+          <VideoIcon /> {selected.size ? t('highlights.exportN', { n: selected.size }) : t('highlights.export')}
         </Button>
       </Flex>
 

@@ -609,15 +609,21 @@ impl Engine {
         let engine = self.clone();
         let spawned = std::thread::Builder::new().name("render-worker".into()).spawn(move || {
             loop {
-                let next = engine.render_queue.lock().unwrap().pop_front();
-                let Some(id) = next else { break };
+                let id = {
+                    let mut queue = engine.render_queue.lock().unwrap();
+                    let Some(id) = queue.pop_front() else {
+                        // Enqueue cannot observe an empty queue with a worker still marked busy.
+                        engine.render_worker_running.store(false, Ordering::SeqCst);
+                        return;
+                    };
+                    id
+                };
                 if let Some(job) = engine.store.get_job(&id) {
                     if job.status == JobStatus::Queued {
                         engine.run_job(job);
                     }
                 }
             }
-            engine.render_worker_running.store(false, Ordering::SeqCst);
         });
         if let Err(e) = spawned {
             eprintln!("could not start the render worker: {e}");

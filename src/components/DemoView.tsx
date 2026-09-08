@@ -150,7 +150,7 @@ export function DemoView({ meta, jobs, status, onChanged, onRemoved }: { meta: D
           </Tabs.List>
           <Box className="tab-body">
             <Tabs.Content value="highlights">
-              <HighlightsTab meta={meta} parsed={parsed} status={status} rendering={activeJobs > 0} onRendered={() => setTab('renders')} />
+              <HighlightsTab meta={meta} parsed={parsed} status={status} onRendered={() => setTab('renders')} />
             </Tabs.Content>
             <Tabs.Content value="players">
               <PlayersTab parsed={parsed} />
