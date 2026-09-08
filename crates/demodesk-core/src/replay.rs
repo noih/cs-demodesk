@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 /// Bump when the layout below changes; older files are rebuilt.
-pub const REPLAY_SCHEMA_VERSION: u32 = 2;
+pub const REPLAY_SCHEMA_VERSION: u32 = 3;
 /// Ticks between frames: 64 tick / 4 = 16 frames per second, interpolated in the UI.
 pub const STEP: i32 = 4;
 
@@ -27,8 +27,9 @@ pub const FLAG_SCOPED: i32 = 32;
 pub const FLAG_DUCKING: i32 = 64;
 /// shift-walking (silent footsteps)
 pub const FLAG_WALKING: i32 = 128;
+pub const FLAG_DEFUSING: i32 = 256;
 
-const PLAYER_PROPS: &[&str] = &["X", "Y", "Z", "yaw", "health", "armor_value", "is_alive", "has_helmet", "has_defuser", "flash_duration", "active_weapon_name", "is_scoped", "ducking", "is_walking", "balance", "inventory"];
+const PLAYER_PROPS: &[&str] = &["X", "Y", "Z", "yaw", "health", "armor_value", "is_alive", "has_helmet", "has_defuser", "flash_duration", "active_weapon_name", "is_scoped", "ducking", "is_walking", "is_defusing", "balance", "inventory"];
 const EVENTS: &[&str] = &[
     "weapon_fire",
     "smokegrenade_detonate",
@@ -221,6 +222,7 @@ fn player_frames(parser: &DemoParser, bytes: &[u8], wanted: Vec<i32>, players: &
             (row.flag("is_scoped"), FLAG_SCOPED),
             (row.flag("ducking"), FLAG_DUCKING),
             (row.flag("is_walking"), FLAG_WALKING),
+            (row.flag("is_defusing"), FLAG_DEFUSING),
         ];
         let flags = bits.iter().filter(|(on, _)| *on).fold(0, |acc, (_, bit)| acc | bit);
         let weapon = row.str("active_weapon_name").map(|w| weapons.get(w)).unwrap_or(0);

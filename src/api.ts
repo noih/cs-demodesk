@@ -137,7 +137,7 @@ export interface ReplayData {
   frames: ReplayFrame[];
   events: ReplayEvent[];
 }
-export const FLAG = { alive: 1, helmet: 2, defuser: 4, blind: 8, bomb: 16, scoped: 32, ducking: 64, walking: 128 } as const;
+export const FLAG = { alive: 1, helmet: 2, defuser: 4, blind: 8, bomb: 16, scoped: 32, ducking: 64, walking: 128, defusing: 256 } as const;
 export const GRENADE_KINDS = ['smoke', 'flash', 'he', 'molotov', 'decoy'] as const;
 
 export interface MapLayer {

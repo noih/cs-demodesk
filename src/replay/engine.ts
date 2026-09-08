@@ -73,7 +73,7 @@ export interface BombState {
   /** seconds left on the timer while planted */
   remaining?: number;
   /** defuse in progress: when it started and the seconds it needs (5 with kit, 10 without) */
-  defuse?: { since: number; needs: number; remaining: number };
+  defuse?: { pid: number; since: number; needs: number; remaining: number };
 }
 export interface TickState {
   tick: number;
@@ -277,7 +277,17 @@ export class Replay {
     const bomb = acc.bomb;
     if (bomb?.state === 'planted') {
       bomb.remaining = Math.max(0, SECONDS.bomb - (tick - bomb.since) / data.tickRate);
-      if (bomb.defuse) bomb.defuse.remaining = Math.max(0, bomb.defuse.needs - (tick - bomb.defuse.since) / data.tickRate);
+      if (bomb.defuse) {
+        const defuser = a.p.find((row) => row[0] === bomb.defuse!.pid);
+        // Some CS2 demos omit bomb_abortdefuse. The next player sample is
+        // authoritative; a sample preceding the start event cannot cancel it.
+        const flags = defuser?.[7] ?? 0;
+        if (a.t > bomb.defuse.since && (!(flags & FLAG.defusing) || !(flags & FLAG.alive))) {
+          bomb.defuse = undefined;
+        } else {
+          bomb.defuse.remaining = Math.max(0, bomb.defuse.needs - (tick - bomb.defuse.since) / data.tickRate);
+        }
+      }
     }
     const feed = this.kills.slice(Math.max(0, killIdx - 5), killIdx + 1).filter((kv) => kv.tick > tick - ticks.feed && kv.tick >= roundStart);
     return {
@@ -354,7 +364,7 @@ function applyEvent(e: ReplayEvent, tick: number, acc: EventAccumulator, ticks: 
       acc.bomb = { state: 'planted', x, y, z, since: e.t };
       break;
     case 'defuseStart':
-      if (acc.bomb) acc.bomb.defuse = { since: e.t, needs: e.kit ? 5 : 10, remaining: 0 };
+      if (acc.bomb?.state === 'planted') acc.bomb.defuse = { pid: e.p ?? -1, since: e.t, needs: e.kit ? 5 : 10, remaining: 0 };
       break;
     case 'defuseAbort':
       if (acc.bomb) acc.bomb.defuse = undefined;
