@@ -29,6 +29,11 @@ export function applyLanguage(setting: string | null | undefined) {
   void i18n.changeLanguage(isLanguage(setting) ? setting : detectLanguage());
 }
 
+// Keep <html lang> in step: CJK glyph/font selection and assistive tech follow it.
+i18n.on('languageChanged', (lng) => {
+  document.documentElement.lang = lng;
+});
+
 void i18n.use(initReactI18next).init({
   resources: { en: { translation: en }, 'zh-TW': { translation: zhTW }, 'zh-CN': { translation: zhCN }, ja: { translation: ja } },
   lng: detectLanguage(),

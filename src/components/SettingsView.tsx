@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useState } from 'react';
 import { AlertDialog, Badge, Box, Button, Callout, Card, DataList, Dialog, Flex, Grid, Heading, IconButton, Select, Switch, Text, TextField, Tooltip } from '@radix-ui/themes';
-import { CheckCircledIcon, Cross2Icon, CrossCircledIcon, ExclamationTriangleIcon, ExternalLinkIcon, OpenInNewWindowIcon, PlusIcon } from '@radix-ui/react-icons';
+import { CheckCircledIcon, Cross2Icon, CrossCircledIcon, ExclamationTriangleIcon, ExternalLinkIcon, InfoCircledIcon, OpenInNewWindowIcon, PlusIcon } from '@radix-ui/react-icons';
 import { open } from '@tauri-apps/plugin-dialog';
 import { useTranslation } from 'react-i18next';
 import { api, errorText, mb, type Settings, type SettingsResponse } from '../api.ts';
 import { AboutDialog } from './AboutDialog.tsx';
 import { LogView } from './LogView.tsx';
-import i18n, { applyLanguage, LANGUAGE_NAMES, LANGUAGES } from '../i18n/index.ts';
+import i18n, { applyLanguage, detectLanguage, LANGUAGE_NAMES, LANGUAGES } from '../i18n/index.ts';
 
 type PickOptions = { directory?: boolean; filters?: Array<{ name: string; extensions: string[] }> };
 
@@ -177,7 +177,8 @@ export function SettingsView({ onChanged }: { onChanged: () => Promise<void> }) 
       setData(r);
       setForm(r.settings);
       applyLanguage(r.settings.language);
-      setMessage({ ok: true, text: t('settings.saved') });
+      // t() is still bound to the old language here; say it in the one just saved
+      setMessage({ ok: true, text: t('settings.saved', { lng: r.settings.language ?? detectLanguage() }) });
       await onChanged();
     } catch (e) {
       setMessage({ ok: false, text: errorText(e) });
@@ -221,7 +222,10 @@ export function SettingsView({ onChanged }: { onChanged: () => Promise<void> }) 
 
   if (!data) return <Text color="gray">{t('settings.loading')}</Text>;
   const d = data.doctor;
-  const set = (patch: Partial<Settings>) => setForm({ ...form, ...patch });
+  const set = (patch: Partial<Settings>) => {
+    setForm({ ...form, ...patch });
+    setMessage(undefined);
+  };
   const dirty = JSON.stringify(form) !== JSON.stringify(data.settings);
   const folders = form.replayFolders.filter(Boolean);
   const gameReplays = data.detected.replaysDir ?? (form.cs2Dir ? `${form.cs2Dir}\\game\\csgo\\replays` : undefined);
@@ -242,6 +246,16 @@ export function SettingsView({ onChanged }: { onChanged: () => Promise<void> }) 
           </Button>
         </Flex>
       </Flex>
+
+      {dirty && (
+        <Callout.Root color="amber" size="1">
+          <Callout.Icon>
+            <InfoCircledIcon />
+          </Callout.Icon>
+          {/* in the language being picked, so the user can read it before saving */}
+          <Callout.Text>{t('settings.unsaved', { lng: form.language ?? detectLanguage() })}</Callout.Text>
+        </Callout.Root>
+      )}
 
       {message && (
         <Callout.Root color={message.ok ? 'green' : 'red'} size="1">

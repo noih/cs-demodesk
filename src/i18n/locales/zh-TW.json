@@ -270,6 +270,7 @@
     "hint": "留空即自動偵測。",
     "saving": "儲存中…",
     "saved": "已儲存。",
+    "unsaved": "設定儲存後才會生效。",
     "loading": "載入設定…",
     "manual": "手動指定",
     "autoDetected": "自動偵測",

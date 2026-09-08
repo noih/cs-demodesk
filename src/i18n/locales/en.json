@@ -274,6 +274,7 @@
     "hint": "Leave a field empty to auto-detect.",
     "saving": "Saving...",
     "saved": "Saved.",
+    "unsaved": "Changes take effect after saving.",
     "loading": "Loading settings...",
     "manual": "Manual",
     "autoDetected": "Auto-detected",
