@@ -23,6 +23,7 @@
     "kills": "킬",
     "damage": "데미지",
     "utilityDamage": "유틸리티 데미지",
+    "friendlyDamage": "아군 피해",
     "multiKills": "멀티킬",
     "clutch": "클러치",
     "headshotPct": "HS %",

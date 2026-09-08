@@ -23,6 +23,7 @@
     "kills": "Kills",
     "damage": "Damage",
     "utilityDamage": "Utility damage",
+    "friendlyDamage": "Friendly fire damage",
     "multiKills": "Multi-kills",
     "clutch": "Clutch",
     "headshotPct": "HS %",

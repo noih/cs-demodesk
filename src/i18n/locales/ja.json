@@ -23,6 +23,7 @@
     "kills": "キル",
     "damage": "ダメージ",
     "utilityDamage": "ユーティリティダメージ",
+    "friendlyDamage": "味方へのダメージ",
     "multiKills": "マルチキル",
     "clutch": "クラッチ",
     "headshotPct": "HS 率",

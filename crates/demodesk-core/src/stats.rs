@@ -32,6 +32,9 @@ pub struct PlayerStats {
     pub damage: u32,
     /// part of `damage` done with grenades / molotov
     pub utility_damage: u32,
+    /// Actual health damage to teammates; excluded from damage and ADR.
+    #[serde(default)]
+    pub friendly_damage: u32,
     /// average damage per round
     pub adr: f64,
     pub highlights: u32,
@@ -147,6 +150,7 @@ pub fn compute_stats(demo: &DemoData, highlights: &[Highlight]) -> Vec<PlayerSta
                 clutches_won: 0,
                 damage: demo.damage.get(&p.steamid).map(|d| d.total).unwrap_or(0),
                 utility_damage: demo.damage.get(&p.steamid).map(|d| d.utility).unwrap_or(0),
+                friendly_damage: demo.damage.get(&p.steamid).map(|d| d.friendly).unwrap_or(0),
                 adr: 0.0,
                 highlights: 0,
                 best_score: 0.0,

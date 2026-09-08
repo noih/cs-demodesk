@@ -103,7 +103,7 @@ impl DemoSummary {
 
 /// Bump when the parse output or the highlight rules change: every stored
 /// result then silently counts as "not parsed" and is re-computed on demand.
-pub const PARSED_SCHEMA_VERSION: u32 = 2;
+pub const PARSED_SCHEMA_VERSION: u32 = 3;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

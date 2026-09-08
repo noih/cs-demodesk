@@ -440,8 +440,11 @@ fn damage_from_events(events: &[&GameEvent], rounds: &[RoundInfo]) -> BTreeMap<S
             _ => round.roster.get(player).copied(),
         };
         let (Some(at), Some(vt)) = (team("attacker_team_num", &attacker), team("user_team_num", &victim)) else { continue };
-        if at == vt { continue; }
         let entry = out.entry(attacker).or_default();
+        if at == vt {
+            entry.friendly += damage;
+            continue;
+        }
         entry.total += damage;
         if UTILITY_WEAPONS.contains(&f.str("weapon").as_str()) { entry.utility += damage; }
     }
@@ -549,7 +552,11 @@ mod damage_tests {
         let events = [hurt(10, "friend", 20, 80, "ak47"), hurt(11, "", 10, 70, "world"),
             hurt(12, "victim", 5, 65, "inferno"), hurt(13, "enemy", 200, 0, "inferno")];
         let damage = damage_from_events(&events.iter().collect::<Vec<_>>(), &[round(1)]);
-        assert_eq!(damage.len(), 1);
+        assert_eq!(damage.len(), 2);
+        assert_eq!(damage["friend"].friendly, 20);
+        assert_eq!(damage["friend"].total, 0);
+        assert_eq!(damage["friend"].utility, 0);
+        assert_eq!(damage["enemy"].friendly, 0);
         assert_eq!(damage["enemy"].total, 65);
         assert_eq!(damage["enemy"].utility, 65);
     }

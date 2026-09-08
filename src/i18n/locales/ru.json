@@ -23,6 +23,7 @@
     "kills": "Убийства",
     "damage": "Урон",
     "utilityDamage": "Урон гранатами",
+    "friendlyDamage": "Урон союзникам",
     "multiKills": "Мультикиллы",
     "clutch": "Клатч",
     "headshotPct": "HS %",

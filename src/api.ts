@@ -78,6 +78,7 @@ export interface PlayerStats {
   clutchesWon: number;
   damage: number;
   utilityDamage: number;
+  friendlyDamage: number;
   adr: number;
   highlights: number;
   bestScore: number;

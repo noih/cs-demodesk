@@ -28,6 +28,7 @@ function TeamTable({ label, color, score, players, colors }: { label: string; co
             <Table.ColumnHeaderCell align="right">{t('common.damage')}</Table.ColumnHeaderCell>
             <Table.ColumnHeaderCell align="right">ADR</Table.ColumnHeaderCell>
             <Table.ColumnHeaderCell align="right">{t('common.utilityDamage')}</Table.ColumnHeaderCell>
+            <Table.ColumnHeaderCell align="right">{t('common.friendlyDamage')}</Table.ColumnHeaderCell>
             <Table.ColumnHeaderCell align="right">{t('common.multiKills')}</Table.ColumnHeaderCell>
             <Table.ColumnHeaderCell align="right">{t('common.clutch')}</Table.ColumnHeaderCell>
             <Table.ColumnHeaderCell align="right">{t('common.highlights')}</Table.ColumnHeaderCell>
@@ -57,6 +58,7 @@ function TeamTable({ label, color, score, players, colors }: { label: string; co
               <Table.Cell align="right">{p.damage}</Table.Cell>
               <Table.Cell align="right">{p.adr.toFixed(1)}</Table.Cell>
               <Table.Cell align="right">{p.utilityDamage}</Table.Cell>
+              <Table.Cell align="right">{p.friendlyDamage}</Table.Cell>
               <Table.Cell align="right" style={{ whiteSpace: 'nowrap' }}>
                 <Text size="1" color="gray">
                   {(['2k', '3k', '4k', '5k'] as const).map((k) => p.multiKills[k]).join(' / ')}

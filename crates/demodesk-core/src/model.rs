@@ -146,6 +146,9 @@ pub struct DemoData {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DamageTotals {
+    /// Actual health damage to teammates, excluding self damage.
+    #[serde(default)]
+    pub friendly: u32,
     /// health damage to enemies, all weapons
     pub total: u32,
     /// share of `total` done by grenades / molotov fire
