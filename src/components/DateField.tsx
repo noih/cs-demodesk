@@ -2,11 +2,11 @@ import { useState } from 'react';
 import { Button, Popover } from '@radix-ui/themes';
 import { CalendarIcon } from '@radix-ui/react-icons';
 import { DayPicker } from 'react-day-picker';
-import { enUS, ja, zhCN, zhTW } from 'date-fns/locale';
+import { enUS, ja, ko, ru, zhCN, zhTW } from 'date-fns/locale';
 import { useTranslation } from 'react-i18next';
 import { fmtDate, type Language } from '../i18n/index.ts';
 
-const LOCALES: Record<Language, typeof enUS> = { en: enUS, 'zh-TW': zhTW, 'zh-CN': zhCN, ja };
+const LOCALES: Record<Language, typeof enUS> = { en: enUS, 'zh-TW': zhTW, 'zh-CN': zhCN, ja, ko, ru };
 
 /** Local calendar day as "YYYY-MM-DD"; compares and sorts as plain text. */
 export function dayOf(d: Date): string {

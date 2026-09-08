@@ -1,6 +1,6 @@
 # CS DemoDesk
 
-[English](README.md) | 繁體中文
+[English](README.md) | 繁體中文 | [简体中文](README.zh-CN.md) | [日本語](README.ja.md) | [한국어](README.ko.md) | [Русский](README.ru.md)
 
 Counter-Strike 2 demo 的 Windows 桌面工具（單一可攜 `.exe`）：從一個 `.dem` 檔取得比賽統計、輸出高光影片、以 2D 回放整場比賽。
 
@@ -25,8 +25,6 @@ Counter-Strike 2 demo 的 Windows 桌面工具（單一可攜 `.exe`）：從一
 - 回合切換、播放速度、跟隨玩家
 - 多樓層地圖每層各一面板；雷達圖自本機遊戲檔抽取
 
-介面語言：English、繁體中文、简体中文、日本語，預設跟隨系統，可在設定中選擇。
-
 ## 不修改遊戲檔案
 
 不在遊戲目錄寫入任何 plugin、script 或 cfg，也不修改任何遊戲檔案。錄影透過 [HLAE](https://github.com/advancedfx/advancedfx) 以 `-insecure` 啟動獨立的 CS2 程序（與手動使用 HLAE 相同），經遊戲內建的 netcon 主控台送出指令，並以獨立的 `USRLOCALCSGO` 目錄保存遊戲設定，不影響玩家本身的設定。所有第三方工具皆下載至程式自己的資料目錄：
@@ -41,7 +39,7 @@ Counter-Strike 2 demo 的 Windows 桌面工具（單一可攜 `.exe`）：從一
 ## 注意事項
 
 - 僅支援 Windows，且須安裝 CS2。
-- 錄影時會執行一個隱藏的 CS2。同一 Steam 帳號同時只能執行一個 CS2，錄影期間無法遊玩。輸出工作一次執行一個，其餘排隊。
+- 錄影時預設隱藏 CS2；可在輸出設定開啟「顯示遊戲畫面」。同一 Steam 帳號同時只能執行一個 CS2，錄影期間無法遊玩。輸出工作一次執行一個，其餘排隊。
 - 錄影用的 CS2 以 `-insecure` 啟動，無法連線 VAC 伺服器；錄影完成後自動關閉，不影響正常啟動。
 - CS2 更新可能導致 HLAE 失效，需等待 HLAE 發布新版後，再於設定頁重新下載工具。
 - 需在通訊軟體或瀏覽器直接播放時請選 H.264。NVIDIA 編碼器需要 NVIDIA 顯示卡。

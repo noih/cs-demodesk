@@ -20,7 +20,7 @@ use std::path::{Path, PathBuf};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Settings {
-    /// UI language (en / zh-TW / zh-CN / ja); None = follow the system language
+    /// UI language (en / zh-TW / zh-CN / ja / ko / ru); None = follow the system language
     #[serde(default)]
     pub language: Option<String>,
     /// CS2 install folder ("…\steamapps\common\Counter-Strike Global Offensive")

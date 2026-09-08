@@ -1,6 +1,6 @@
 # CS DemoDesk
 
-English | [繁體中文](README.zh-TW.md)
+English | [繁體中文](README.zh-TW.md) | [简体中文](README.zh-CN.md) | [日本語](README.ja.md) | [한국어](README.ko.md) | [Русский](README.ru.md)
 
 A Windows desktop tool for Counter-Strike 2 demos (single portable `.exe`): match statistics, highlight video export, and a 2D replay of the whole match from one `.dem` file.
 
@@ -25,8 +25,6 @@ Score, round results, and per-player stats (K/D/A, ADR, headshots, utility damag
 - Round navigation, playback speed, follow a player
 - Multi-level maps shown one level per panel; radar images extracted from the local game files
 
-UI languages: English, 繁體中文, 简体中文, 日本語 - follows the system language, selectable in Settings.
-
 ## Game files are never modified
 
 Nothing is written into the game folder: no plugin, script, or cfg, and no game file is changed. Recording launches a separate CS2 process through [HLAE](https://github.com/advancedfx/advancedfx) with `-insecure` (the same as using HLAE manually), sends commands over the game's own netcon console, and keeps game settings in a separate `USRLOCALCSGO` folder so the player's settings are untouched. All third-party tools are downloaded into the app's own data folder:
@@ -41,7 +39,7 @@ Nothing is written into the game folder: no plugin, script, or cfg, and no game 
 ## Notes
 
 - Windows only; CS2 must be installed.
-- Recording runs a hidden CS2 instance. One Steam account can run only one CS2 at a time, so the game cannot be played while recording. Export jobs run one at a time and queue.
+- Recording runs a hidden CS2 instance by default; enable "Show game window" in the export dialog to watch it. One Steam account can run only one CS2 at a time, so the game cannot be played while recording. Export jobs run one at a time and queue.
 - The recording instance is launched with `-insecure` and cannot join VAC-secured servers; it closes when recording finishes and does not affect normal launches.
 - A CS2 update can break HLAE until HLAE releases a fix; re-download the tools from Settings once a new HLAE version is available.
 - Choose H.264 for playback in chat apps and browsers. NVIDIA encoders require an NVIDIA GPU.

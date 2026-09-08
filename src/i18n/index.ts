@@ -5,19 +5,23 @@ import i18n from 'i18next';
 import { initReactI18next } from 'react-i18next';
 import en from './locales/en.json';
 import ja from './locales/ja.json';
+import ko from './locales/ko.json';
+import ru from './locales/ru.json';
 import zhCN from './locales/zh-CN.json';
 import zhTW from './locales/zh-TW.json';
 
-export const LANGUAGES = ['en', 'zh-TW', 'zh-CN', 'ja'] as const;
+export const LANGUAGES = ['en', 'zh-TW', 'zh-CN', 'ja', 'ko', 'ru'] as const;
 export type Language = (typeof LANGUAGES)[number];
 
 /** Native name of each language, for the settings picker. */
-export const LANGUAGE_NAMES: Record<Language, string> = { en: 'English', 'zh-TW': '繁體中文', 'zh-CN': '简体中文', ja: '日本語' };
+export const LANGUAGE_NAMES: Record<Language, string> = { en: 'English', 'zh-TW': '繁體中文', 'zh-CN': '简体中文', ja: '日本語', ko: '한국어', ru: 'Русский' };
 
 /** Map a BCP 47 tag from the OS / WebView to one of ours; anything else is English. */
 export function detectLanguage(tag: string = navigator.language): Language {
   const t = tag.toLowerCase();
   if (t.startsWith('ja')) return 'ja';
+  if (t.startsWith('ko')) return 'ko';
+  if (t.startsWith('ru')) return 'ru';
   if (t.startsWith('zh')) return /tw|hk|mo|hant/.test(t) ? 'zh-TW' : 'zh-CN';
   return 'en';
 }
@@ -35,7 +39,7 @@ i18n.on('languageChanged', (lng) => {
 });
 
 void i18n.use(initReactI18next).init({
-  resources: { en: { translation: en }, 'zh-TW': { translation: zhTW }, 'zh-CN': { translation: zhCN }, ja: { translation: ja } },
+  resources: { en: { translation: en }, 'zh-TW': { translation: zhTW }, 'zh-CN': { translation: zhCN }, ja: { translation: ja }, ko: { translation: ko }, ru: { translation: ru } },
   lng: detectLanguage(),
   fallbackLng: 'en',
   interpolation: { escapeValue: false },
