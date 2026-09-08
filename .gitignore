@@ -144,3 +144,6 @@ $RECYCLE.BIN/
 
 # session hand-over notes (local only)
 HANDOFF.md
+
+# Local investigation notes; maintained guidance belongs in docs/.
+/research/
