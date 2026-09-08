@@ -7,6 +7,9 @@ import { api, errorText, mb, type ParsedDemo, type RenderJob } from '../api.ts';
 import { LogView } from './LogView.tsx';
 import { fmtDateTime } from '../i18n/index.ts';
 
+function initializePreview(video: HTMLVideoElement | null) {
+  if (video) video.volume = 0.5;
+}
 const COLOR: Record<RenderJob['status'], 'gray' | 'amber' | 'green' | 'red'> = { queued: 'amber', running: 'amber', done: 'green', error: 'red', cancelled: 'gray' };
 const STAGES = ['starting', 'recording', 'encoding'] as const;
 const isStage = (s: string): s is (typeof STAGES)[number] => (STAGES as readonly string[]).includes(s);
@@ -124,7 +127,7 @@ function JobCard({ job, parsed, onChanged }: { job: RenderJob; parsed: ParsedDem
               const title = o.isFinal ? t('renders.merged') : (titleOf(o.highlightId) ?? o.title);
               return (
                 <Box key={o.file} style={{ minWidth: 0 }}>
-                  <video controls preload="metadata" src={api.fileSrc(o.file)} />
+                  <video ref={initializePreview} controls preload="metadata" src={api.fileSrc(o.file)} />
                   <Text as="div" size="2" mt="1" truncate title={title}>
                     {title}
                   </Text>
