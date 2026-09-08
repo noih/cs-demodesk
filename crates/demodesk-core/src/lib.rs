@@ -12,3 +12,5 @@ pub mod stats;
 pub mod store;
 
 pub use model::*;
+
+mod demo_readiness;

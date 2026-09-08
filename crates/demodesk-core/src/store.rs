@@ -255,6 +255,26 @@ impl Store {
         write_atomic(&self.root.join("settings.json"), serde_json::to_string_pretty(&saved)?.as_bytes())
     }
 
+    // One persistent failure per demo: automatic parsing never retries it.
+    pub fn parse_error(&self, id: &str) -> Option<String> {
+        let path = self.root.join("parsed").join(format!("{id}.error.json"));
+        match fs::read_to_string(path) {
+            Ok(text) => Some(serde_json::from_str(&text).unwrap_or_else(|_| "Stored parse failure is unreadable; parse manually to retry.".into())),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+            Err(e) => Some(format!("Cannot read previous parse failure: {e}")),
+        }
+    }
+    pub fn write_parse_error(&self, id: &str, error: &str) -> Result<()> {
+        write_atomic(&self.root.join("parsed").join(format!("{id}.error.json")), &serde_json::to_vec(error)?)
+    }
+    pub fn clear_parse_error(&self, id: &str) -> Result<()> {
+        match fs::remove_file(self.root.join("parsed").join(format!("{id}.error.json"))) {
+            Ok(()) => Ok(()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(e) => Err(e.into()),
+        }
+    }
+
     // ---- parse results (disposable cache) ----
     fn summary_path(&self, id: &str) -> PathBuf {
         self.root.join("parsed").join(format!("{id}.summary.json"))
@@ -316,7 +336,15 @@ impl Store {
     }
     /// Delete every stored parse result. Returns the number of bytes freed.
     pub fn clear_all_parsed(&self) -> u64 {
-        clear_dir(&self.root.join("parsed"))
+        let mut freed = 0;
+        if let Ok(entries) = fs::read_dir(self.root.join("parsed")) {
+            for entry in entries.flatten() {
+                if entry.file_name().to_string_lossy().ends_with(".error.json") { continue; }
+                let bytes = dir_size(&entry.path());
+                if fs::remove_file(entry.path()).is_ok() { freed += bytes; }
+            }
+        }
+        freed
     }
     /// Total size of the stored parse results.
     pub fn parsed_bytes(&self) -> u64 {
@@ -327,6 +355,8 @@ impl Store {
         let Ok(rd) = fs::read_dir(self.root.join("parsed")) else { return };
         for e in rd.flatten() {
             let name = e.file_name().to_string_lossy().to_string();
+            // A disconnected demo folder must not erase the no-retry decision.
+            if name.ends_with(".error.json") { continue; }
             let id = name.split('.').next().unwrap_or("").to_string();
             if !id.is_empty() && !live.contains(&id) {
                 let _ = fs::remove_file(e.path());

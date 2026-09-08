@@ -1,6 +1,6 @@
 //! Background work: demo parsing and the sequential render queue. The engine
-//! owns the [`Store`] (config + render jobs) and keeps every parse result in
-//! memory only — nothing about demos is cached on disk. Changes are reported
+//! owns the [`Store`] (config, parse results and render jobs), scans demos from
+//! disk, and loads saved analysis into memory on demand. Changes are reported
 //! through a [`Notify`] sink so the Tauri layer can forward them as window events.
 
 use crate::parser::DemoParser;
@@ -52,6 +52,7 @@ pub struct SetupState {
 struct DemoEntry {
     meta: DemoMeta,
     parsed: Option<Arc<ParsedDemo>>,
+    auto_complete: Option<bool>,
 }
 
 impl DemoEntry {
@@ -220,9 +221,9 @@ impl Engine {
         path.extension().map(|e| e.to_string_lossy().eq_ignore_ascii_case("dem")).unwrap_or(false)
     }
 
-    /// Every .dem in the scanned folders.
+    /// Scan configured demo folders.
     fn demo_paths(&self) -> Vec<PathBuf> {
-        let mut out: Vec<PathBuf> = vec![];
+        let mut out = vec![];
         for folder in self.replay_folders() {
             let Ok(rd) = std::fs::read_dir(&folder) else { continue };
             for entry in rd.flatten() {
@@ -238,7 +239,7 @@ impl Engine {
     }
 
     /// Rescan the file system and merge with the in-memory parse state.
-    pub fn list_demos(&self) -> Vec<DemoMeta> {
+    pub fn list_demos(self: &Arc<Self>) -> Vec<DemoMeta> {
         // Everything that touches the disk happens before the lock.
         let scanned: Vec<(PathBuf, u64, f64)> = self
             .demo_paths()
@@ -257,6 +258,7 @@ impl Engine {
                 let id = Self::demo_id(&path);
                 let entry = demos.entry(id.clone()).or_insert_with(|| {
                     // A result stored by an earlier session counts as parsed (loaded lazily).
+                    let failure = self.store.parse_error(&id);
                     let stored = self.store.read_summary(&id, bytes, mtime_ms);
                     DemoEntry {
                         meta: DemoMeta {
@@ -265,16 +267,20 @@ impl Engine {
                             path: path.to_string_lossy().to_string(),
                             bytes,
                             mtime_ms,
-                            status: if stored.is_some() { DemoStatus::Parsed } else { DemoStatus::New },
-                            error: None,
+                            status: if failure.is_some() { DemoStatus::Error } else if stored.is_some() { DemoStatus::Parsed } else { DemoStatus::New },
+                            error: failure,
                             map_name: stored.as_ref().map(|s| s.map_name.clone()),
                             parsed_at: stored.as_ref().map(|s| s.parsed_at.clone()),
                             summary: stored.map(|s| s.summary),
                         },
                         parsed: None,
+                        auto_complete: None,
                     }
                 });
                 entry.meta.path = path.to_string_lossy().to_string();
+                if !entry.meta.same_file(bytes, mtime_ms) {
+                    entry.auto_complete = None;
+                }
                 // File changed under us: the parse result no longer describes it.
                 if entry.meta.status == DemoStatus::Parsed && !entry.meta.same_file(bytes, mtime_ms) {
                     entry.reset();
@@ -293,7 +299,9 @@ impl Engine {
             list
         };
         self.store.prune_parsed(&keep);
-        list
+        self.auto_parse_next();
+        let demos = self.demos.lock().unwrap();
+        list.into_iter().map(|meta| demos.get(&meta.id).map(|e| e.meta.clone()).unwrap_or(meta)).collect()
     }
 
     /// Meta + parse result; a result stored on disk is loaded on first use.
@@ -315,7 +323,7 @@ impl Engine {
             None => {
                 // Stored result unreadable: fall back to "not parsed".
                 self.store.delete_parsed(id);
-                self.update_meta(id, DemoEntry::reset).map(|m| (m, None))
+                self.update_meta(id, |e| { if e.meta.status != DemoStatus::Error { e.reset(); } }).map(|m| (m, None))
             }
         }
     }
@@ -323,10 +331,7 @@ impl Engine {
         self.get_demo(id).and_then(|(_, p)| p)
     }
 
-    /// Add a demo the user picked: copy it into the first scanned folder (the
-    /// game's replays folder by default) so it shows up like any other demo.
-    /// A file already inside a scanned folder is used in place.
-    pub fn add_demo(&self, path: &Path) -> Result<DemoMeta> {
+    pub fn add_demo(self: &Arc<Self>, path: &Path) -> Result<DemoMeta> {
         if !path.is_file() || !Self::is_dem(path) {
             return Err(anyhow!("not a .dem file: {}", path.display()));
         }
@@ -371,59 +376,122 @@ impl Engine {
         Some(entry.meta.clone())
     }
 
-    pub fn parse_demo(self: &Arc<Self>, id: &str) -> Result<()> {
-        let (meta, _) = self.get_demo(id).ok_or_else(|| anyhow!("demo not found"))?;
-        if !self.parsing.lock().unwrap().insert(id.to_string()) {
-            return Ok(());
+    fn auto_parse_next(self: &Arc<Self>) {
+        let mut candidates: Vec<_> = self.demos.lock().unwrap().values()
+            .filter(|e| e.meta.status == DemoStatus::New && e.auto_complete != Some(false))
+            .map(|e| (e.meta.id.clone(), e.meta.mtime_ms)).collect();
+        candidates.sort_by(|a, b| b.1.total_cmp(&a.1));
+        for (id, _) in candidates {
+            if let Err(error) = self.start_parse(&id, true) {
+                eprintln!("could not auto-parse {id}: {error:#}");
+            }
+            if !self.parsing.lock().unwrap().is_empty() { break; }
         }
-        let meta = self
-            .update_meta(id, |e| {
-                e.meta.status = DemoStatus::Parsing;
-                e.meta.error = None;
-            })
-            .unwrap_or(meta);
+    }
+
+    pub fn parse_demo(self: &Arc<Self>, id: &str) -> Result<()> {
+        self.start_parse(id, false)
+    }
+
+    fn start_parse(self: &Arc<Self>, id: &str, automatic: bool) -> Result<()> {
+        let source_guard = if automatic {
+            let (meta, complete) = {
+                let demos = self.demos.lock().unwrap();
+                let entry = demos.get(id).ok_or_else(|| anyhow!("demo not found"))?;
+                if entry.meta.status != DemoStatus::New || entry.auto_complete == Some(false) { return Ok(()); }
+                (entry.meta.clone(), entry.auto_complete)
+            };
+            let mut options = std::fs::OpenOptions::new();
+            options.read(true);
+            // Refuse active writers and keep the source unchanged throughout parsing.
+            #[cfg(windows)]
+            {
+                use std::os::windows::fs::OpenOptionsExt;
+                options.share_mode(1); // FILE_SHARE_READ
+            }
+            let Ok(mut file) = options.open(&meta.path) else { return Ok(()); };
+            let metadata = file.metadata()?;
+            let modified = metadata.modified()?.duration_since(std::time::UNIX_EPOCH)?.as_millis() as f64;
+            if !meta.same_file(metadata.len(), modified) { return Ok(()); }
+            let complete = match complete {
+                Some(ready) => ready,
+                None => crate::demo_readiness::is_complete(&mut file)?,
+            };
+            if let Some(entry) = self.demos.lock().unwrap().get_mut(id) {
+                if entry.meta.same_file(metadata.len(), modified) { entry.auto_complete = Some(complete); }
+            }
+            if !complete { return Ok(()); }
+            Some(file)
+        } else { None };
+        let meta = {
+            // Same lock order as scanning; claim the demo and the automatic slot together.
+            let mut demos = self.demos.lock().unwrap();
+            let entry = demos.get_mut(id).ok_or_else(|| anyhow!("demo not found"))?;
+            let mut parsing = self.parsing.lock().unwrap();
+            if parsing.contains(id) || (automatic && (!parsing.is_empty() || entry.meta.status != DemoStatus::New)) {
+                return Ok(());
+            }
+            parsing.insert(id.to_string());
+            entry.meta.status = DemoStatus::Parsing;
+            entry.meta.error = None;
+            entry.meta.clone()
+        };
+        // Also covers app termination during parsing: retry then requires an explicit click.
+        if let Err(error) = self.store.write_parse_error(id, "Parsing was interrupted; parse manually to retry.") {
+            self.finish_parse_error(id, format!("Cannot save parse state: {error:#}"));
+            return Err(error);
+        }
         self.notify.notify(Event::DemoChanged { demo: meta.clone() });
         let engine = self.clone();
         let id = id.to_string();
         let thread_id = id.clone();
         let spawned = std::thread::Builder::new().name(format!("parse-{id}")).spawn(move || {
+            let _source_guard = source_guard;
             let id = thread_id;
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| engine.parser.load_demo(Path::new(&meta.path)).map(build_parsed_demo)));
-            // Serialize to disk before taking the lock: the UI keeps listing while we write.
             let outcome = match result {
-                Ok(Ok(parsed)) => {
-                    if let Err(err) = engine.store.write_parsed(&id, &meta, &parsed) {
-                        eprintln!("could not store parse result for {id}: {err:#}");
-                    }
-                    Ok(parsed)
-                }
+                Ok(Ok(parsed)) => engine.store.write_parsed(&id, &meta, &parsed)
+                    .and_then(|_| engine.store.clear_parse_error(&id))
+                    .map(|_| parsed).map_err(|e| format!("Cannot save parse result: {e:#}")),
                 Ok(Err(err)) => Err(format!("{err:#}")),
                 Err(_) => Err("parser crashed (unsupported or corrupt demo?)".to_string()),
             };
-            let fresh = engine.update_meta(&id, |e| match outcome {
+            match outcome {
                 Ok(parsed) => {
-                    e.meta.status = DemoStatus::Parsed;
-                    e.meta.map_name = Some(parsed.info.map_name.clone());
-                    e.meta.parsed_at = Some(parsed.parsed_at.clone());
-                    e.meta.summary = Some(DemoSummary::of(&parsed));
-                    e.parsed = Some(Arc::new(parsed));
+                    let fresh = engine.update_meta(&id, |e| {
+                        e.meta.status = DemoStatus::Parsed;
+                        e.meta.error = None;
+                        e.meta.map_name = Some(parsed.info.map_name.clone());
+                        e.meta.parsed_at = Some(parsed.parsed_at.clone());
+                        e.meta.summary = Some(DemoSummary::of(&parsed));
+                        e.parsed = if automatic { None } else { Some(Arc::new(parsed)) };
+                    });
+                    engine.parsing.lock().unwrap().remove(&id);
+                    if let Some(demo) = fresh { engine.notify.notify(Event::DemoChanged { demo }); }
                 }
-                Err(msg) => {
-                    e.meta.status = DemoStatus::Error;
-                    e.meta.error = Some(msg);
-                }
-            });
-            engine.parsing.lock().unwrap().remove(&id);
-            if let Some(fresh) = fresh {
-                engine.notify.notify(Event::DemoChanged { demo: fresh });
+                Err(error) => engine.finish_parse_error(&id, error),
             }
+            engine.auto_parse_next();
         });
-        if let Err(e) = spawned {
-            self.parsing.lock().unwrap().remove(&id);
-            self.update_meta(&id, DemoEntry::reset);
-            return Err(anyhow!("could not start the parse thread: {e}"));
+        if let Err(error) = spawned {
+            let message = format!("could not start the parse thread: {error}");
+            self.finish_parse_error(&id, message.clone());
+            return Err(anyhow!(message));
         }
         Ok(())
+    }
+
+    fn finish_parse_error(&self, id: &str, message: String) {
+        if let Err(error) = self.store.write_parse_error(id, &message) {
+            eprintln!("could not store parse failure for {id}: {error:#}");
+        }
+        let fresh = self.update_meta(id, |e| {
+            e.reset();
+            e.meta.status = DemoStatus::Error;
+            e.meta.error = Some(message);
+        });
+        self.parsing.lock().unwrap().remove(id);
+        if let Some(demo) = fresh { self.notify.notify(Event::DemoChanged { demo }); }
     }
 
     /// Path of the replay stream for a parsed demo, building it on first use
@@ -483,7 +551,7 @@ impl Engine {
         let metas: Vec<DemoMeta> = {
             let mut demos = self.demos.lock().unwrap();
             for e in demos.values_mut() {
-                e.reset();
+                if e.meta.status != DemoStatus::Error { e.reset(); }
             }
             demos.values().map(|e| e.meta.clone()).collect()
         };
@@ -502,6 +570,7 @@ impl Engine {
             std::fs::remove_file(path).map_err(|e| anyhow!("cannot delete {}: {e}", meta.path))?;
         }
         self.store.delete_parsed(id);
+        self.store.clear_parse_error(id)?;
         self.demos.lock().unwrap().remove(id);
         Ok(())
     }
@@ -721,4 +790,120 @@ fn job_outputs(result: &crate::render::RenderResult) -> Vec<JobOutput> {
         outputs.push(JobOutput { file: f.to_string_lossy().to_string(), bytes: b, highlight_id: None, title: "highlights (merged)".into(), is_final: true });
     }
     outputs
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::mpsc;
+    use std::time::Duration;
+
+    struct Events(mpsc::Sender<Event>);
+    impl Notify for Events {
+        fn notify(&self, event: Event) { let _ = self.0.send(event); }
+    }
+
+    fn terminal_events(receiver: &mpsc::Receiver<Event>, count: usize) -> Vec<DemoMeta> {
+        let mut finished = vec![];
+        let mut running = HashSet::new();
+        while finished.len() < count {
+            if let Event::DemoChanged { demo } = receiver.recv_timeout(Duration::from_secs(10)).unwrap() {
+                match demo.status {
+                    DemoStatus::Parsing => {
+                        assert!(running.insert(demo.id.clone()));
+                        assert_eq!(running.len(), 1, "automatic parsing must be sequential");
+                    }
+                    DemoStatus::Error | DemoStatus::Parsed => {
+                        assert!(running.remove(&demo.id));
+                        finished.push(demo);
+                    }
+                    _ => {}
+                }
+            }
+        }
+        finished
+    }
+
+    fn complete_invalid_demo() -> Vec<u8> {
+        let mut bytes = b"PBDEMS2\0".to_vec();
+        bytes.extend_from_slice(&[0; 8]);
+        bytes.extend_from_slice(&[0, 0, 0]);
+        bytes
+    }
+
+    #[test]
+    fn automatic_parse_waits_for_complete_source() {
+        let temp = tempfile::tempdir().unwrap();
+        let data = temp.path().join("data");
+        let source = temp.path().join("match.dem");
+        let bytes = complete_invalid_demo();
+        std::fs::write(&source, &bytes[..16]).unwrap();
+        let store = Store::open(data.clone()).unwrap();
+        store.save_settings(&Settings { scan_game_replays: false, replay_folders: vec![temp.path().to_string_lossy().into_owned()], ..Settings::default() }).unwrap();
+        let (send, receive) = mpsc::channel();
+        let engine = Engine::new(data, Arc::new(Events(send))).unwrap();
+        let demo = engine.add_demo(&source).unwrap();
+        assert_eq!(demo.status, DemoStatus::New);
+        assert!(store.parse_error(&demo.id).is_none());
+        engine.list_demos();
+        assert!(receive.try_recv().is_err());
+        assert_eq!(engine.demos.lock().unwrap()[&demo.id].auto_complete, Some(false));
+        std::fs::write(&source, &bytes).unwrap();
+        #[cfg(windows)]
+        {
+            let writer = std::fs::OpenOptions::new().append(true).open(&source).unwrap();
+            engine.list_demos();
+            assert!(receive.try_recv().is_err());
+            assert!(store.parse_error(&demo.id).is_none());
+            drop(writer);
+        }
+        engine.list_demos();
+        // Complete framing is ready immediately; invalid game data still fails once.
+        let completed = terminal_events(&receive, 1);
+        assert_eq!(completed[0].status, DemoStatus::Error);
+        assert!(store.parse_error(&demo.id).is_some());
+    }
+
+    #[test]
+    fn auto_parse_failure_is_not_retried_until_manual_parse() {
+        let temp = tempfile::tempdir().unwrap();
+        let data = temp.path().join("data");
+        let demos = temp.path().join("demos");
+        std::fs::create_dir_all(&demos).unwrap();
+        for name in ["first.dem", "second.dem"] {
+            std::fs::write(demos.join(name), complete_invalid_demo()).unwrap();
+        }
+        Store::open(data.clone()).unwrap().save_settings(&Settings {
+            scan_game_replays: false,
+            replay_folders: vec![demos.to_string_lossy().into_owned()],
+            cs2_dir: Some(temp.path().join("no-game").to_string_lossy().into_owned()),
+            ..Settings::default()
+        }).unwrap();
+        let (send, receive) = mpsc::channel();
+        let engine = Engine::new(data.clone(), Arc::new(Events(send))).unwrap();
+        assert_eq!(engine.list_demos().len(), 2);
+        let completed = terminal_events(&receive, 2);
+        assert!(completed.iter().all(|d| d.status == DemoStatus::Error));
+        // Scans, changed file contents and clearing cached analysis do not retry errors.
+        std::fs::write(&completed[0].path, b"still not a demo, but changed").unwrap();
+        engine.clear_all_analysis().unwrap();
+        assert!(engine.list_demos().iter().all(|d| d.status == DemoStatus::Error));
+        assert!(receive.try_iter().all(|e| !matches!(e, Event::DemoChanged { demo } if demo.status == DemoStatus::Parsing)));
+        let settings = engine.settings();
+        let mut disconnected = settings.clone();
+        disconnected.replay_folders.clear();
+        engine.store.save_settings(&disconnected).unwrap();
+        assert!(engine.list_demos().is_empty());
+        engine.store.save_settings(&settings).unwrap();
+        assert!(engine.list_demos().iter().all(|d| d.status == DemoStatus::Error));
+        drop(engine);
+        let (send, receive) = mpsc::channel();
+        let restarted = Engine::new(data, Arc::new(Events(send))).unwrap();
+        assert!(restarted.list_demos().iter().all(|d| d.status == DemoStatus::Error));
+        assert!(receive.try_recv().is_err());
+        restarted.parse_demo(&completed[0].id).unwrap();
+        let retried = terminal_events(&receive, 1);
+        assert_eq!(retried[0].id, completed[0].id);
+        assert_eq!(retried[0].status, DemoStatus::Error);
+    }
 }

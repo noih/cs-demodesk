@@ -294,7 +294,7 @@
     "parsedDir": "解析目录",
     "clipsDir": "视频目录",
     "radarDir": "雷达图目录",
-    "clearParsedConfirm": "所有 demo 会回到“未解析”；demo 文件与视频不受影响。",
+    "clearParsedConfirm": "删除已保存的解析数据，未失败的 demo 会自动重新解析。失败的 demo 仍需手动重试。保留 demo 文件和视频。",
     "clearClipsConfirm": "将删除所有输出过的视频与记录；demo 文件与解析数据不受影响。",
     "clearRadarConfirm": "下次打开 2D 回放时会再从游戏文件提取。",
     "clearParsedWhat": "解析数据",

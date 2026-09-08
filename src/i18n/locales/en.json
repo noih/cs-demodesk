@@ -298,7 +298,7 @@
     "parsedDir": "Parsed data",
     "clipsDir": "Videos",
     "radarDir": "Radar images",
-    "clearParsedConfirm": "All demos go back to \"not parsed\"; demo files and videos are kept.",
+    "clearParsedConfirm": "Deletes saved analysis; demos without errors are parsed again automatically. Failed demos still require a manual retry. Demo files and videos are kept.",
     "clearClipsConfirm": "Deletes every exported video and job record; demo files and parsed data are kept.",
     "clearRadarConfirm": "Extracted again from the game files the next time the 2D replay opens.",
     "clearParsedWhat": "parsed data",
