@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Box, Card, Flex, Grid, Heading, SegmentedControl, Select, Text } from '@radix-ui/themes';
+import { Box, Button, Card, Flex, Grid, Heading, Select, Text } from '@radix-ui/themes';
 import type { EChartsCoreOption } from 'echarts/core';
 import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
@@ -171,13 +171,14 @@ export function ChartsTab({ parsed }: { parsed: ParsedDemo }) {
       </Card>
       <Grid columns={{ initial: '1', lg: 'minmax(0, 3fr) minmax(0, 2fr)' }} gap="4" align="start">
         <Card style={{ minWidth: 0 }}>
-          <SegmentedControl.Root size="1" value={metric} onValueChange={(v) => setMetric(v as Metric)} mb="2">
+          {/* pills that wrap: nine labels never fit one segmented row in every language */}
+          <Flex gap="1" wrap="wrap" mb="2">
             {METRICS.map((m) => (
-              <SegmentedControl.Item key={m} value={m}>
+              <Button key={m} size="1" variant={m === metric ? 'solid' : 'soft'} color={m === metric ? undefined : 'gray'} aria-pressed={m === metric} onClick={() => setMetric(m)}>
                 {t(`charts.seg.${m}`)}
-              </SegmentedControl.Item>
+              </Button>
             ))}
-          </SegmentedControl.Root>
+          </Flex>
           <EChart option={bars} height={Math.max(260, parsed.stats.length * 30 + 60)} />
         </Card>
         <Card style={{ minWidth: 0 }}>

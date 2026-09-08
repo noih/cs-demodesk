@@ -69,7 +69,8 @@ body {
 .row-click {
   cursor: pointer;
 }
-.row-click:hover td {
+.row-click:hover td,
+.row-hover:hover td {
   background: var(--gray-a2);
 }
 .row-selected td {

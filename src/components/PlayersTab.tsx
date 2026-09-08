@@ -1,4 +1,4 @@
-import { Badge, Card, Flex, Grid, Heading, Table, Text } from '@radix-ui/themes';
+import { Badge, Card, Flex, Grid, Heading, Table, Text, Tooltip } from '@radix-ui/themes';
 import { useTranslation } from 'react-i18next';
 import type { ParsedDemo, PlayerStats } from '../api.ts';
 import { playerColors } from '../charts/EChart.tsx';
@@ -16,33 +16,35 @@ function TeamTable({ label, color, score, players, colors }: { label: string; co
           {t('players.kills', { count: players.reduce((s, p) => s + p.kills, 0) })}
         </Text>
       </Flex>
-      <Table.Root className="nowrap-headers" size="1" layout="fixed">
+      <Table.Root className="nowrap-headers" size="1" style={{ overflowX: 'auto' }}>
         <Table.Header>
           <Table.Row>
-            <Table.ColumnHeaderCell>{t('common.player')}</Table.ColumnHeaderCell>
-            <Table.ColumnHeaderCell align="right" width="40px">K</Table.ColumnHeaderCell>
-            <Table.ColumnHeaderCell align="right" width="40px">D</Table.ColumnHeaderCell>
-            <Table.ColumnHeaderCell align="right" width="40px">A</Table.ColumnHeaderCell>
-            <Table.ColumnHeaderCell align="right" width="52px">K/D</Table.ColumnHeaderCell>
-            <Table.ColumnHeaderCell align="right" width="52px">HS%</Table.ColumnHeaderCell>
-            <Table.ColumnHeaderCell align="right" width="64px">{t('common.damage')}</Table.ColumnHeaderCell>
-            <Table.ColumnHeaderCell align="right" width="56px">ADR</Table.ColumnHeaderCell>
-            <Table.ColumnHeaderCell align="right" width="72px">{t('common.utilityDamage')}</Table.ColumnHeaderCell>
-            <Table.ColumnHeaderCell align="right" width="84px">{t('common.multiKills')}</Table.ColumnHeaderCell>
-            <Table.ColumnHeaderCell align="right" width="60px">{t('common.clutch')}</Table.ColumnHeaderCell>
-            <Table.ColumnHeaderCell align="right" width="48px">{t('common.highlights')}</Table.ColumnHeaderCell>
-            <Table.ColumnHeaderCell align="right" width="60px">{t('players.best')}</Table.ColumnHeaderCell>
+            <Table.ColumnHeaderCell width="100%" style={{ minWidth: 120 }}>{t('common.player')}</Table.ColumnHeaderCell>
+            <Table.ColumnHeaderCell align="right">K</Table.ColumnHeaderCell>
+            <Table.ColumnHeaderCell align="right">D</Table.ColumnHeaderCell>
+            <Table.ColumnHeaderCell align="right">A</Table.ColumnHeaderCell>
+            <Table.ColumnHeaderCell align="right">K/D</Table.ColumnHeaderCell>
+            <Table.ColumnHeaderCell align="right">HS%</Table.ColumnHeaderCell>
+            <Table.ColumnHeaderCell align="right">{t('common.damage')}</Table.ColumnHeaderCell>
+            <Table.ColumnHeaderCell align="right">ADR</Table.ColumnHeaderCell>
+            <Table.ColumnHeaderCell align="right">{t('common.utilityDamage')}</Table.ColumnHeaderCell>
+            <Table.ColumnHeaderCell align="right">{t('common.multiKills')}</Table.ColumnHeaderCell>
+            <Table.ColumnHeaderCell align="right">{t('common.clutch')}</Table.ColumnHeaderCell>
+            <Table.ColumnHeaderCell align="right">{t('common.highlights')}</Table.ColumnHeaderCell>
+            <Table.ColumnHeaderCell align="right">{t('players.best')}</Table.ColumnHeaderCell>
           </Table.Row>
         </Table.Header>
         <Table.Body>
           {players.map((p) => (
-            <Table.Row key={p.steamid}>
-              <Table.Cell>
-                <Flex align="center" gap="2" style={{ minWidth: 0 }}>
+            <Table.Row key={p.steamid} className="row-hover">
+              <Table.Cell style={{ maxWidth: 0 }}>
+                <Flex align="center" gap="2">
                   <span className="player-dot" style={{ background: colors.get(p.steamid) }} />
-                  <Text truncate style={{ display: 'block', minWidth: 0 }}>
-                    {p.name}
-                  </Text>
+                  <Tooltip content={p.name}>
+                    <Text truncate style={{ display: 'block', minWidth: 0 }}>
+                      {p.name}
+                    </Text>
+                  </Tooltip>
                 </Flex>
               </Table.Cell>
               <Table.Cell align="right">
@@ -81,7 +83,7 @@ export function PlayersTab({ parsed }: { parsed: ParsedDemo }) {
   return (
     <Flex direction="column" gap="2">
       {/* two tables side by side only when each gets its full column widths; otherwise stacked, full width */}
-      <Grid columns="repeat(auto-fit, minmax(820px, 1fr))" gap="4">
+      <Grid columns="repeat(auto-fit, minmax(min(760px, 100%), 1fr))" gap="4">
         <TeamTable label={t('players.teamA')} color="blue" score={parsed.score.A} players={a} colors={colors} />
         <TeamTable label={t('players.teamB')} color="orange" score={parsed.score.B} players={b} colors={colors} />
       </Grid>
