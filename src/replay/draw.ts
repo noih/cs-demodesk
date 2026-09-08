@@ -19,7 +19,7 @@ export interface DrawToggles {
   /** hearing radius (footsteps while running, gunshots): everyone, only the focused player, or nobody */
   sound: 'all' | 'focus' | 'off';
 }
-export const DEFAULT_TOGGLES: DrawToggles = { names: true, hp: true, weapon: true, view: true, grenades: true, shots: true, bomb: true, deaths: true, killFeed: true, clock: true, sound: 'all' };
+export const DEFAULT_TOGGLES: DrawToggles = { names: true, hp: true, weapon: false, view: true, grenades: true, shots: true, bomb: true, deaths: true, killFeed: true, clock: true, sound: 'focus' };
 
 // Sound ranges in world units — approximations of how far CS2 lets you hear
 // footsteps and gunfire, not measured values.
