@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { AlertDialog, Badge, Box, Button, Callout, DropdownMenu, Flex, Heading, IconButton, Spinner, Tabs, Text, Tooltip } from '@radix-ui/themes';
 import { DotsHorizontalIcon, ReloadIcon } from '@radix-ui/react-icons';
 import { Trans, useTranslation } from 'react-i18next';
@@ -14,6 +14,7 @@ export function DemoView({ meta, jobs, status, onChanged, onRemoved }: { meta: D
   const { t } = useTranslation();
   const [parsed, setParsed] = useState<ParsedDemo>();
   const [tab, setTab] = useState('highlights');
+  const tabScrollRef = useRef<HTMLDivElement>(null);
   const [confirmRemove, setConfirmRemove] = useState(false);
   const [loadError, setLoadError] = useState<string>();
 
@@ -148,7 +149,7 @@ export function DemoView({ meta, jobs, status, onChanged, onRemoved }: { meta: D
             </Tabs.Trigger>
             <Tabs.Trigger value="2d">{t('demoView.tabs.replay')}</Tabs.Trigger>
           </Tabs.List>
-          <Box className="tab-body">
+          <Box ref={tabScrollRef} className="tab-body">
             <Tabs.Content value="highlights">
               <HighlightsTab meta={meta} parsed={parsed} status={status} onRendered={() => setTab('renders')} />
             </Tabs.Content>
@@ -159,7 +160,7 @@ export function DemoView({ meta, jobs, status, onChanged, onRemoved }: { meta: D
               <ChartsTab parsed={parsed} />
             </Tabs.Content>
             <Tabs.Content value="renders">
-              <RendersTab jobs={jobs} parsed={parsed} onChanged={onChanged} />
+              <RendersTab jobs={jobs} parsed={parsed} onChanged={onChanged} scrollRef={tabScrollRef} />
             </Tabs.Content>
             <Tabs.Content value="2d" style={{ height: '100%' }}>
               <ReplayTab meta={meta} parsed={parsed} />

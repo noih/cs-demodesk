@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react';
+import { useVirtualizer } from '@tanstack/react-virtual';
 import { AlertDialog, Badge, Box, Button, Callout, Card, DataList, Dialog, DropdownMenu, Flex, Grid, Heading, IconButton, Link, Progress, Spinner, Text } from '@radix-ui/themes';
 import { DotsHorizontalIcon, ExternalLinkIcon, FileTextIcon, OpenInNewWindowIcon } from '@radix-ui/react-icons';
 import { useTranslation } from 'react-i18next';
@@ -226,20 +227,57 @@ function JobCard({ job, parsed, onChanged }: { job: RenderJob; parsed: ParsedDem
   );
 }
 
-export function RendersTab({ jobs, parsed, onChanged }: { jobs: RenderJob[]; parsed: ParsedDemo; onChanged: () => Promise<void> }) {
+export function RendersTab({ jobs, parsed, onChanged, scrollRef }: { jobs: RenderJob[]; parsed: ParsedDemo; onChanged: () => Promise<void>; scrollRef: RefObject<HTMLDivElement | null> }) {
   const { t } = useTranslation();
-  if (jobs.length === 0) {
-    return (
-      <Text as="p" size="2" color="gray">
-        {t('renders.empty')}
-      </Text>
-    );
+  const listRef = useRef<HTMLDivElement>(null);
+  const [scrollMargin, setScrollMargin] = useState(0);
+  const hasJobs = jobs.length > 0;
+  const getItemKey = useCallback((index: number) => jobs[index]!.id, [jobs]);
+  const virtualizer = useVirtualizer({
+    count: jobs.length,
+    getScrollElement: () => scrollRef.current,
+    getItemKey,
+    estimateSize: (index) => jobs[index]!.outputs.length > 0 ? 320 : 110,
+    overscan: 3,
+    gap: 12,
+    scrollMargin,
+  });
+
+  useLayoutEffect(() => {
+    const scroll = scrollRef.current;
+    const list = listRef.current;
+    if (!scroll || !list) return;
+    let width = scroll.clientWidth;
+    const measureLayout = () => {
+      // Account for the tab body's padding without introducing a second scrollbar.
+      setScrollMargin(list.getBoundingClientRect().top - scroll.getBoundingClientRect().top + scroll.scrollTop - scroll.clientTop);
+      if (scroll.clientWidth !== width) {
+        width = scroll.clientWidth;
+        // Off-screen measurements also become stale when cards reflow at a new width.
+        virtualizer.measure();
+      }
+    };
+    measureLayout();
+    const observer = new ResizeObserver(measureLayout);
+    observer.observe(scroll);
+    return () => observer.disconnect();
+  }, [hasJobs, scrollRef, virtualizer]);
+
+  if (!hasJobs) {
+    return <Text as="p" size="2" color="gray">{t('renders.empty')}</Text>;
   }
   return (
-    <Flex direction="column" gap="3">
-      {jobs.map((job) => (
-        <JobCard key={job.id} job={job} parsed={parsed} onChanged={onChanged} />
+    <div ref={listRef} style={{ height: virtualizer.getTotalSize(), position: 'relative', overflowAnchor: 'none' }}>
+      {virtualizer.getVirtualItems().map((row) => (
+        <div
+          key={row.key}
+          data-index={row.index}
+          ref={virtualizer.measureElement}
+          style={{ position: 'absolute', top: 0, left: 0, width: '100%', transform: `translateY(${row.start - scrollMargin}px)` }}
+        >
+          <JobCard job={jobs[row.index]!} parsed={parsed} onChanged={onChanged} />
+        </div>
       ))}
-    </Flex>
+    </div>
   );
 }
