@@ -84,7 +84,7 @@ pub fn run_setup(default_tools_dir: &Path, o: &PathOverrides, force: bool, log: 
     let paths = resolve_tool_paths(default_tools_dir, o);
     std::fs::create_dir_all(&paths.tools_dir)?;
     setup::install_hlae(&paths.tools_dir, force, log)?;
-    if o.ffmpeg_exe.is_none() && (force || paths.ffmpeg_exe.is_none()) {
+    if o.ffmpeg_exe.is_none() && (force || paths.ffmpeg_exe.is_none() || paths.ffmpeg_exe.as_ref().is_some_and(|exe| !encode::ffprobe_exe(exe).is_file())) {
         setup::install_ffmpeg(&paths.tools_dir, force, log)?;
     }
     setup::install_vrf(&paths.tools_dir, force, log)?;

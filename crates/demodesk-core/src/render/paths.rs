@@ -97,7 +97,7 @@ pub fn read_patch_version(cs2_dir: &Path) -> Option<u32> {
     line.trim_start_matches("PatchVersion=").trim().replace('.', "").parse().ok()
 }
 
-fn find_file(dir: &Path, name: &str, depth: usize) -> Option<PathBuf> {
+pub(super) fn find_file(dir: &Path, name: &str, depth: usize) -> Option<PathBuf> {
     let entries = std::fs::read_dir(dir).ok()?;
     let mut dirs = vec![];
     for entry in entries.flatten() {
