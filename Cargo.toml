@@ -5,7 +5,7 @@ exclude = ["vendor"]
 
 [workspace.package]
 edition = "2021"
-version = "1.0.6"
+version = "1.0.7"
 license = "AGPL-3.0-only"
 
 # `tauri dev` builds the dev profile; the demo parser is ~10× slower unoptimized,
