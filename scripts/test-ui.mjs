@@ -223,9 +223,9 @@ try {
   const zoomOut = recoil.getByRole('button',{name:'Zoom out',exact:true});
   const resetZoom = recoil.getByRole('button',{name:'Reset zoom (reference)',exact:true});
   assert.ok(!(await zoomOut.isDisabled()));
-  const checkPlot = async (zoom) => {
+  const checkPlot = async (zoom, playerPoint = false) => {
     // Check known shot positions, without depending on tooltip/label rasterization.
-    await page.waitForFunction(({ zoom, accent, weapons }) => {
+    await page.waitForFunction(({ zoom, accent, weapons, playerPoint }) => {
       const canvas = document.querySelector('[data-testid="recoil-chart"] canvas');
       const plots = [weapons.ak47,weapons.m4a1,weapons.m4a1_silencer].map(points => {
         const xs = points.map(p=>p.x), ys = points.map(p=>p.y);
@@ -234,16 +234,67 @@ try {
       const halfSpan = Math.max(3,...plots.flatMap(p=>p.points.map(v=>Math.max(Math.abs(v.x-p.cx),Math.abs(v.y-p.cy))*1.2))) / (zoom*.8);
       const {cx,cy,points} = plots[0];
       const inset = Math.ceil(parseFloat(getComputedStyle(canvas).getPropertyValue('--app-font-caption')) * 3 + 8);
-      const point = points.reduce((best,p)=>Math.hypot(p.x-cx,p.y-cy)<Math.hypot(best.x-cx,best.y-cy)?p:best);
+      const point = playerPoint ? { x: 2, y: -5 } : points.reduce((best,p)=>Math.hypot(p.x-cx,p.y-cy)<Math.hypot(best.x-cx,best.y-cy)?p:best);
       return [[point.x, point.y]].every(([px, py]) => {
         const x = (inset + (px - cx + halfSpan) / (2 * halfSpan) * (canvas.clientWidth - inset - 20)) * canvas.width / canvas.clientWidth;
         const y = (20 + (halfSpan - (py - cy)) / (2 * halfSpan) * (canvas.clientHeight - inset - 20)) * canvas.height / canvas.clientHeight;
         const pixels = canvas.getContext('2d').getImageData(Math.round(x)-3, Math.round(y)-3, 7, 7).data;
         return Array.from({length:49},(_,n)=>n*4).some(offset=>accent.every((value,i)=>Math.abs(pixels[offset+i]-value)<5));
       });
-    }, { zoom, weapons: calibration.weapons, accent: THEMES.light.accent.match(/[a-f0-9]{2}/gi).map(v => parseInt(v, 16)) });
+    }, { zoom, playerPoint, weapons: calibration.weapons, accent: (playerPoint ? THEMES.light.players.split(',')[7] : THEMES.light.accent).match(/[a-f0-9]{2}/gi).map(v => parseInt(v, 16)) });
   };
   await checkPlot(1);
+  const playShots = recoil.getByRole('button', { name: 'Play AK-47', exact: true });
+  assert.ok(await recoil.getByRole('button', { name: 'Play M4A4', exact: true }).isDisabled());
+  assert.ok(await recoil.getByRole('button', { name: 'Play M4A1-S', exact: true }).isDisabled());
+  await page.clock.install();
+  await page.clock.pauseAt(new Date());
+  await page.evaluate(() => {
+    const start = window.setInterval.bind(window), clear = window.clearInterval.bind(window);
+    window.shotIntervals = new Set();
+    window.setInterval = (callback, delay, ...args) => {
+      const id = start(callback, delay, ...args);
+      if (delay === 50) window.shotIntervals.add(id);
+      return id;
+    };
+    window.clearInterval = id => { window.shotIntervals.delete(id); clear(id); };
+  });
+  const recoilCanvases = () => recoil.locator('.recoil-plot canvas').evaluateAll(canvases => canvases.map(canvas => canvas.toDataURL()));
+  const completeShots = await recoilCanvases();
+  await playShots.click();
+  const pauseShots = recoil.getByRole('button', { name: 'Pause AK-47', exact: true });
+  await pauseShots.waitFor();
+  await page.clock.runFor(20);
+  const firstShot = await recoilCanvases();
+  assert.ok(firstShot[0] !== completeShots[0], 'Playback reveals a partial player trajectory');
+  assert.ok(firstShot.slice(1).every((image,i) => image === completeShots[i+1]), 'Other weapon panels do not change');
+  await checkPlot(1); // The full fixed reference remains visible during playback.
+  await page.clock.runFor(50);
+  const settledShot = await recoilCanvases();
+  assert.ok(settledShot[0] !== firstShot[0], 'The newly fired point settles to its normal size');
+  await pauseShots.click();
+  await playShots.waitFor();
+  assert.equal(await page.evaluate(() => window.shotIntervals.size), 0, 'Pause clears the interval');
+  const pausedShots = await recoilCanvases();
+  await page.clock.runFor(500);
+  assert.ok((await recoilCanvases()).every((image,i) => image === pausedShots[i]), 'Pause freezes the trajectory');
+  await playShots.click();
+  await page.clock.fastForward(1000);
+  await page.clock.runFor(20);
+  await playShots.waitFor();
+  await checkPlot(1, true); // The final player shot is visible again.
+  assert.equal(await page.evaluate(() => window.shotIntervals.size), 0, 'Completion clears the interval');
+  await playShots.click();
+  await pauseShots.waitFor();
+  await page.clock.runFor(1000);
+  await playShots.waitFor();
+  await playShots.click();
+  await pauseShots.waitFor();
+  await page.getByRole('tab', { name: 'Players', exact: true }).click();
+  assert.equal(await page.evaluate(() => window.shotIntervals.size), 0, 'Unmount clears the interval');
+  await page.getByRole('tab', { name: 'Charts', exact: true }).click();
+  await playShots.waitFor();
+  await page.clock.resume();
   const controlHeights = await recoil.locator('.recoil-controls .rt-Button,.recoil-controls .rt-IconButton,.recoil-controls .rt-SelectTrigger').evaluateAll(elements=>elements.map(el=>el.getBoundingClientRect().height));
   assert.ok(Math.max(...controlHeights)-Math.min(...controlHeights)<1,'Recoil controls share a height');
   const plot = recoil.locator('.recoil-plot').first();
@@ -287,9 +338,11 @@ try {
     assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
     if(process.env.UI_SCREENSHOT_DIR) await recoil.screenshot({path:process.env.UI_SCREENSHOT_DIR+'/recoil-'+width+'.png'});
   }
+  await playShots.click();
   await recoil.getByRole('combobox',{name:'Spray player'}).click();
   await page.getByRole('option',{name:'Player',exact:true}).nth(1).click();
   assert.equal(await recoil.getByText('No qualifying bursts',{exact:true}).count(),3);
+  assert.equal(await page.evaluate(() => window.shotIntervals.size), 0, 'Changing player clears the interval');
   assert.equal(await resetZoom.innerText(),'100%','Changing player fits the new trajectories');
   assert.ok(!(await resetZoom.isDisabled()),'Reference remains available without player bursts');
   await recoil.getByText('━ Actual',{exact:true}).first().waitFor();
