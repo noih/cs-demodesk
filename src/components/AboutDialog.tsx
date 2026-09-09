@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
 import { Badge, Button, Dialog, Flex, IconButton, Text } from '@radix-ui/themes';
-import { ExternalLinkIcon, InfoCircledIcon } from '@radix-ui/react-icons';
 import { useTranslation } from 'react-i18next';
 import { api } from '../api.ts';
+import logo from '../../src-tauri/icons/128x128.png';
 
 const THIRD_PARTY: Array<{ name: string; repo: string; license: string; url: string }> = [
   { name: 'HLAE', repo: 'advancedfx/advancedfx', license: 'custom', url: 'https://github.com/advancedfx/advancedfx' },
@@ -14,7 +14,7 @@ const THIRD_PARTY: Array<{ name: string; repo: string; license: string; url: str
 function LinkIcon({ url, label }: { url: string; label: string }) {
   return (
     <IconButton size="1" variant="ghost" color="gray" aria-label={label} onClick={() => void api.openUrl(url)}>
-      <ExternalLinkIcon />
+      <i aria-hidden="true" className="bi bi-box-arrow-up-right app-icon"  />
     </IconButton>
   );
 }
@@ -30,22 +30,25 @@ export function AboutDialog() {
     <Dialog.Root>
       {/* a plain button: wrapping the trigger in a Tooltip swallowed the click */}
       <Dialog.Trigger>
-        <Button variant="soft" color="gray">
-          <InfoCircledIcon /> {t('about.button')}
-        </Button>
+        <IconButton variant="ghost" color="gray" aria-label={t('about.button')} title={t('about.button')}>
+          <i aria-hidden="true" className="bi bi-info-circle app-icon" />
+        </IconButton>
       </Dialog.Trigger>
-      <Dialog.Content maxWidth="560px">
-        <Flex justify="between" align="baseline" gap="3">
-          <Dialog.Title mb="0">CS DemoDesk</Dialog.Title>
+      <Dialog.Content maxWidth="600px" style={{ padding: 32 }}>
+        <Flex justify="between" align="center" gap="3">
+          <Flex align="center" gap="3">
+            <img src={logo} alt="" width="48" height="48" style={{ background: 'var(--app-logo-background, #121518)', borderRadius: 10, padding: 4 }} />
+            <Dialog.Title mb="0">CS DemoDesk</Dialog.Title>
+          </Flex>
           <Text size="2" color="gray" className="mono">
             v{version ?? '…'}
           </Text>
         </Flex>
-        <Dialog.Description size="2" color="gray" mt="1">
+        <Dialog.Description size="2" color="gray" mt="4" mb="0" style={{ lineHeight: 1.7 }}>
           {t('about.tagline')}
         </Dialog.Description>
 
-        <Flex align="center" gap="2" mt="4" wrap="wrap">
+        <Flex align="center" gap="2" mt="5" wrap="wrap">
           <Text size="2">{t('about.author')}</Text>
           <Text size="2" color="gray" className="mono">
             github.com/noih/cs-demodesk
@@ -56,7 +59,7 @@ export function AboutDialog() {
           </Text>
         </Flex>
 
-        <Text as="div" size="2" weight="medium" mt="4" mb="2">
+        <Text as="div" size="2" weight="medium" mt="5" mb="2">
           {t('about.thirdParty')}
         </Text>
         <div className="about-list">

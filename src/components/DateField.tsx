@@ -1,6 +1,5 @@
 import { useState } from 'react';
 import { Button, Popover } from '@radix-ui/themes';
-import { CalendarIcon } from '@radix-ui/react-icons';
 import { DayPicker } from 'react-day-picker';
 import { enUS, ja, ko, ru, zhCN, zhTW } from 'date-fns/locale';
 import { useTranslation } from 'react-i18next';
@@ -24,8 +23,8 @@ export function DateField({ value, onChange, label, min, max }: { value: string;
   return (
     <Popover.Root open={open} onOpenChange={setOpen}>
       <Popover.Trigger>
-        <Button size="1" variant="surface" color="gray" aria-label={label} style={{ flex: 1, minWidth: 0 }}>
-          <CalendarIcon />
+        <Button size="2" variant="surface" color="gray" aria-label={label} style={{ flex: 1, minWidth: 0 }}>
+          <i aria-hidden="true" className="bi bi-calendar3 app-icon"  />
           {selected ? fmtDate(selected.getTime()) : label}
         </Button>
       </Popover.Trigger>

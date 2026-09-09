@@ -50,7 +50,7 @@
   },
   "about": {
     "button": "정보",
-    "tagline": "Counter-Strike 데모 분석 데스크톱 앱",
+    "tagline": "경기 데이터를 분석하고, 주요 순간을 다시 보며, 하이라이트를 내보내세요.",
     "author": "제작 NOIH",
     "openGithub": "GitHub 열기",
     "thirdParty": "서드파티 구성 요소",
@@ -61,7 +61,7 @@
     "refreshed": "업데이트됨",
     "refreshFailed": "새로 고침 실패",
     "videos": "동영상 {{n}}개",
-    "exportJobs": "{{status}}: 내보내기 작업 {{n}}개",
+    "exportJobs": "{{status}} {{n}}",
     "status": {
       "new": "미분석",
       "parsing": "분석 중",
@@ -244,7 +244,7 @@
   "replay": {
     "imageLoadFailed": "{{file}} 을(를) 불러올 수 없습니다",
     "downloadTools": "도구 다운로드",
-    "preparing": "리플레이 데이터 준비 중...",
+    "preparing": "준비 중",
     "collapsePanel": "패널 접기",
     "expandPanel": "패널 펼치기",
     "zoomIn": "확대",
@@ -339,5 +339,16 @@
     "dataDirHint": "데이터 폴더 자체를 선택하세요. 비우면 앱 옆의 demodesk-data를 사용합니다. 변경 사항은 재시작 후 적용되며 기존 파일은 이동되지 않습니다.",
     "restartRequired": "선택한 데이터 폴더를 사용하려면 앱을 재시작하세요. 아래 저장 공간 작업은 현재 폴더에 적용됩니다.",
     "autoParseHint": "새 데모는 하나씩 자동 분석됩니다. 실패한 데모는 분석 버튼을 클릭해야 다시 시도합니다."
+  },
+  "ui": {
+    "filter": "Demo 필터",
+    "light": "라이트 모드로 전환",
+    "dark": "다크 모드로 전환",
+    "queueCount": "처리 중 {{running}} · 대기 {{queued}}",
+    "queue": "영상 대기열",
+    "queueHint": "현재 작업과 클립입니다. Demo에서 상세 정보를 확인하세요.",
+    "goToDemo": "Demo 열기",
+    "clips": "클립 보기",
+    "queueEmpty": "진행 중인 작업 없음"
   }
 }

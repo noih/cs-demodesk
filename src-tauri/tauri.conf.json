@@ -13,8 +13,9 @@
     "windows": [
       {
         "title": "CS DemoDesk",
-        "width": 1440,
-        "height": 920,
+        "width": 1600,
+        "height": 1200,
+        "preventOverflow": true,
         "minWidth": 960,
         "minHeight": 640
       }

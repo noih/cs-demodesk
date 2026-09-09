@@ -1,6 +1,6 @@
+import { Spinner } from './Spinner.tsx';
 import { useEffect, useRef, useState } from 'react';
-import { AlertDialog, Badge, Box, Button, Callout, DropdownMenu, Flex, Heading, IconButton, Spinner, Tabs, Text, Tooltip } from '@radix-ui/themes';
-import { DotsHorizontalIcon, ReloadIcon } from '@radix-ui/react-icons';
+import { AlertDialog, Badge, Box, Button, Callout, DropdownMenu, Flex, Heading, IconButton, Tabs, Text, Tooltip } from '@radix-ui/themes';
 import { Trans, useTranslation } from 'react-i18next';
 import { api, errorText, mb, type DemoMeta, type ParsedDemo, type RenderJob, type Status } from '../api.ts';
 import { fmtDate } from '../i18n/index.ts';
@@ -10,20 +10,27 @@ import { RendersTab } from './RendersTab.tsx';
 import { ChartsTab } from './ChartsTab.tsx';
 import { ReplayTab } from './ReplayTab.tsx';
 
-export function DemoView({ meta, jobs, status, onChanged, onRemoved }: { meta: DemoMeta; jobs: RenderJob[]; status?: Status; onChanged: () => Promise<void>; onRemoved: () => void }) {
+export function DemoView({ meta, jobs, status, onChanged, onRemoved, requestedTab, selectionRequest }: { requestedTab: string; selectionRequest: number; meta: DemoMeta; jobs: RenderJob[]; status?: Status; onChanged: () => Promise<void>; onRemoved: () => void }) {
   const { t } = useTranslation();
   const [parsed, setParsed] = useState<ParsedDemo>();
-  const [tab, setTab] = useState('highlights');
+  const [loading, setLoading] = useState(true);
+  const [parseRequested, setParseRequested] = useState(false);
+  const parsing = parseRequested || meta.status === 'parsing';
+  const [tab, setTab] = useState(requestedTab);
+  useEffect(() => { setTab(requestedTab); }, [requestedTab, selectionRequest]);
   const tabScrollRef = useRef<HTMLDivElement>(null);
   const [confirmRemove, setConfirmRemove] = useState(false);
   const [loadError, setLoadError] = useState<string>();
 
   useEffect(() => {
     let alive = true;
+    setLoading(true);
+    setLoadError(undefined);
     api
       .demo(meta.id)
       .then((r) => alive && setParsed(r.parsed))
-      .catch((e) => alive && setLoadError(errorText(e)));
+      .catch((e) => alive && setLoadError(errorText(e)))
+      .finally(() => { if (alive) setLoading(false); });
     return () => {
       alive = false;
     };
@@ -33,6 +40,18 @@ export function DemoView({ meta, jobs, status, onChanged, onRemoved }: { meta: D
     void fn()
       .then(onChanged)
       .catch((e) => alert(errorText(e)));
+  const reparse = async () => {
+    if (parsing) return;
+    setParseRequested(true);
+    try {
+      await api.parse(meta.id);
+      await onChanged();
+    } catch (e) {
+      alert(errorText(e));
+    } finally {
+      setParseRequested(false);
+    }
+  };
   const doRemove = async () => {
     try {
       await api.removeDemo(meta.id);
@@ -47,25 +66,35 @@ export function DemoView({ meta, jobs, status, onChanged, onRemoved }: { meta: D
   const videoCount = jobs.reduce((count, job) => count + job.outputs.length, 0);
   const activeJobs = jobs.filter((j) => j.status === 'running' || j.status === 'queued').length;
 
+  if (loading && !parsed) {
+    return (
+      <Flex align="center" justify="center" gap="2" style={{ height: '100%' }} aria-busy="true">
+        <Spinner />
+        <Text color="gray">{t('replay.preparing')}</Text>
+      </Flex>
+    );
+  }
+
   return (
     <Flex direction="column" gap="3" style={{ height: '100%' }}>
-      <Flex direction="column" gap="2">
+      <Flex direction="column" gap="2" className="demo-heading">
         <Flex justify="between" align="center" gap="3">
           <Heading size="6" truncate style={{ minWidth: 0 }}>
             {parsed ? parsed.info.mapName : meta.name.replace(/\.dem$/i, '')}
           </Heading>
+          {parsed && <div className="match-score"><div className="team-a"><small>{t('common.teamA')}</small><strong>{parsed.score.A}</strong></div><div className="team-b"><small>{t('common.teamB')}</small><strong>{parsed.score.B}</strong></div></div>}
           <Flex gap="2" style={{ flex: 'none' }}>
-            {meta.status === 'parsed' && (
+            {(parsed || meta.status === 'parsed' || parsing) && (
               <Tooltip content={t('demoView.reparse')}>
-                <IconButton variant="soft" onClick={run(() => api.parse(meta.id))} aria-label={t('demoView.reparse')}>
-                  <ReloadIcon />
+                <IconButton variant="soft" onClick={() => void reparse()} disabled={parsing} aria-busy={parsing} aria-label={t('demoView.reparse')}>
+                  {parsing ? <Spinner size="1" /> : <i aria-hidden="true" className="bi bi-arrow-clockwise app-icon" />}
                 </IconButton>
               </Tooltip>
             )}
             <DropdownMenu.Root>
               <DropdownMenu.Trigger>
                 <IconButton variant="soft" aria-label={t('common.more')}>
-                  <DotsHorizontalIcon />
+                  <i aria-hidden="true" className="bi bi-three-dots app-icon"  />
                 </IconButton>
               </DropdownMenu.Trigger>
               <DropdownMenu.Content align="end">
@@ -84,12 +113,6 @@ export function DemoView({ meta, jobs, status, onChanged, onRemoved }: { meta: D
         <Flex align="center" gap="2" wrap="wrap">
           {parsed && (
             <>
-              <Badge color="blue" size="2">
-                A {parsed.score.A}
-              </Badge>
-              <Badge color="orange" size="2">
-                B {parsed.score.B}
-              </Badge>
               <Text size="2" color="gray">
                 {t('demoView.rounds', { count: parsed.rounds.length })}
               </Text>
@@ -122,7 +145,7 @@ export function DemoView({ meta, jobs, status, onChanged, onRemoved }: { meta: D
                 </Callout.Root>
               )}
               <Button size="3" onClick={run(() => api.parse(meta.id))}>
-                <ReloadIcon /> {meta.status === 'error' ? t('demoView.reparse') : t('demoView.parse')}
+                <i aria-hidden="true" className="bi bi-arrow-clockwise app-icon"  /> {meta.status === 'error' ? t('demoView.reparse') : t('demoView.parse')}
               </Button>
             </>
           )}
@@ -131,7 +154,7 @@ export function DemoView({ meta, jobs, status, onChanged, onRemoved }: { meta: D
 
       {parsed && (
         <Tabs.Root value={tab} onValueChange={setTab} style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-          <Tabs.List>
+          <Tabs.List className="demo-tabs">
             <Tabs.Trigger value="highlights">
               {t('demoView.tabs.highlights')}
               <Badge ml="2" variant="soft" color="gray">

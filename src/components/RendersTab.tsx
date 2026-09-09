@@ -1,7 +1,7 @@
+import { Spinner } from './Spinner.tsx';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { AlertDialog, Badge, Box, Button, Callout, Card, DataList, Dialog, DropdownMenu, Flex, Grid, Heading, IconButton, Link, Progress, Spinner, Text } from '@radix-ui/themes';
-import { DotsHorizontalIcon, ExternalLinkIcon, FileTextIcon, OpenInNewWindowIcon } from '@radix-ui/react-icons';
+import { AlertDialog, Badge, Box, Button, Callout, Card, DataList, Dialog, DropdownMenu, Flex, Heading, IconButton, Link, Progress, Text } from '@radix-ui/themes';
 import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
 import { api, errorText, mb, type ParsedDemo, type RenderJob } from '../api.ts';
@@ -9,7 +9,7 @@ import { LogView } from './LogView.tsx';
 import { fmtDateTime } from '../i18n/index.ts';
 
 function initializePreview(video: HTMLVideoElement | null) {
-  if (video) video.volume = 0.5;
+  if (video) video.volume = 0.15;
 }
 const COLOR: Record<RenderJob['status'], 'gray' | 'amber' | 'green' | 'red'> = { queued: 'amber', running: 'amber', done: 'green', error: 'red', cancelled: 'gray' };
 const STAGES = ['starting', 'recording', 'encoding'] as const;
@@ -50,8 +50,8 @@ function JobCard({ job, parsed, onChanged }: { job: RenderJob; parsed: ParsedDem
   const hasOptions = job.options.trueView || !job.options.hud || !job.options.crosshair || !job.options.radar || !job.options.killFeed || !job.options.viewmodel || !job.options.tracers || job.options.chat || job.options.xray || job.options.voice;
 
   return (
-    <Card>
-      <Flex align="center" gap="3" wrap="wrap">
+    <Card className="job-card">
+      <Flex align="center" gap="3" wrap="wrap" className="job-header">
         <Badge color={COLOR[job.status]} size="2">
           {t(`renders.status.${job.status}`)}
         </Badge>
@@ -67,18 +67,18 @@ function JobCard({ job, parsed, onChanged }: { job: RenderJob; parsed: ParsedDem
         )}
         {revealTarget && (
           <Button size="1" variant="soft" onClick={() => void api.reveal(revealTarget)}>
-            <OpenInNewWindowIcon /> {t('renders.openFolder')}
+            <i aria-hidden="true" className="bi bi-folder2-open app-icon"  /> {t('renders.openFolder')}
           </Button>
         )}
         <DropdownMenu.Root>
           <DropdownMenu.Trigger>
             <IconButton size="1" variant="soft" aria-label={t('common.more')}>
-              <DotsHorizontalIcon />
+              <i aria-hidden="true" className="bi bi-three-dots app-icon"  />
             </IconButton>
           </DropdownMenu.Trigger>
           <DropdownMenu.Content align="end">
             <DropdownMenu.Item onSelect={() => setLogOpen(true)}>
-              <FileTextIcon /> {t('renders.viewLog', { n: job.log.length })}
+              <i aria-hidden="true" className="bi bi-file-earmark-text app-icon"  /> {t('renders.viewLog', { n: job.log.length })}
             </DropdownMenu.Item>
             {!active && (
               <>
@@ -93,7 +93,7 @@ function JobCard({ job, parsed, onChanged }: { job: RenderJob; parsed: ParsedDem
       </Flex>
 
       {active && (
-        <Box mt="3">
+        <Box className="job-content">
           <Flex justify="between" align="center" mb={pct !== undefined ? '1' : '0'}>
             <Flex align="center" gap="2">
               <Spinner size="1" />
@@ -121,9 +121,9 @@ function JobCard({ job, parsed, onChanged }: { job: RenderJob; parsed: ParsedDem
       )}
 
       {job.outputs.length > 0 && (
-        <Flex gap="4" mt="3" align="start" wrap="wrap">
+        <div className="job-outputs">
           {/* same small preview for every file (merged video included); the player is one click away */}
-          <Grid columns="repeat(auto-fit, minmax(min(100%, 240px), 1fr))" gap="3" style={{ flex: `0 1 ${job.outputs.length === 1 ? 340 : 680}px`, minWidth: 0 }}>
+          <div className="job-previews">
             {job.outputs.map((o) => {
               const title = o.isFinal ? t('renders.merged') : (titleOf(o.highlightId) ?? o.title);
               return (
@@ -135,14 +135,14 @@ function JobCard({ job, parsed, onChanged }: { job: RenderJob; parsed: ParsedDem
                   <Text as="div" size="1" color="gray">
                     {mb(o.bytes)} ·{' '}
                     <Link size="1" href="#" onClick={(e) => (e.preventDefault(), void api.open(o.file))}>
-                      {t('renders.openInPlayer')} <ExternalLinkIcon style={{ verticalAlign: '-2px' }} />
+                      {t('renders.openInPlayer')} <i aria-hidden="true" className="bi bi-box-arrow-up-right app-icon" style={{ verticalAlign: '-2px' }} />
                     </Link>
                   </Text>
                 </Box>
               );
             })}
-          </Grid>
-          <DataList.Root size="1" style={{ flex: '1 1 280px', minWidth: 0 }}>
+          </div>
+          <DataList.Root size="1" className="job-details">
             <DataList.Item>
               <DataList.Label minWidth="0" style={{ flexBasis: 90 }}>{t('renders.files')}</DataList.Label>
               <DataList.Value>{job.outputs.length}</DataList.Value>
@@ -187,7 +187,7 @@ function JobCard({ job, parsed, onChanged }: { job: RenderJob; parsed: ParsedDem
               </DataList.Value>
             </DataList.Item>
           </DataList.Root>
-        </Flex>
+        </div>
       )}
 
       <Dialog.Root open={logOpen} onOpenChange={setLogOpen}>
@@ -267,6 +267,7 @@ export function RendersTab({ jobs, parsed, onChanged, scrollRef }: { jobs: Rende
     return <Text as="p" size="2" color="gray">{t('renders.empty')}</Text>;
   }
   return (
+    <><Flex align="center" gap="3" mb="3"><Heading size="3">{t('demoView.tabs.videos')}</Heading><Text size="1" color="gray">{t('demoList.videos', { n: jobs.reduce((n, job) => n + job.outputs.length, 0) })} · {mb(jobs.reduce((n, job) => n + job.outputs.reduce((bytes, output) => bytes + output.bytes, 0), 0))}</Text></Flex>
     <div ref={listRef} style={{ height: virtualizer.getTotalSize(), position: 'relative', overflowAnchor: 'none' }}>
       {virtualizer.getVirtualItems().map((row) => (
         <div
@@ -278,6 +279,6 @@ export function RendersTab({ jobs, parsed, onChanged, scrollRef }: { jobs: Rende
           <JobCard job={jobs[row.index]!} parsed={parsed} onChanged={onChanged} />
         </div>
       ))}
-    </div>
+    </div></>
   );
 }

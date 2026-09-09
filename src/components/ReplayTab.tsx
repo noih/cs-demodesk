@@ -1,6 +1,6 @@
+import { Spinner } from './Spinner.tsx';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Box, Button, Callout, Flex, IconButton, Select, Spinner, Text, Tooltip } from '@radix-ui/themes';
-import { ChevronLeftIcon, ChevronRightIcon, MinusIcon, PauseIcon, PlayIcon, PlusIcon, TrackNextIcon, TrackPreviousIcon } from '@radix-ui/react-icons';
+import { Box, Button, Callout, Flex, IconButton, Select, Text, Tooltip } from '@radix-ui/themes';
 import { useTranslation } from 'react-i18next';
 import i18n from '../i18n/index.ts';
 import { api, errorText, type DemoMeta, type MapAssets, type ParsedDemo, type RoundInfo, type Team } from '../api.ts';
@@ -279,10 +279,10 @@ function Player({ loaded }: { loaded: Loaded }) {
   return (
     <Flex direction="column" gap="2" style={{ height: '100%', minHeight: 0 }}>
       <Flex gap="3" align="start">
-        {/* round strip: border colour = winner side */}
+        {/* Round strip: only the bottom edge marks the winning side. */}
         <Flex gap="1" wrap="wrap" style={{ flex: 1 }}>
           {rounds.map((r) => (
-            <button key={r.round} className={`round-pill ${curRound?.round === r.round ? 'active' : ''}`} style={{ borderColor: r.winner ? teamColor(r.winner) : 'var(--gray-a6)' }} onClick={() => gotoRound(r)} title={t('common.roundN', { n: r.round })}>
+            <button key={r.round} className={`round-pill ${curRound?.round === r.round ? 'active' : ''}`} aria-pressed={curRound?.round === r.round} style={{ borderBottomColor: r.winner === 'CT' ? 'var(--app-teamA)' : r.winner === 'TERRORIST' ? 'var(--app-teamB)' : 'transparent' }} onClick={() => gotoRound(r)} title={t('common.roundN', { n: r.round })}>
               {r.round}
             </button>
           ))}
@@ -291,7 +291,7 @@ function Player({ loaded }: { loaded: Loaded }) {
         <div className={panelOpen ? 'replay-side replay-side-head' : undefined}>
           <Tooltip content={panelOpen ? t('replay.collapsePanel') : t('replay.expandPanel')}>
             <IconButton size="1" variant="soft" color="gray" onClick={() => setPanelOpen((v) => !v)} aria-label={panelOpen ? t('replay.collapsePanel') : t('replay.expandPanel')}>
-              {panelOpen ? <ChevronRightIcon /> : <ChevronLeftIcon />}
+              {panelOpen ? <i aria-hidden="true" className="bi bi-chevron-right app-icon"  /> : <i aria-hidden="true" className="bi bi-chevron-left app-icon"  />}
             </IconButton>
           </Tooltip>
         </div>
@@ -305,6 +305,7 @@ function Player({ loaded }: { loaded: Loaded }) {
             <div className="replay-hud replay-clock">
               <div className="dim">{t('common.roundN', { n: curRound.round })}</div>
               <div className={`replay-time ${state.bomb?.state === 'planted' ? 'bomb' : ''}`}>{state.clock}</div>
+              {state.bomb?.state === 'planted' && <div className="replay-bomb-status"><span aria-hidden="true" />C4 · {t('charts.bombPlanted')}</div>}
             </div>
           )}
           {toggles.killFeed && state.feed.length > 0 && (
@@ -315,7 +316,7 @@ function Player({ loaded }: { loaded: Loaded }) {
                   <span className="dim">
                     {' '}
                     {kv.weapon}
-                    {kv.headshot ? ' ✦' : ''}{' '}
+                    {kv.headshot && <i aria-hidden="true" className="bi bi-crosshair app-icon" />}{' '}
                   </span>
                   <span style={{ color: teamColor(kv.victim.team) }}>{kv.victim.name}</span>
                 </div>
@@ -324,10 +325,10 @@ function Player({ loaded }: { loaded: Loaded }) {
           )}
           <div className="replay-hud replay-zoom">
             <IconButton size="2" variant="surface" color="gray" onClick={() => setZoomTo(viewRef.current.zoom * ZOOM_STEP)} aria-label={t('replay.zoomIn')}>
-              <PlusIcon />
+              <i aria-hidden="true" className="bi bi-plus-lg app-icon"  />
             </IconButton>
             <IconButton size="2" variant="surface" color="gray" onClick={() => setZoomTo(viewRef.current.zoom / ZOOM_STEP)} aria-label={t('replay.zoomOut')} disabled={zoom === 1}>
-              <MinusIcon />
+              <i aria-hidden="true" className="bi bi-dash app-icon"  />
             </IconButton>
           </div>
           <div className="replay-hud replay-settings">
@@ -349,7 +350,7 @@ function Player({ loaded }: { loaded: Loaded }) {
       <Flex align="center" gap="2">
         <Tooltip content={playing ? t('replay.pauseHint') : t('replay.playHint')}>
           <IconButton onClick={() => play(!playing)} aria-label={playing ? t('replay.pause') : t('replay.play')}>
-            {playing ? <PauseIcon /> : <PlayIcon />}
+            {playing ? <i aria-hidden="true" className="bi bi-pause-fill app-icon"  /> : <i aria-hidden="true" className="bi bi-play-fill app-icon"  />}
           </IconButton>
         </Tooltip>
         <Select.Root
@@ -371,13 +372,13 @@ function Player({ loaded }: { loaded: Loaded }) {
         </Select.Root>
         <Tooltip content={t('replay.prevRoundHint')}>
           <IconButton variant="soft" onClick={() => stepRound(-1)} aria-label={t('replay.prevRound')}>
-            <TrackPreviousIcon />
+            <i aria-hidden="true" className="bi bi-skip-start-fill app-icon"  />
           </IconButton>
         </Tooltip>
         <RoundTimeline replay={replay} round={curRound} tick={state.tick} onSeek={seek} />
         <Tooltip content={t('replay.nextRoundHint')}>
           <IconButton variant="soft" onClick={() => stepRound(1)} aria-label={t('replay.nextRound')}>
-            <TrackNextIcon />
+            <i aria-hidden="true" className="bi bi-skip-end-fill app-icon"  />
           </IconButton>
         </Tooltip>
       </Flex>

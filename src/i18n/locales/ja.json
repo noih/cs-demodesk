@@ -50,7 +50,7 @@
   },
   "about": {
     "button": "情報",
-    "tagline": "Counter-Strike デモ分析デスクトップアプリ",
+    "tagline": "試合データを分析し、重要な場面をリプレイして、ハイライトを書き出す。",
     "author": "作者 NOIH",
     "openGithub": "GitHub を開く",
     "thirdParty": "サードパーティコンポーネント",
@@ -61,7 +61,7 @@
     "refreshed": "更新しました",
     "refreshFailed": "更新に失敗しました",
     "videos": "動画 {{n}} 本",
-    "exportJobs": "{{status}}：書き出しジョブ {{n}} 件",
+    "exportJobs": "{{status}} {{n}}",
     "status": {
       "new": "未解析",
       "parsing": "解析中",
@@ -244,7 +244,7 @@
   "replay": {
     "imageLoadFailed": "{{file}} を読み込めません",
     "downloadTools": "ツールをダウンロード",
-    "preparing": "リプレイデータを準備中…",
+    "preparing": "準備中",
     "collapsePanel": "パネルを折りたたむ",
     "expandPanel": "パネルを展開",
     "zoomIn": "拡大",
@@ -339,5 +339,16 @@
     "dataDirHint": "データフォルダー自体を選択します。クリアするとアプリと同じ場所の demodesk-data を使用します。変更は再起動後に適用され、既存のファイルは移動されません。",
     "restartRequired": "選択したデータフォルダーを使用するにはアプリを再起動してください。以下のストレージ操作は現在のフォルダーに適用されます。",
     "autoParseHint": "新しいデモは1つずつ自動解析されます。失敗したデモは「解析」をクリックするまで再試行されません。"
+  },
+  "ui": {
+    "filter": "Demo を絞り込む",
+    "light": "ライトモードに切替",
+    "dark": "ダークモードに切替",
+    "queueCount": "処理中 {{running}} · 待機 {{queued}}",
+    "queue": "動画キュー",
+    "queueHint": "処理中のジョブとクリップ。Demo を開いて詳細を確認できます。",
+    "goToDemo": "Demo を開く",
+    "clips": "クリップを表示",
+    "queueEmpty": "実行中のジョブはありません"
   }
 }

@@ -50,7 +50,7 @@
   },
   "about": {
     "button": "關於",
-    "tagline": "Counter-Strike demo 分析桌面工具",
+    "tagline": "分析對局數據，重播關鍵時刻，匯出精彩片段。",
     "author": "作者 NOIH",
     "openGithub": "開啟 GitHub",
     "thirdParty": "第三方元件",
@@ -61,7 +61,7 @@
     "refreshed": "已更新",
     "refreshFailed": "更新失敗",
     "videos": "{{n}} 部影片",
-    "exportJobs": "{{status}}：{{n}} 個輸出工作",
+    "exportJobs": "{{status}} {{n}}",
     "status": {
       "new": "未解析",
       "parsing": "解析中",
@@ -244,7 +244,7 @@
   "replay": {
     "imageLoadFailed": "無法載入 {{file}}",
     "downloadTools": "下載工具",
-    "preparing": "準備回放資料…",
+    "preparing": "準備中",
     "collapsePanel": "收合面板",
     "expandPanel": "展開面板",
     "zoomIn": "放大",
@@ -339,5 +339,16 @@
     "dataDirHint": "選擇資料目錄本身。清除後使用 app 旁的 demodesk-data。變更於重新啟動後生效，不會搬移既有檔案。",
     "restartRequired": "請重新啟動 app 以使用選定的資料目錄。下方儲存空間操作仍使用目前目錄。",
     "autoParseHint": "新 demo 會依序自動解析；解析失敗後，只有手動點選解析才會重試。"
+  },
+  "ui": {
+    "filter": "篩選 Demo",
+    "light": "切換為淺色模式",
+    "dark": "切換為深色模式",
+    "queueCount": "處理中 {{running}} · 等待 {{queued}}",
+    "queue": "影片處理佇列",
+    "queueHint": "目前的處理工作與片段，可前往所屬 Demo。",
+    "goToDemo": "前往",
+    "clips": "查看片段",
+    "queueEmpty": "目前沒有處理中的工作"
   }
 }

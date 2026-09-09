@@ -50,7 +50,7 @@
   },
   "about": {
     "button": "About",
-    "tagline": "Counter-Strike demo analysis desktop app",
+    "tagline": "Analyze match stats, replay key moments, and export highlights.",
     "author": "Author NOIH",
     "openGithub": "Open GitHub",
     "thirdParty": "Third-party components",
@@ -61,7 +61,7 @@
     "refreshed": "Updated",
     "refreshFailed": "Refresh failed",
     "videos": "{{n}} videos",
-    "exportJobs": "{{status}}: {{n}} export jobs",
+    "exportJobs": "{{status}} {{n}}",
     "status": {
       "new": "Not parsed",
       "parsing": "Parsing",
@@ -248,7 +248,7 @@
   "replay": {
     "imageLoadFailed": "Cannot load {{file}}",
     "downloadTools": "Download tools",
-    "preparing": "Preparing replay data...",
+    "preparing": "Preparing",
     "collapsePanel": "Collapse panel",
     "expandPanel": "Expand panel",
     "zoomIn": "Zoom in",
@@ -343,5 +343,16 @@
     "dataDirHint": "Select the data folder itself. Clear to use demodesk-data beside the app. Changes apply after restarting; existing files are not moved.",
     "restartRequired": "Restart the app to use the selected data directory. Storage actions below still use the current directory.",
     "autoParseHint": "New demos are parsed automatically, one at a time. Failed demos are retried only when you click Parse."
+  },
+  "ui": {
+    "filter": "Filter demos",
+    "light": "Switch to light mode",
+    "dark": "Switch to dark mode",
+    "queueCount": "Processing {{running}} · Waiting {{queued}}",
+    "queue": "Video queue",
+    "queueHint": "Current jobs and clips. Open a demo to view its details.",
+    "goToDemo": "Open demo",
+    "clips": "Show clips",
+    "queueEmpty": "No active jobs"
   }
 }

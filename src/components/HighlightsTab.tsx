@@ -1,6 +1,5 @@
 import { useMemo, useState } from 'react';
 import { Badge, Box, Button, Callout, Checkbox, DataList, Dialog, Flex, Grid, SegmentedControl, Select, Slider, Switch, Table, Text } from '@radix-ui/themes';
-import { VideoIcon } from '@radix-ui/react-icons';
 import { useTranslation } from 'react-i18next';
 import { api, clock, errorText, DEFAULT_RENDER_OPTIONS, type DemoMeta, type Highlight, type ParsedDemo, type RenderOptions, type Status } from '../api.ts';
 
@@ -81,7 +80,7 @@ export function HighlightsTab({ meta, parsed, status, onRendered }: { meta: Demo
           {allVisibleSelected ? t('highlights.deselectAll') : t('highlights.selectAll')}
         </Button>
         <Button size="2" disabled={selected.size === 0 || submitting} onClick={() => setDialog(true)}>
-          <VideoIcon /> {selected.size ? t('highlights.exportN', { n: selected.size }) : t('highlights.export')}
+          <i aria-hidden="true" className="bi bi-camera-video app-icon"  /> {selected.size ? t('highlights.exportN', { n: selected.size }) : t('highlights.export')}
         </Button>
       </Flex>
 

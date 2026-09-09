@@ -1,5 +1,6 @@
+import { Spinner } from './Spinner.tsx';
 import { useEffect, useState, type ReactNode } from 'react';
-import { Button, Callout, Flex, Heading, Spinner, Text } from '@radix-ui/themes';
+import { Button, Callout, Flex, Heading, Text } from '@radix-ui/themes';
 import { open } from '@tauri-apps/plugin-dialog';
 import { useTranslation } from 'react-i18next';
 import { api, errorText } from '../api.ts';

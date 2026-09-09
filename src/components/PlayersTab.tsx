@@ -1,3 +1,4 @@
+import { useAppTheme } from '../AppTheme.tsx';
 import { Badge, Card, Flex, Grid, Heading, Table, Text, Tooltip } from '@radix-ui/themes';
 import { useTranslation } from 'react-i18next';
 import type { ParsedDemo, PlayerStats } from '../api.ts';
@@ -81,7 +82,8 @@ export function PlayersTab({ parsed }: { parsed: ParsedDemo }) {
   const { t } = useTranslation();
   const a = parsed.stats.filter((p) => p.team === 'A');
   const b = parsed.stats.filter((p) => p.team === 'B');
-  const colors = playerColors(parsed.stats);
+  const { colors: theme } = useAppTheme();
+  const colors = playerColors(parsed.stats, theme.players.split(','));
   return (
     <Flex direction="column" gap="2">
       {/* two tables side by side only when each gets its full column widths; otherwise stacked, full width */}

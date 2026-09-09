@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Box, Button, Callout, Flex, Spinner, Text } from '@radix-ui/themes';
-import { ExclamationTriangleIcon } from '@radix-ui/react-icons';
+import { Button, Callout, Flex, IconButton, Text, Tooltip } from '@radix-ui/themes';
 import { api, errorText, type DemoMeta, type RenderJob, type Status } from './api.ts';
 import { createAppSync } from './appSync.ts';
 import { applyLanguage } from './i18n/index.ts';
@@ -10,17 +9,27 @@ import { DemoList } from './components/DemoList.tsx';
 import { DemoView } from './components/DemoView.tsx';
 import { SettingsView } from './components/SettingsView.tsx';
 
+import { useAppTheme } from './AppTheme.tsx';
+import { AboutDialog } from './components/AboutDialog.tsx';
+import { QueueDialog } from './components/QueueDialog.tsx';
+
 export function App() {
   return <StartupGate><ReadyApp /></StartupGate>;
 }
 
 function ReadyApp() {
   const { t } = useTranslation();
+  const theme = useAppTheme();
+  const [toolbar, setToolbar] = useState<HTMLDivElement | null>(null);
+  const [selectionRequest, setSelectionRequest] = useState(0);
+  const [requestedTab, setRequestedTab] = useState('highlights');
   const [status, setStatus] = useState<Status>();
   const [demos, setDemos] = useState<DemoMeta[]>([]);
   const [jobs, setJobs] = useState<RenderJob[]>([]);
   const [selectedId, setSelectedId] = useState<string>();
   const [showSettings, setShowSettings] = useState(false);
+  const [toolsRequest, setToolsRequest] = useState(0);
+  const showTools = () => { setShowSettings(true); setToolsRequest(n => n + 1); };
   const [error, setError] = useState<string>();
 
   const syncRef = useRef<ReturnType<typeof createAppSync> | undefined>(undefined);
@@ -50,57 +59,44 @@ function ReadyApp() {
   }, []);
 
   const selected = demos.find((d) => d.id === selectedId);
-  const runningJobs = jobs.filter((j) => j.status === 'running' || j.status === 'queued').length;
+
 
   return (
     <div className="layout">
+      <header className="app-header">
+        <div ref={setToolbar} className="header-tools" />
+        <Flex align="center" gap="2" ml="auto">
+          <QueueDialog jobs={jobs} demos={demos} onSelect={id => { setSelectedId(id); setShowSettings(false); setRequestedTab('renders'); setSelectionRequest(n => n + 1); }} />
+          <Tooltip content={t(theme.appearance === 'dark' ? 'ui.light' : 'ui.dark')}><IconButton variant="ghost" aria-label={t(theme.appearance === 'dark' ? 'ui.light' : 'ui.dark')} onClick={theme.toggle}>{theme.appearance === 'dark' ? <i aria-hidden="true" className="bi bi-sun app-icon"  /> : <i aria-hidden="true" className="bi bi-moon app-icon" />}</IconButton></Tooltip>
+          <AboutDialog /><Button variant="ghost" aria-pressed={showSettings} color="gray" onClick={() => setShowSettings(v => !v)}>{t('common.settings')}</Button>
+        </Flex>
+      </header>
       <aside className="sidebar">
         <DemoList
           demos={demos}
           jobs={jobs}
           selectedId={selectedId}
-          settingsOpen={showSettings}
+          toolbar={toolbar}
+          selectionRequest={selectionRequest}
           onSelect={(id) => {
+            setRequestedTab('highlights');
             setSelectedId(id);
             setShowSettings(false);
           }}
-          onToggleSettings={() => setShowSettings((v) => !v)}
           onChanged={refresh}
           onRefresh={rescan}
         />
-        {/* footer only when there is something to act on or wait for */}
-        {(error || (status && !status.ok) || runningJobs > 0) && (
-          <Box p="3" style={{ borderTop: '1px solid var(--gray-a4)' }}>
-            {error ? (
-              <Callout.Root color="red" size="1">
-                <Callout.Icon>
-                  <ExclamationTriangleIcon />
-                </Callout.Icon>
-                <Callout.Text>{t('app.backendError', { error })}</Callout.Text>
-              </Callout.Root>
-            ) : status && !status.ok ? (
-              <Callout.Root color="red" size="1" style={{ cursor: 'pointer' }} onClick={() => setShowSettings(true)}>
-                <Callout.Icon>
-                  <ExclamationTriangleIcon />
-                </Callout.Icon>
-                <Callout.Text>{t('app.renderNotReady')}</Callout.Text>
-              </Callout.Root>
-            ) : (
-              <Callout.Root color="amber" size="1">
-                <Callout.Icon>
-                  <Spinner size="1" />
-                </Callout.Icon>
-                <Callout.Text>{t('app.rendering', { n: runningJobs })}</Callout.Text>
-              </Callout.Root>
-            )}
-          </Box>
-        )}
+
       </aside>
+      {(error || (status && !status.ok)) && <div className="app-notice">
+        {error ? <Callout.Root color="red" size="1"><Callout.Text>{t('app.backendError', { error })}</Callout.Text><Button size="1" variant="soft" onClick={() => setShowSettings(true)}>{t('common.settings')}</Button></Callout.Root>
+          : <Button className="environment-notice" variant="surface" color="amber" onClick={showTools}><i aria-hidden="true" className="bi bi-exclamation-triangle app-icon" />{t('app.renderNotReady')}<i aria-hidden="true" className="bi bi-arrow-right app-icon" /></Button>}
+      </div>}
       <main className="main">
         {showSettings ? (
-          <SettingsView onChanged={refresh} />
+          <SettingsView onChanged={refresh} toolsRequest={toolsRequest} />
         ) : selected ? (
-          <DemoView key={selected.id} meta={selected} jobs={jobs.filter((j) => j.demoId === selected.id)} status={status} onChanged={refresh} onRemoved={() => setSelectedId(undefined)} />
+          <DemoView requestedTab={requestedTab} selectionRequest={selectionRequest} key={selected.id} meta={selected} jobs={jobs.filter((j) => j.demoId === selected.id)} status={status} onChanged={refresh} onRemoved={() => setSelectedId(undefined)} />
         ) : (
           <Flex align="center" justify="center" style={{ height: '100%' }}>
             <Flex direction="column" align="center">
@@ -108,7 +104,7 @@ function ReadyApp() {
                 {t('app.pickDemo')}
               </Text>
               {status && !status.ok && (
-                <Button mt="3" onClick={() => setShowSettings(true)}>
+                <Button mt="3" onClick={showTools}>
                   {t('app.goToSettings')}
                 </Button>
               )}

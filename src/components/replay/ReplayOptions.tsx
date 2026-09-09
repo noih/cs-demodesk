@@ -1,5 +1,4 @@
 import { Box, Button, Flex, Popover, SegmentedControl, Switch, Text } from '@radix-ui/themes';
-import { MixerHorizontalIcon } from '@radix-ui/react-icons';
 import { useTranslation } from 'react-i18next';
 import type { DrawToggles } from '../../replay/draw.ts';
 
@@ -13,7 +12,7 @@ export function ReplayOptions({ toggles, onChange }: { toggles: DrawToggles; onC
     <Popover.Root>
       <Popover.Trigger>
         <Button size="2" variant="surface" color="gray" aria-label={t('common.options')}>
-          <MixerHorizontalIcon /> {t('common.options')}
+          <i aria-hidden="true" className="bi bi-sliders app-icon"  /> {t('common.options')}
         </Button>
       </Popover.Trigger>
       <Popover.Content size="1" align="end" style={{ width: 236 }}>

@@ -1,40 +1,35 @@
+import { Spinner } from './Spinner.tsx';
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
+import { format } from 'date-fns';
 import { useTranslation } from 'react-i18next';
-import { Badge, Box, Callout, Flex, IconButton, Spinner, Text, TextField, Tooltip } from '@radix-ui/themes';
-import { ClockIcon, Cross2Icon, ExclamationTriangleIcon, GearIcon, MagnifyingGlassIcon, PlusIcon, ReloadIcon, VideoIcon } from '@radix-ui/react-icons';
+import { Badge, Box, Callout, Flex, IconButton, Popover, Text, TextField, Tooltip } from '@radix-ui/themes';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { open } from '@tauri-apps/plugin-dialog';
-import { api, errorText, mb, type DemoMeta, type RenderJob } from '../api.ts';
-import { fmtDate, fmtTime } from '../i18n/index.ts';
+import { api, errorText, type DemoMeta, type RenderJob } from '../api.ts';
 import { DateField, dayOf } from './DateField.tsx';
 
 const STATUS_COLOR: Record<DemoMeta['status'], 'gray' | 'amber' | 'green' | 'red'> = { new: 'gray', parsing: 'amber', parsed: 'green', error: 'red' };
-const ROW_HEIGHT = 100;
-
-/** "match730_003841245499151614385_1512260798_142.dem" → "match730_…_142" */
-function shortName(name: string): string {
-  const base = name.replace(/\.dem$/i, '');
-  if (base.length <= 28) return base;
-  const parts = base.split('_');
-  return parts.length >= 3 ? `${parts[0]}_…_${parts[parts.length - 1]}` : `${base.slice(0, 14)}…${base.slice(-10)}`;
-}
+const ROW_HEIGHT = 80;
 
 export function DemoList({
   demos,
   jobs,
   selectedId,
-  settingsOpen,
+  toolbar,
+  selectionRequest,
   onSelect,
-  onToggleSettings,
+
   onChanged,
   onRefresh,
 }: {
   demos: DemoMeta[];
   jobs: RenderJob[];
   selectedId?: string;
-  settingsOpen: boolean;
+  toolbar: HTMLElement | null;
+  selectionRequest: number;
   onSelect: (id: string) => void;
-  onToggleSettings: () => void;
+
   onChanged: () => Promise<void>;
   onRefresh: () => Promise<boolean>;
 }) {
@@ -44,11 +39,12 @@ export function DemoList({
   const refreshRequest = useRef(0);
   useEffect(() => () => { refreshRequest.current++; }, []);
   useEffect(() => {
-    if (!refreshStatus || refreshStatus === 'refreshing') return;
+    if (!refreshStatus || refreshStatus === 'refreshing' || refreshStatus === 'refreshFailed') return;
     const timer = setTimeout(() => setRefreshStatus(undefined), 3000);
     return () => clearTimeout(timer);
   }, [refreshStatus]);
   const handleRefresh = async () => {
+    if (refreshStatus === 'refreshing') return;
     const request = ++refreshRequest.current;
     setRefreshStatus('refreshing');
     try {
@@ -115,46 +111,55 @@ export function DemoList({
       setBusy(false);
     }
   };
-  const filtered = visible.length !== demos.length;
+  const handledSelection = useRef(0);
+  const filtered = !!(query.trim() || from || to);
+  useEffect(() => {
+    if (!selectionRequest) return;
+    setQuery(''); setFrom(''); setTo('');
+  }, [selectionRequest]);
+  useEffect(() => {
+    if (!selectionRequest || handledSelection.current === selectionRequest || query || from || to) return;
+    const index = visible.findIndex(d => d.id === selectedId);
+    if (index >= 0) {
+      virtualizer.scrollToIndex(index, { align: 'auto' });
+      handledSelection.current = selectionRequest;
+    }
+  }, [selectionRequest, selectedId, visible, query, from, to, virtualizer]);
 
   return (
     <Flex direction="column" style={{ flex: 1, minHeight: 0 }}>
-      <div role="status" aria-live="polite" aria-atomic="true" style={{ position: 'fixed', right: 24, bottom: 24, zIndex: 100, pointerEvents: 'none' }}>
+      <div role="status" aria-live="polite" aria-atomic="true" style={{ position: 'fixed', right: 24, top: 68, zIndex: 100 }}>
         {refreshStatus && (
           <Callout.Root size="1" color={refreshStatus === 'refreshFailed' ? 'red' : 'green'} variant="surface">
             <Callout.Text>{t(`demoList.${refreshStatus}`)}</Callout.Text>
+            <IconButton size="1" variant="ghost" aria-label={t('common.close')} onClick={() => setRefreshStatus(undefined)}><i aria-hidden="true" className="bi bi-x-lg app-icon"  /></IconButton>
           </Callout.Root>
         )}
       </div>
-      <Flex direction="column" gap="2" px="3" py="3">
+      {toolbar && createPortal(<Flex align="center" gap="2">
         <Flex align="center" gap="2">
           <Tooltip content={t('demoList.addTooltip')}>
-            <IconButton size="2" onClick={() => void addFiles()} disabled={busy} aria-label={t('demoList.add')}>
-              <PlusIcon />
+            <IconButton size="2" variant="ghost" onClick={() => void addFiles()} disabled={busy} aria-label={t('demoList.add')}>
+              <i aria-hidden="true" className="bi bi-plus-lg app-icon"  />
             </IconButton>
           </Tooltip>
           <Tooltip content={t('demoList.rescanTooltip')}>
-            <IconButton size="2" variant="soft" onClick={() => void handleRefresh()} disabled={busy} aria-label={t('demoList.rescan')}>
-              {refreshStatus === 'refreshing' ? <Spinner size="1" /> : <ReloadIcon />}
-            </IconButton>
-          </Tooltip>
-          <Text size="2" color="gray" style={{ flex: 1 }}>
-            {filtered ? t('demoList.countFiltered', { shown: visible.length, total: demos.length }) : t('demoList.count', { count: demos.length })}
-          </Text>
-          <Tooltip content={t('common.settings')}>
-            <IconButton size="2" variant={settingsOpen ? 'solid' : 'soft'} onClick={onToggleSettings} aria-label={t('common.settings')}>
-              <GearIcon />
+            <IconButton size="2" variant="soft" onClick={() => void handleRefresh()} disabled={busy || refreshStatus === 'refreshing'} aria-busy={refreshStatus === 'refreshing'} aria-label={t('demoList.rescan')}>
+              {refreshStatus === 'refreshing' ? <Spinner size="1" /> : <i aria-hidden="true" className="bi bi-arrow-clockwise app-icon"  />}
             </IconButton>
           </Tooltip>
         </Flex>
-        <TextField.Root size="1" placeholder={t('demoList.searchPlaceholder')} value={query} onChange={(e) => setQuery(e.target.value)}>
+        <Popover.Root>
+          <Popover.Trigger><IconButton variant="ghost" className="filter-trigger" data-filtered={filtered} aria-label={t('ui.filter')}><i aria-hidden="true" className={'bi app-icon ' + (filtered ? 'bi-funnel-fill' : 'bi-funnel')} /></IconButton></Popover.Trigger>
+          <Popover.Content width="320px" align="start"><Flex direction="column" gap="3">
+        <TextField.Root size="2" placeholder={t('demoList.searchPlaceholder')} value={query} onChange={(e) => setQuery(e.target.value)}>
           <TextField.Slot>
-            <MagnifyingGlassIcon />
+            <i aria-hidden="true" className="bi bi-search app-icon"  />
           </TextField.Slot>
           {query && (
             <TextField.Slot side="right">
-              <IconButton size="1" variant="ghost" color="gray" onClick={() => setQuery('')} aria-label={t('demoList.clearSearch')}>
-                <Cross2Icon />
+              <IconButton size="2" variant="ghost" color="gray" onClick={() => setQuery('')} aria-label={t('demoList.clearSearch')}>
+                <i aria-hidden="true" className="bi bi-x-lg app-icon"  />
               </IconButton>
             </TextField.Slot>
           )}
@@ -176,11 +181,14 @@ export function DemoList({
               }}
               aria-label={t('demoList.clearDates')}
             >
-              <Cross2Icon />
+              <i aria-hidden="true" className="bi bi-x-lg app-icon"  />
             </IconButton>
           )}
         </Flex>
-      </Flex>
+
+          </Flex></Popover.Content>
+        </Popover.Root>
+      </Flex>, toolbar)}
 
       <div ref={scrollRef} className="demo-scroll">
         {visible.length > 0 ? (
@@ -189,50 +197,25 @@ export function DemoList({
               const d = visible[row.index]!;
               const exports = exportsByDemo.get(d.id);
               return (
-                <Tooltip key={d.id} content={d.path} side="right">
-                  <div className={`demo-item ${d.id === selectedId ? 'active' : ''}`} style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: row.size, transform: `translateY(${row.start}px)` }} onClick={() => onSelect(d.id)}>
-                    <Flex justify="between" align="center" gap="2">
-                      <Text weight="bold" truncate>
-                        {d.mapName ?? shortName(d.name)}
-                      </Text>
-                      <Badge size="1" color={STATUS_COLOR[d.status]} variant="soft" style={{ flex: 'none' }}>
-                        {t(`demoList.status.${d.status}`)}
-                      </Badge>
-                    </Flex>
-                    <Text as="div" size="1" color="gray" truncate>
-                      {d.summary ? (
-                        <>
-                          <Text color="blue">{d.summary.scoreA}</Text> – <Text color="orange">{d.summary.scoreB}</Text> · {t('demoList.highlights', { count: d.summary.highlights })}
-                        </>
-                      ) : (
-                        shortName(d.name)
-                      )}
-                    </Text>
-                    <Text as="div" size="1" color="gray" truncate>
-                      {fmtDate(d.mtimeMs)} {fmtTime(d.mtimeMs)} · {mb(d.bytes)}
-                    </Text>
-                    <Flex align="center" gap="2" mt="1" style={{ whiteSpace: 'nowrap' }}>
-                      <Badge size="1" color={exports?.videos ? 'green' : 'gray'} variant="soft">
-                        <VideoIcon /> {t('demoList.videos', { n: exports?.videos ?? 0 })}
-                      </Badge>
-                      {exports && exports.queued > 0 && (
-                        <Badge size="1" color="amber" title={t('demoList.exportJobs', { status: t('renders.status.queued'), n: exports.queued })} aria-label={t('demoList.exportJobs', { status: t('renders.status.queued'), n: exports.queued })}>
-                          <ClockIcon /> {exports.queued}
-                        </Badge>
-                      )}
-                      {exports && exports.running > 0 && (
-                        <Badge size="1" color="blue" title={t('demoList.exportJobs', { status: t('renders.status.running'), n: exports.running })} aria-label={t('demoList.exportJobs', { status: t('renders.status.running'), n: exports.running })}>
-                          <ReloadIcon /> {exports.running}
-                        </Badge>
-                      )}
-                      {exports && exports.error > 0 && (
-                        <Badge size="1" color="red" title={t('demoList.exportJobs', { status: t('renders.status.error'), n: exports.error })} aria-label={t('demoList.exportJobs', { status: t('renders.status.error'), n: exports.error })}>
-                          <ExclamationTriangleIcon /> {exports.error}
-                        </Badge>
-                      )}
-                    </Flex>
-                  </div>
-                </Tooltip>
+
+                  <button key={d.id} type="button" aria-pressed={d.id === selectedId} className={'demo-item ' + (d.id === selectedId ? 'active' : '')} style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: row.size, transform: 'translateY(' + row.start + 'px)' }} onClick={() => onSelect(d.id)}>
+                    <span className="demo-chip">{d.mapName?.replace(/^de_/, '').slice(0, 2) ?? '—'}</span>
+                    <span className="demo-copy">
+                      <span className="demo-name"><Text weight="bold" truncate>{d.mapName ?? t('common.unknown')}</Text>
+                        {d.summary && <span className="demo-score"><span>{d.summary.scoreA}</span><i>:</i><span>{d.summary.scoreB}</span></span>}
+                      </span>
+                      <span className="demo-date mono">{format(d.mtimeMs, 'yyyy-MM-dd HH:mm')}</span>
+                      <span className="demo-states">
+                        <span>{t('demoList.videos', { n: exports?.videos ?? 0 })}</span>
+                        <span className="demo-job-states">
+                        {d.status !== 'parsed' && <Badge size="1" color={STATUS_COLOR[d.status]}>{t(`demoList.status.${d.status}`)}</Badge>}
+                        {exports && exports.running > 0 && <span className="queue-note">{t('demoList.exportJobs', { status: t('renders.status.running'), n: exports.running })}</span>}
+                        {exports && exports.queued > 0 && <span className="queue-note">{t('demoList.exportJobs', { status: t('renders.status.queued'), n: exports.queued })}</span>}
+                        {exports && exports.error > 0 && <Badge color="red"><i aria-hidden="true" className="bi bi-exclamation-triangle app-icon"  />{exports.error}</Badge>}
+                        </span>
+                      </span>
+                    </span><i aria-hidden="true" className="bi bi-chevron-right demo-chevron app-icon" />
+                  </button>
               );
             })}
           </div>
