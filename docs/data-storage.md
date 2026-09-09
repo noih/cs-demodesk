@@ -82,3 +82,34 @@ General statistics are rebuilt by the parse. The detailed 2D stream is generated
 on demand when 2D is opened again. Shared radar assets, source demos and exported
 videos are retained. Paths are relative to the selected data folder, which is
 `demodesk-data` beside the executable unless changed in Settings.
+
+## Privacy when developing and publishing
+
+Treat demos and their derived data as private test material. Steam IDs, account
+IDs, player names, profile links and personal filesystem paths can identify a
+player even without credentials. Logs, screenshots, replay caches and exported
+statistics can contain the same information as the source demo.
+
+- Keep real captures and diagnostic output in ignored `out/`, `target/`,
+  `research/` or `demodesk-data/` directories. Do not attach them to public issues,
+  releases or CI artifacts without reviewing and sanitizing their contents.
+- Use invented names and synthetic identifiers in committed tests and examples.
+  Renaming a player alone does not anonymize their Steam ID or account ID.
+  Do not publish a mapping back to the real identities.
+- Run `npm run test:privacy` and review the staged diff before committing.
+  `node scripts/check-repo-privacy.mjs --staged` checks the exact index contents.
+  The scanner detects common patterns; names, images and binary files still need
+  manual review. An ignored file may already be tracked in older commits.
+
+If private data was committed, deleting the current file or adding an ignore rule
+does not remove earlier copies. Sanitize every affected branch and tag, then
+verify the rewritten history before replacing remote references. Keep version tag
+names pointing to the corresponding sanitized commits; re-sign signed tags after
+the rewrite. Changed commit hashes invalidate their original signatures.
+
+Local cleanup is not remote cleanup. Separately review release attachments, CI
+artifacts, logs and cached commit views. Existing clones can retain old objects;
+avoid merging the old history back. After verification, expire local reflogs and
+prune unreachable objects containing the removed data. See GitHub's
+[sensitive-data removal procedure](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/removing-sensitive-data-from-a-repository)
+for remote cleanup and support requests.

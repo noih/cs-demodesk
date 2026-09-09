@@ -147,3 +147,9 @@ HANDOFF.md
 
 # Local investigation notes; maintained guidance belongs in docs/.
 /research/
+
+# Private recordings and local Python artifacts
+*.dem
+*.dem.gz
+*.dem.bz2
+__pycache__/
