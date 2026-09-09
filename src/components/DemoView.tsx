@@ -155,14 +155,14 @@ export function DemoView({ meta, jobs, status, onChanged, onRemoved, requestedTa
       {parsed && (
         <Tabs.Root value={tab} onValueChange={setTab} style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
           <Tabs.List className="demo-tabs">
+            <Tabs.Trigger value="players">{t('demoView.tabs.players')}</Tabs.Trigger>
+            <Tabs.Trigger value="charts">{t('demoView.tabs.charts')}</Tabs.Trigger>
             <Tabs.Trigger value="highlights">
               {t('demoView.tabs.highlights')}
               <Badge ml="2" variant="soft" color="gray">
                 {parsed.highlights.length}
               </Badge>
             </Tabs.Trigger>
-            <Tabs.Trigger value="players">{t('demoView.tabs.players')}</Tabs.Trigger>
-            <Tabs.Trigger value="charts">{t('demoView.tabs.charts')}</Tabs.Trigger>
             <Tabs.Trigger value="renders">
               {t('demoView.tabs.videos')}
               <Badge ml="2" variant="soft" color="gray">
