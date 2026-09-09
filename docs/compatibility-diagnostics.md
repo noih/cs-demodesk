@@ -92,103 +92,19 @@ and replacing stale scan artifacts. The scan itself compiles the native observer
 
 ## Statistics and recoil data after a CS2 update
 
-This section is the maintenance procedure. It does not promise that an unknown
-future demo format will parse, and it does not add automatic game-version detection.
-The calculation and export command are documented in
-[Statistics: regenerate after a game update](statistics.md#regenerate-after-a-game-update).
+Use the [Recoil calibration SOP](recoil-calibration.md) for fixed-reference
+capture and updates. The chart reads the bundled calibration, not the legacy
+parsed `recoilReference` field. Calibration-only changes do not invalidate match
+statistics caches; restore the accepted JSON from Git to roll back.
 
-### Current compatibility contract
+Parser changes that alter cached statistics or player trajectories require the
+appropriate `PARSED_SCHEMA_VERSION` bump in `store.rs`. Validate old/new demo
+fixtures rather than assuming successful parsing proves field semantics are
+unchanged. Do not change expected statistics to hide regressions. Reparse derived
+analysis after a parser rollback; retain original recordings, settings and videos.
 
-- Recoil references are estimated from each demo's own events. The application
-  does not load a global weapon-pattern file or use the currently installed game's
-  recoil values for an old recording. Exported JSON is an inspection artifact,
-  not an application input.
-- `recoilReference` is optional on the frontend and defaults to an empty map when
-  deserializing older results in Rust. Missing reference data leaves the player's
-  trajectory available; it must not become a zero-valued reference curve.
-- Missing or ambiguous firing-event pairs are excluded. They must not be filled
-  with zeros, bridged across a missing shot, or replaced with another build's curve.
-  Missing weapons and unobserved later shots remain unavailable.
-- A reference is not an official ideal pattern. Subtick aim changes and shot timing
-  affect the estimate. A new game build can change these semantics even if the
-  parser still produces numbers.
-- Recorded analysis caches use `PARSED_SCHEMA_VERSION` (currently 12) in
-  `crates/demodesk-core/src/store.rs`. Startup/scan freshness checks compare schema,
-  demo size and modification time. A stale summary invalidates its parsed JSON and
-  replay cache; original demos and exported videos are not deleted by this check.
-  Automatic parsing follows the normal readiness/error rules in
-  [Data storage](data-storage.md). Persisted parse errors require an explicit retry.
-- The standalone export has its own `schemaVersion: 1` and
-  `method: same-tick-firing-minus-eye-angles-v1`. These are separate from the app's
-  cache version and the CS2 build number. `generatedAt` is the export time, not the
-  recording time or proof of its game version.
-
-### What to version
-
-| Change | Maintenance action |
-| --- | --- |
-| CS2 update only; existing fields retain their meaning | Generate a new-build artifact and test old/new demos. Do not bump schemas solely because CS2 updated. |
-| Parser fix changes stored statistics or reference results | Bump `PARSED_SCHEMA_VERSION` so existing analysis is recomputed. Keep the original demo. |
-| Pairing, axes, units, burst eligibility or averaging semantics change | Change the exported method identifier and bump the parsed cache version. Record why old/new results differ. |
-| Export JSON shape changes incompatibly | Bump export `schemaVersion`; document the old/new shapes. Any future reader must explicitly handle supported versions. |
-| Add an optional serialized field | Supply a safe absent-field default. If old caches must be recomputed to populate it, also bump the parsed cache version. |
-| Only label, colour, drawing order or zoom changes | No data-schema or method bump. Verify UI behaviour. |
-
-Do not change the meaning of an existing method identifier while keeping its name.
-The current export has no importer, so there is no automatic export migration.
-If import is added later, unknown versions must be reported as unsupported rather
-than guessed or silently treated as the latest version.
-
-### Rebuild and compare
-
-1. Preserve an old-build demo and its accepted export. Record its known CS2 build
-   and the app commit used for the export in the review notes. The source SHA-256
-   identifies the file; it cannot identify the CS2 build by itself. If the recording's
-   build is unknown, state that instead of reading the installed game's build ID.
-2. Record a completed demo on the updated game. Include repeated fully recovered
-   AK-47, M4A4 and M4A1-S bursts; full magazines are needed to observe late shots.
-   Keep recording conditions and firing cadence comparable. Do not pool different
-   game builds into one accepted reference.
-3. Run the script with English filenames and a different output filename for each
-   build. The output directory must already exist. The script overwrites the
-   specified JSON, so do not reuse the accepted old artifact's path:
-
-   ```powershell
-   node scripts/export-recoil-reference.mjs "E:\replays\old-build.dem" "E:\replays\recoil-reference-old-build.json"
-   node scripts/export-recoil-reference.mjs "E:\replays\new-build.dem" "E:\replays\recoil-reference-new-build.json"
-   ```
-
-4. Check the source hash, method/schema, available weapons, observed shot count,
-   per-shot sample counts, finite angles and aligned first-shot origin. Later-shot
-   means with one sample are observations, not evidence of a stable standard.
-   Compare matching shot indices and units; never rescale or shift one curve to
-   manufacture agreement. A change can reflect the game, different burst timing,
-   sample composition or a parser error; successful JSON generation alone does
-   not distinguish them.
-5. If fields changed, inspect `fire_bullets` in the vendored event decoder and the
-   matching code in `crates/demodesk-core/src/aim.rs`. Verify tick/Steam-ID identity,
-   eye/firing-angle timing, recoil-index meaning, weapon item IDs (7 = AK-47,
-   16 = M4A4, 60 = M4A1-S), yaw wrap and compensation direction. Preserve the older
-   format where demonstrably supported; otherwise report unavailable data.
-6. Validate both old and new demos after any parser change. Record the tested game
-   builds, source hashes, app commit, observed differences and sample coverage.
-   Retain a reproducible failing case for any format fix. Do not adjust expected
-   statistics merely to make a regression pass.
-
-Run the existing focused checks from the repository root:
-
-```powershell
-cargo test -p demodesk-core --lib
-cargo clippy -p demodesk-core --all-targets -- -D warnings
-npm run build
-npm run test:ui
-```
-
-If an update must be rolled back, restore the accepted parser/method, invalidate
-or explicitly reparse affected derived analysis, and regenerate it from the
-original demos. Do not relabel newly computed JSON as an old schema or overwrite
-accepted evidence to hide a difference. Keep cache cleanup scoped to derived
-analysis; do not remove source demos, settings, jobs or videos.
+Keep private recordings and investigation output outside version control. See
+[scripts README](../scripts/README.md#private-test-data) for handling rules.
 
 ## Existing application logs
 

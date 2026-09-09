@@ -8,7 +8,7 @@ A Windows desktop tool for Counter-Strike 2 demos (single portable `.exe`): matc
 
 ### Match statistics
 
-Score, round results, and per-player stats (K/D/A, ADR, headshots, utility damage, multi-kills, clutches) with round timeline and comparison charts.
+Review match results and player performance across combat, utility and round situations. Comparison charts, round trends and recoil plots help explore the match from different angles.
 
 ### Highlight videos
 
