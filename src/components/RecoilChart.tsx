@@ -6,6 +6,7 @@ import { useAppTheme } from '../AppTheme.tsx';
 import { EChart } from '../charts/EChart.tsx';
 import type { ParsedDemo, RecoilPoint } from '../api.ts';
 
+import calibration from '../data/recoil-reference.json';
 
 const WEAPONS = [['ak47', 'AK-47'], ['m4a1', 'M4A4'], ['m4a1_silencer', 'M4A1-S']] as const;
 
@@ -31,7 +32,7 @@ export function RecoilChart({ parsed }: { parsed: ParsedDemo }) {
   const player = parsed.stats.find(p => p.steamid === selected) ?? parsed.stats[0];
   const plots = WEAPONS.map(([id, label]) => {
     const points = player?.recoil?.[id] ?? [];
-    const reference = parsed.recoilReference?.[id] ?? [];
+    const reference = calibration.weapons[id];
     const minX = Math.min(0, ...reference.map(p => p.x)), maxX = Math.max(0, ...reference.map(p => p.x));
     const minY = Math.min(0, ...reference.map(p => p.y)), maxY = Math.max(0, ...reference.map(p => p.y));
     return { id, label, points, reference, cx: (minX + maxX) / 2, cy: (minY + maxY) / 2 };

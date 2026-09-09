@@ -1,0 +1,32 @@
+{
+  "ak47": {
+    "itemId": 7,
+    "magazine": 30,
+    "fireSeconds": 3.5,
+    "mode": 0,
+    "tickGap": [
+      5,
+      8
+    ]
+  },
+  "m4a1": {
+    "itemId": 16,
+    "magazine": 30,
+    "fireSeconds": 3.3,
+    "mode": 0,
+    "tickGap": [
+      5,
+      8
+    ]
+  },
+  "m4a1_silencer": {
+    "itemId": 60,
+    "magazine": 20,
+    "fireSeconds": 2.5,
+    "mode": 1,
+    "tickGap": [
+      5,
+      8
+    ]
+  }
+}

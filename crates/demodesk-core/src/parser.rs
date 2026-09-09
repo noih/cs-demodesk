@@ -22,7 +22,6 @@ const EVENTS: &[&str] = &[
     "player_death",
     "player_hurt",
     "weapon_fire",
-    "fire_bullets",
     "player_blind",
     "round_start",
     "round_freeze_end",
@@ -195,7 +194,6 @@ impl DemoParser {
             })).collect();
             (r.round, metrics)
         }).collect();
-        let recoil_reference = crate::aim::recoil_reference(&out.game_events, &rounds, 64.0);
         Ok(DemoData {
             round_metrics,
             info: DemoInfo {
@@ -211,7 +209,7 @@ impl DemoParser {
             activity,
             aim,
             recoil,
-            recoil_reference,
+            recoil_reference: Default::default(), // Legacy cache field; the chart uses a bundled calibration.
         })
     }
 }

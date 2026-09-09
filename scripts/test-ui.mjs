@@ -3,6 +3,7 @@ import { readdir, readFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { preview } from 'vite';
 import { initialAppearance, THEMES } from '../src/themes.ts';
+const calibration = JSON.parse(await readFile(new URL('../src/data/recoil-reference.json', import.meta.url), 'utf8'));
 const require = createRequire(import.meta.url);
 const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
 assert.equal(initialAppearance('light', true), 'light');
@@ -224,19 +225,23 @@ try {
   assert.ok(!(await zoomOut.isDisabled()));
   const checkPlot = async (zoom) => {
     // Check known shot positions, without depending on tooltip/label rasterization.
-    await page.waitForFunction(({ zoom, accent }) => {
+    await page.waitForFunction(({ zoom, accent, weapons }) => {
       const canvas = document.querySelector('[data-testid="recoil-chart"] canvas');
-      const halfSpan = 3 / (zoom * .8);
-      const cx = -1, cy = -2;
+      const plots = [weapons.ak47,weapons.m4a1,weapons.m4a1_silencer].map(points => {
+        const xs = points.map(p=>p.x), ys = points.map(p=>p.y);
+        return { points, cx: (Math.min(0,...xs)+Math.max(0,...xs))/2, cy: (Math.min(0,...ys)+Math.max(0,...ys))/2 };
+      });
+      const halfSpan = Math.max(3,...plots.flatMap(p=>p.points.map(v=>Math.max(Math.abs(v.x-p.cx),Math.abs(v.y-p.cy))*1.2))) / (zoom*.8);
+      const {cx,cy,points} = plots[0];
       const inset = Math.ceil(parseFloat(getComputedStyle(canvas).getPropertyValue('--app-font-caption')) * 3 + 8);
-      const point = {x:-2,y:-3};
+      const point = points.reduce((best,p)=>Math.hypot(p.x-cx,p.y-cy)<Math.hypot(best.x-cx,best.y-cy)?p:best);
       return [[point.x, point.y]].every(([px, py]) => {
         const x = (inset + (px - cx + halfSpan) / (2 * halfSpan) * (canvas.clientWidth - inset - 20)) * canvas.width / canvas.clientWidth;
         const y = (20 + (halfSpan - (py - cy)) / (2 * halfSpan) * (canvas.clientHeight - inset - 20)) * canvas.height / canvas.clientHeight;
         const pixels = canvas.getContext('2d').getImageData(Math.round(x)-3, Math.round(y)-3, 7, 7).data;
         return Array.from({length:49},(_,n)=>n*4).some(offset=>accent.every((value,i)=>Math.abs(pixels[offset+i]-value)<5));
       });
-    }, { zoom, accent: THEMES.light.accent.match(/[a-f0-9]{2}/gi).map(v => parseInt(v, 16)) });
+    }, { zoom, weapons: calibration.weapons, accent: THEMES.light.accent.match(/[a-f0-9]{2}/gi).map(v => parseInt(v, 16)) });
   };
   await checkPlot(1);
   const controlHeights = await recoil.locator('.recoil-controls .rt-Button,.recoil-controls .rt-IconButton,.recoil-controls .rt-SelectTrigger').evaluateAll(elements=>elements.map(el=>el.getBoundingClientRect().height));
