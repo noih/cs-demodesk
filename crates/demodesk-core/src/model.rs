@@ -149,6 +149,8 @@ pub struct DemoData {
     pub aim: BTreeMap<SteamId, BTreeMap<String, crate::aim::AimStats>>,
     #[serde(default)]
     pub recoil: BTreeMap<SteamId, BTreeMap<String, Vec<crate::aim::RecoilPoint>>>,
+    #[serde(default)]
+    pub recoil_reference: BTreeMap<String, Vec<crate::aim::RecoilPoint>>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -186,7 +188,7 @@ pub struct Highlight {
     pub anchor_tick: i32,
     pub score: f64,
     pub tags: Vec<String>,
-    /// Human readable summary e.g. "Player B — 3K (2 HS, clutch) 1v3 won · R13"
+    /// Human readable summary e.g. "Player A — 3K (2 HS, clutch) 1v3 won · R13"
     pub title: String,
     pub kills: Vec<KillEvent>,
     /// Per-rule score contributions, for tuning

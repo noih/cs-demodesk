@@ -425,10 +425,14 @@
     "queueEmpty": "No active jobs"
   },
   "recoil": {
-    "resetZoom": "Reset zoom (fit all)",
+    "clipped": "{{n}} player points outside the view; zoom out to see them.",
+    "noReference": "No paired firing-angle samples; reference unavailable.",
+    "reference": "Reference (estimated)",
+    "you": "Your mean",
+    "resetZoom": "Reset zoom (reference)",
     "title": "Single-match spray movement",
     "player": "Spray player",
-    "hint": "Mean view-angle movement from the first shot, by weapon. Includes target tracking; this is not a bullet-impact pattern or an isolated recoil-control score.",
+    "hint": "Mean view movement versus compensation estimated from this demo’s firing angles, pooled by weapon. First shots align; the reference is centred. Subtick aim changes can affect the estimate; this is not an official ideal curve or a recoil score.",
     "bursts": "{{n}} bursts",
     "empty": "No qualifying bursts",
     "horizontal": "X° · right +",

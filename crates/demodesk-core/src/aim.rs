@@ -192,6 +192,53 @@ pub fn recoil(events: &[GameEvent], rounds: &[RoundInfo], tick_rate: f64) -> BTr
     out
 }
 
+/// Empirical compensation reference from this demo, not a version-independent ideal.
+/// FireBullets supplies the firing angle before random spread. Its difference from
+/// the same-tick eye angle estimates recoil; subtick aim changes remain measurement noise.
+pub fn recoil_reference(events: &[GameEvent], rounds: &[RoundInfo], tick_rate: f64) -> BTreeMap<String, Vec<RecoilPoint>> {
+    use parser::second_pass::variants::Variant;
+    let mut bullets = HashMap::new();
+    for event in events.iter().filter(|e| e.name == "fire_bullets") {
+        let key = (event.tick, Fields(event).str("user_steamid"));
+        // Ambiguous pairs must not silently pick whichever event came last.
+        bullets.entry(key).and_modify(|v| *v = None).or_insert(Some(event));
+    }
+    let samples: Vec<_> = events.iter().filter(|e| e.name == "weapon_fire").map(|event| {
+        let f = Fields(event);
+        let compensation = (|| {
+            let b = Fields(*bullets.get(&(event.tick, f.str("user_steamid")))?.as_ref()?);
+            let expected = match weapon(&f.str("weapon")) { "ak47" => 7, "m4a1" => 16, "m4a1_silencer" => 60, _ => return None };
+            if b.int("item_def_index") != expected || (b.opt_num("recoil_index")? - f.opt_num("user_fl_recoil_idx")?).abs() > 0.01 { return None; }
+            let pitch = b.opt_num("angles_x")? - f.opt_num("user_pitch")?;
+            let yaw = (b.opt_num("angles_y")? - f.opt_num("user_yaw")? + 180.0).rem_euclid(360.0) - 180.0;
+            if !pitch.is_finite() || !yaw.is_finite() || pitch.abs() > 90.0 { return None; }
+            Some((pitch, yaw))
+        })();
+        let mut sample = event.clone();
+        // recoil() converts eye angles to screen axes and aligns each fresh burst.
+        for field in &mut sample.fields {
+            if field.name == "user_pitch" { field.data = compensation.map(|(p, _)| Variant::F32(-p as f32)); }
+            if field.name == "user_yaw" { field.data = compensation.map(|(_, y)| Variant::F32(-y as f32)); }
+        }
+        sample
+    }).collect();
+    let mut reference: BTreeMap<String, Vec<RecoilPoint>> = BTreeMap::new();
+    for weapons in recoil(&samples, rounds, tick_rate).into_values() {
+        for (gun, points) in weapons {
+            let pooled = reference.entry(gun).or_default();
+            for (i, p) in points.into_iter().enumerate() {
+                if pooled.len() <= i { pooled.push(RecoilPoint::default()); }
+                let mean = &mut pooled[i];
+                mean.samples += p.samples;
+                let weight = f64::from(p.samples) / f64::from(mean.samples);
+                mean.x += (p.x - mean.x) * weight;
+                mean.y += (p.y - mean.y) * weight;
+            }
+        }
+    }
+    reference
+}
+
 #[cfg(test)]
 mod recoil_tests {
     use super::*;
@@ -219,6 +266,48 @@ mod recoil_tests {
             shot(270,0.,Some(0.),0.,"ak47"), shot(290,1.,Some(1.),1.,"ak47"), shot(296,2.,Some(2.),2.,"ak47"),
             shot(401,0.,Some(0.),0.,"ak47"), shot(407,1.,Some(1.),1.,"ak47"), shot(413,2.,Some(2.),2.,"ak47"),
         ];
+        let mut with_bullets = events.clone();
+        for e in &events {
+            let f = Fields(e);
+            let Some(yaw) = f.opt_num("user_yaw") else { continue };
+            let index = f.num("user_fl_recoil_idx");
+            let item = match weapon(&f.str("weapon")) { "ak47" => 7, "m4a1" => 16, _ => 60 };
+            let mut b = e.clone();
+            b.name = "fire_bullets".into();
+            for (name, value) in [("angles_x", f.num("user_pitch") - index * 1.5), ("angles_y", yaw + index * 0.5), ("item_def_index", item as f64), ("recoil_index", index)] {
+                b.fields.push(EventField { name: name.into(), data: Some(Variant::F32(value as f32)) });
+            }
+            with_bullets.push(b);
+        }
+        with_bullets.reverse();
+        let reference = recoil_reference(&with_bullets, std::slice::from_ref(&round), 64.0);
+        let expected = &reference["ak47"];
+        assert_eq!(expected.iter().map(|p| p.samples).collect::<Vec<_>>(), vec![2,2,2,1]);
+        assert_eq!(expected.iter().map(|p| (p.x,p.y)).collect::<Vec<_>>(), vec![(0.,0.),(0.5,-1.5),(1.,-3.),(1.5,-4.5)]);
+        // Pool by burst counts, not equal weights for each player's mean.
+        let mut pooled_events = with_bullets.clone();
+        for event in with_bullets.iter().filter(|e| [10,16,22].contains(&e.tick)) {
+            let index = Fields(event).num("user_fl_recoil_idx") as f32;
+            let mut other = event.clone();
+            for field in &mut other.fields {
+                if field.name == "user_steamid" { field.data = Some(Variant::String("q".into())); }
+                if let Some(Variant::F32(value)) = &mut field.data {
+                    if field.name == "angles_x" { *value -= index * 1.5; }
+                    if field.name == "angles_y" { *value += index * 0.5; }
+                }
+            }
+            pooled_events.push(other);
+        }
+        let pooled = recoil_reference(&pooled_events, std::slice::from_ref(&round), 64.0);
+        assert_eq!(pooled["ak47"][1].samples, 3);
+        assert!((pooled["ak47"][1].x - 2.0 / 3.0).abs() < 1e-6);
+        assert_eq!(pooled["ak47"][1].y, -2.0);
+        // Missing or duplicate pairs cannot manufacture a reference or bridge gaps.
+        with_bullets.retain(|e| !(e.name == "fire_bullets" && e.tick == 66));
+        let duplicate = with_bullets.iter().find(|e| e.name == "fire_bullets" && e.tick == 16).unwrap().clone();
+        with_bullets.push(duplicate);
+        assert!(!recoil_reference(&with_bullets, std::slice::from_ref(&round), 64.0).contains_key("ak47"));
+        assert!(recoil_reference(&events, std::slice::from_ref(&round), 64.0).is_empty());
         events.reverse(); // Message order is not assumed.
         let result = recoil(&events, &[round], 64.0);
         let points = &result["p"]["ak47"];

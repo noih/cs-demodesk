@@ -74,6 +74,8 @@ pub struct RoundSummary {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ParsedDemo {
+    #[serde(default)]
+    pub recoil_reference: BTreeMap<String, Vec<crate::aim::RecoilPoint>>,
     pub info: DemoInfo,
     pub rounds: Vec<RoundInfo>,
     pub kills: Vec<KillEvent>,
@@ -313,7 +315,7 @@ pub fn build_parsed_demo(demo: DemoData) -> ParsedDemo {
     let stats = compute_stats(&demo, &highlights);
     let score = compute_score(&demo);
     let round_summaries = round_summaries(&demo);
-    ParsedDemo { info: demo.info, rounds: demo.rounds, kills: demo.kills, highlights, stats, score, round_summaries, parsed_at: chrono::Utc::now().to_rfc3339() }
+    ParsedDemo { recoil_reference: demo.recoil_reference, info: demo.info, rounds: demo.rounds, kills: demo.kills, highlights, stats, score, round_summaries, parsed_at: chrono::Utc::now().to_rfc3339() }
 }
 
 #[cfg(test)]

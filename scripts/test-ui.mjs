@@ -37,7 +37,7 @@ try {
       if(cmd==='get_demo' && window.emptyParsed)return {meta:demos.find(d=>d.id===args.id)};
       if(cmd==='get_demo' && window.failDemo)throw Error('Cannot read demo');
       if(cmd==='get_demo' && window.holdDemo)await new Promise(resolve=>window.releaseDemo=resolve);
-      if(cmd==='get_demo')return { meta:demos.find(d=>d.id===args.id),parsed:{info:{mapName:demos.find(d=>d.id===args.id).mapName,tickRate:64,players:[]},parsedAt:'2026-09-08',score:{A:13,B:9},rounds:[],roundSummaries:[{round:1,winner:'A',killsA:5,killsB:2,players:{'1':{kills:5,deaths:2,damage:450,awp:1,flashed:2,cash:800},'2':{kills:2,deaths:5,damage:220,awp:0,flashed:0,cash:300}}}],stats:[player,{...player,steamid:'2',name:'Opponent',team:'B',recoil:{},opponents:{'1':1}}],highlights:[{id:'highlight-1',player:{steamid:'1',name:'Player'},round:8,startTick:640,endTick:1280,score:8,tags:['3k'],title:'Player — 3 kills · R8',kills:[],breakdown:{}}]}};
+      if(cmd==='get_demo')return { meta:demos.find(d=>d.id===args.id),parsed:{recoilReference:{ak47:[{x:0,y:0,samples:4},{x:-1,y:-1,samples:4},{x:-2,y:-3,samples:4},{x:-2,y:-4,samples:2}]},info:{mapName:demos.find(d=>d.id===args.id).mapName,tickRate:64,players:[]},parsedAt:'2026-09-08',score:{A:13,B:9},rounds:[],roundSummaries:[{round:1,winner:'A',killsA:5,killsB:2,players:{'1':{kills:5,deaths:2,damage:450,awp:1,flashed:2,cash:800},'2':{kills:2,deaths:5,damage:220,awp:0,flashed:0,cash:300}}}],stats:[player,{...player,steamid:'2',name:'Opponent',team:'B',recoil:{},opponents:{'1':1}}],highlights:[{id:'highlight-1',player:{steamid:'1',name:'Player'},round:8,startTick:640,endTick:1280,score:8,tags:['3k'],title:'Player — 3 kills · R8',kills:[],breakdown:{}}]}};
       if(cmd.startsWith('plugin:event|'))return 1;
       throw Error('Unexpected command '+cmd);
     }};
@@ -85,6 +85,8 @@ try {
   await page.waitForFunction(()=>typeof window.releaseDemo==='function');
   await page.evaluate(()=>{window.holdDemo=false;window.releaseDemo()});
   await page.locator('.demo-tabs').waitFor();
+  assert.equal(await page.getByRole('tab').first().innerText(),'Players');
+  assert.equal(await page.getByRole('tab').first().getAttribute('data-state'),'active','Opening a demo selects player statistics');
   assert.equal(await page.locator('.main [aria-busy="true"]').count(), 0, 'Loading ends after demo data arrives');
   await page.getByRole('tab').filter({hasText:'Videos'}).click();
   await page.locator('.job-card').first().waitFor();
@@ -173,28 +175,44 @@ try {
   assert.equal(await recoil.getByText('No qualifying bursts',{exact:true}).count(),2);
   await recoil.locator('summary').click();
   const lastShot = recoil.getByRole('table').locator('tbody tr').last();
-  assert.deepEqual(await lastShot.getByRole('cell').allTextContents(),['2.00','-5.00','1']);
+  assert.deepEqual(await lastShot.getByRole('cell').allTextContents(),['2.00','-5.00','1','-2.00 / -4.00 / 2']);
   await recoil.locator('summary').click();
   await recoil.scrollIntoViewIfNeeded();
   const zoomIn = recoil.getByRole('button',{name:'Zoom in',exact:true});
   const zoomOut = recoil.getByRole('button',{name:'Zoom out',exact:true});
-  const resetZoom = recoil.getByRole('button',{name:'Reset zoom (fit all)',exact:true});
+  const resetZoom = recoil.getByRole('button',{name:'Reset zoom (reference)',exact:true});
   assert.ok(!(await zoomOut.isDisabled()));
-  const fittedPlot = await recoil.locator('canvas').first().evaluate(canvas=>canvas.toDataURL());
+  const checkPlot = async (zoom) => {
+    // Check known shot positions, without depending on tooltip/label rasterization.
+    await page.waitForFunction(({ zoom, accent }) => {
+      const canvas = document.querySelector('[data-testid="recoil-chart"] canvas');
+      const halfSpan = 3 / (zoom * 0.8);
+      return [[-2, -3]].every(([px, py]) => {
+        const x = (45 + (px + 1 + halfSpan) / (2 * halfSpan) * (canvas.clientWidth - 65)) * canvas.width / canvas.clientWidth;
+        const y = (20 + (halfSpan - (py + 2)) / (2 * halfSpan) * (canvas.clientHeight - 65)) * canvas.height / canvas.clientHeight;
+        const pixel = canvas.getContext('2d').getImageData(Math.round(x), Math.round(y), 1, 1).data;
+        return accent.every((value, i) => pixel[i] === value);
+      });
+    }, { zoom, accent: THEMES.light.accent.match(/[a-f0-9]{2}/gi).map(v => parseInt(v, 16)) });
+  };
+  await checkPlot(1);
   await zoomIn.click();
   assert.equal(await resetZoom.innerText(),'125%');
-  await page.waitForFunction(original=>document.querySelector('[data-testid="recoil-chart"] canvas').toDataURL()!==original,fittedPlot);
+  await checkPlot(1.25);
   await zoomOut.click();
   assert.equal(await resetZoom.innerText(),'100%');
-  await page.waitForFunction(original=>document.querySelector('[data-testid="recoil-chart"] canvas').toDataURL()===original,fittedPlot);
+  await checkPlot(1);
   for(let step=0;step<4;step++) await zoomIn.click();
   assert.equal(await resetZoom.innerText(),'200%');
+  await checkPlot(2);
   assert.ok(await zoomIn.isDisabled());
   for(let step=0;step<7;step++) await zoomOut.click();
   assert.equal(await resetZoom.innerText(),'25%');
+  await checkPlot(0.25);
   assert.ok(await zoomOut.isDisabled());
   await resetZoom.click();
-  await page.waitForFunction(original=>document.querySelector('[data-testid="recoil-chart"] canvas').toDataURL()===original,fittedPlot);
+  assert.equal(await resetZoom.innerText(),'100%');
+  await checkPlot(1);
   await zoomIn.click();
   for(const width of [1360,900]) {
     await page.setViewportSize({width,height:940});
@@ -208,7 +226,8 @@ try {
   await page.getByRole('option',{name:'Opponent',exact:true}).click();
   assert.equal(await recoil.getByText('No qualifying bursts',{exact:true}).count(),3);
   assert.equal(await resetZoom.innerText(),'100%','Changing player fits the new trajectories');
-  assert.ok(await zoomIn.isDisabled() && await zoomOut.isDisabled() && await resetZoom.isDisabled(),'Empty charts do not offer zoom');
+  assert.ok(!(await resetZoom.isDisabled()),'Reference remains available without player bursts');
+  await recoil.getByText('━ Reference (estimated)',{exact:true}).first().waitFor();
   await page.setViewportSize({width:1360,height:940});
   await page.getByRole('button',{name:'Switch to dark mode'}).click();
   await page.getByRole('button',{name:'Filter demos'}).click();
@@ -340,9 +359,21 @@ try {
   await page.emulateMedia({reducedMotion:'no-preference'});
   await page.evaluate(()=>window.missingTools=true);
   await page.locator('.header-tools .bi-arrow-clockwise').locator('..').click();
-  await page.locator('.environment-notice').click();
+  const notice = page.locator('.environment-notice');
+  await notice.waitFor();
+  const noticeStyle = await notice.evaluate(el => ({background:getComputedStyle(el).backgroundColor,color:getComputedStyle(el).color}));
+  assert.ok(/^rgb\(/.test(noticeStyle.background),'Notice uses an opaque background');
+  assert.notEqual(noticeStyle.background,noticeStyle.color);
+  await notice.click();
   const download = page.locator('.tools-highlight');
   await download.waitFor();
+  assert.equal(await download.evaluate(el=>getComputedStyle(el).animationName),'tools-highlight-pulse');
+  assert.equal(await download.evaluate(el=>getComputedStyle(el).animationDuration),'2s');
+  const outline = await download.evaluate(el=>getComputedStyle(el).outlineColor);
+  await page.waitForFunction(original=>getComputedStyle(document.querySelector('.tools-highlight')).outlineColor!==original,outline);
+  await page.emulateMedia({reducedMotion:'reduce'});
+  assert.equal(await download.evaluate(el=>getComputedStyle(el).animationDuration),'3s');
+  await page.emulateMedia({reducedMotion:'no-preference'});
   assert.ok(await download.evaluate(el => document.activeElement === el), 'Missing tools guidance focuses download action');
   assert.ok(await download.evaluate(el => {
     const r = el.getBoundingClientRect();

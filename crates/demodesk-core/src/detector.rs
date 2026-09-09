@@ -508,7 +508,7 @@ mod tests {
 
     fn demo(rounds: Vec<RoundInfo>, kills: Vec<KillEvent>) -> DemoData {
         let players = CT.iter().chain(TS.iter()).map(|id| PlayerInfo { name: id.to_string(), steamid: id.to_string(), team_number: if id.starts_with("ct") { 3 } else { 2 }, user_id: None }).collect();
-        DemoData { round_metrics: Default::default(), info: DemoInfo { path: "x.dem".into(), map_name: "de_test".into(), server_name: String::new(), tick_rate: TR, players }, kills, rounds, activity: Default::default(), aim: Default::default(), recoil: Default::default(), damage: Default::default() }
+        DemoData { round_metrics: Default::default(), info: DemoInfo { path: "x.dem".into(), map_name: "de_test".into(), server_name: String::new(), tick_rate: TR, players }, kills, rounds, activity: Default::default(), aim: Default::default(), recoil: Default::default(), recoil_reference: Default::default(), damage: Default::default() }
     }
 
     fn opts(min_score: f64) -> DetectOptions {

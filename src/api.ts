@@ -115,6 +115,7 @@ export interface RoundSummary {
   bombPlanted: boolean;
 }
 export interface ParsedDemo {
+  recoilReference?: Record<string, RecoilPoint[]>;
   info: DemoInfo;
   rounds: RoundInfo[];
   highlights: Highlight[];

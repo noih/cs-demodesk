@@ -420,6 +420,9 @@ video {
 .app-notice { position:fixed; top:68px; right:20px; z-index:90; max-width:min(480px,90vw); }
 .refresh-notice { position:fixed; right:24px; bottom:24px; z-index:100; max-width:calc(100vw - 48px); }
 .refresh-notice .rt-CalloutRoot { display:flex; align-items:center; gap:16px; padding:12px 16px; background:var(--app-panel); }
+/* Floating notices must obscure the content behind them in either theme. */
+.app-notice > .rt-CalloutRoot, .app-notice > .environment-notice, .refresh-notice > .rt-CalloutRoot { background:var(--app-panel); color:var(--app-text); border:1px solid var(--accent-8); box-shadow:0 6px 20px #0004; }
+.app-notice .app-icon { color:var(--app-accent); }
 .refresh-notice .rt-IconButton { flex:none; margin:0; }
 .demo-item { font:inherit; color:var(--app-text); background:transparent; border:0; border-bottom:1px solid var(--app-border); border-radius:0; text-align:left; display:flex; align-items:center; gap:12px; padding:10px 14px; }
 .demo-item:hover,.demo-item.active { background:var(--app-raised); }
@@ -547,6 +550,6 @@ video {
 .queue-stage { margin:8px 0 0; overflow-wrap:anywhere; }
 .queue-actions { margin-top:12px; }
 .queue-clips { overflow-wrap:anywhere; }.environment-notice { max-width:min(480px,90vw); height:auto; min-height:32px; padding:10px 12px; white-space:normal; text-align:left; }
-.tools-highlight { outline:2px solid var(--app-accent); outline-offset:4px; background:var(--app-accentSoft); animation:tools-highlight-in .3s ease-out; scroll-margin:24px; }
-@keyframes tools-highlight-in { from { outline-offset:8px; } to { outline-offset:4px; } }
-@media (prefers-reduced-motion:reduce) { .tools-highlight { animation:none; } }
+.tools-highlight { outline:2px solid var(--app-accent); outline-offset:4px; background:var(--app-accentSoft); animation:tools-highlight-pulse 2s ease-in-out infinite; scroll-margin:24px; }
+@keyframes tools-highlight-pulse { 0%,100% { outline-color:var(--app-accent); } 50% { outline-color:color-mix(in srgb,var(--app-accent) 30%,var(--app-panel)); } }
+@media (prefers-reduced-motion:reduce) { .tools-highlight { animation:tools-highlight-pulse 3s ease-in-out infinite!important; } }

@@ -22,7 +22,7 @@ function ReadyApp() {
   const theme = useAppTheme();
   const [toolbar, setToolbar] = useState<HTMLDivElement | null>(null);
   const [selectionRequest, setSelectionRequest] = useState(0);
-  const [requestedTab, setRequestedTab] = useState('highlights');
+  const [requestedTab, setRequestedTab] = useState('players');
   const [status, setStatus] = useState<Status>();
   const [demos, setDemos] = useState<DemoMeta[]>([]);
   const [jobs, setJobs] = useState<RenderJob[]>([]);
@@ -79,7 +79,7 @@ function ReadyApp() {
           toolbar={toolbar}
           selectionRequest={selectionRequest}
           onSelect={(id) => {
-            setRequestedTab('highlights');
+            setRequestedTab('players');
             setSelectedId(id);
             setShowSettings(false);
           }}
