@@ -6,67 +6,30 @@ import type { EChartsCoreOption } from 'echarts/core';
 import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
 import { EChart, playerColors } from '../charts/EChart.tsx';
+import { RecoilChart } from './RecoilChart.tsx';
+import { TRENDS, trendSeries, type Trend } from '../charts/trends.ts';
 import type { ParsedDemo, PlayerStats } from '../api.ts';
 
 /** Multi-kill rounds weighted by size (2k = 1 … 5k = 4). */
 const multiScore = (p: PlayerStats) => p.multiKills['2k'] + p.multiKills['3k'] * 2 + p.multiKills['4k'] * 3 + p.multiKills['5k'] * 4;
 
-/** Round timeline: who won each round, kills per team, and where the highlights sit. */
-function roundTimelineOption(parsed: ParsedDemo, t: TFunction, colors: AppColors): EChartsCoreOption {
-  const rounds = parsed.roundSummaries;
-  const x = rounds.map((r) => String(r.round));
-  const winA = rounds.map((r) => (r.winner === 'A' ? 1 : 0));
-  const winB = rounds.map((r) => (r.winner === 'B' ? -1 : 0));
-  const bestByRound = new Map<number, { score: number; title: string }>();
-  for (const h of parsed.highlights) {
-    const cur = bestByRound.get(h.round);
-    if (!cur || h.score > cur.score) bestByRound.set(h.round, { score: h.score, title: h.title });
-  }
-  const highlightPoints = rounds.map((r) => {
-    const b = bestByRound.get(r.round);
-    return b ? [r.round - 1, r.winner === 'B' ? -1.35 : 1.35, b.score, b.title] : null;
-  }).filter(Boolean);
+function roundTimelineOption(parsed: ParsedDemo, metric: Trend, t: TFunction, colors: AppColors): EChartsCoreOption {
+  const palette = playerColors(parsed.stats, colors.players.split(','));
+  const teamMetric = metric === 'cash' || metric === 'difference';
+  const series = trendSeries(parsed, metric).map(s => ({
+    id: s.id,
+    name: teamMetric ? s.id === 'difference' ? t('charts.trend.difference') : t(s.id === 'B' ? 'common.teamB' : 'common.teamA') : (parsed.stats.find(p => p.steamid === s.id)?.name ?? s.id),
+    type: 'line', data: s.values, showSymbol: true, symbolSize: 4, connectNulls: false,
+    lineStyle: { width: 2 },
+    itemStyle: { color: teamMetric ? s.id === 'B' ? colors.teamB : colors.teamA : palette.get(s.id) },
+  }));
   return {
-    tooltip: {
-      trigger: 'axis',
-      axisPointer: { type: 'shadow' },
-      formatter: (params: unknown) => {
-        const p = params as Array<{ dataIndex: number }>;
-        const r = rounds[p[0]?.dataIndex ?? 0];
-        if (!r) return '';
-        const best = bestByRound.get(r.round);
-        const winner = r.winner === 'A' ? t('common.teamA') : r.winner === 'B' ? t('common.teamB') : undefined;
-        return [
-          `<b>${t('common.roundN', { n: r.round })}</b> - ${winner ? t('charts.roundTooltipWin', { team: winner }) : t('common.unknown')}${r.bombPlanted ? ` · ${t('charts.bombPlanted')}` : ''}`,
-          t('charts.roundKills', { a: r.killsA, b: r.killsB }),
-          best ? t('charts.bestHighlight', { score: best.score.toFixed(1), title: best.title }) : '',
-        ]
-          .filter(Boolean)
-          .join('<br/>');
-      },
-    },
-    legend: { data: [t('charts.teamAWin'), t('charts.teamBWin'), t('charts.killsA'), t('charts.killsB')], textStyle: { color: colors.muted }, top: 0 },
-    grid: { left: 40, right: 20, top: 36, bottom: 30 },
-    xAxis: { type: 'category', data: x, axisLine: { lineStyle: { color: colors.border } }, axisLabel: { color: colors.muted } },
-    yAxis: [
-      { type: 'value', min: -1.6, max: 1.6, show: false },
-      { type: 'value', name: t('common.kills'), position: 'right', splitLine: { lineStyle: { color: colors.border } }, axisLabel: { color: colors.muted }, nameTextStyle: { color: colors.muted } },
-    ],
-    series: [
-      { name: t('charts.teamAWin'), type: 'bar', stack: 'win', data: winA, itemStyle: { color: colors.teamA }, barWidth: '60%' },
-      { name: t('charts.teamBWin'), type: 'bar', stack: 'win', data: winB, itemStyle: { color: colors.teamB }, barWidth: '60%' },
-      { name: t('charts.killsA'), type: 'line', yAxisIndex: 1, data: rounds.map((r) => r.killsA), lineStyle: { color: colors.teamA, width: 1.5 }, itemStyle: { color: colors.teamA }, symbolSize: 5 },
-      { name: t('charts.killsB'), type: 'line', yAxisIndex: 1, data: rounds.map((r) => r.killsB), lineStyle: { color: colors.teamB, width: 1.5 }, itemStyle: { color: colors.teamB }, symbolSize: 5 },
-      {
-        name: t('common.highlights'),
-        type: 'scatter',
-        data: highlightPoints,
-        symbol: 'diamond',
-        symbolSize: (v: number[]) => 8 + Math.min(v[2] ?? 0, 15),
-        itemStyle: { color: colors.accent },
-        tooltip: { formatter: (p: unknown) => String((p as { value: unknown[] }).value[3]) },
-      },
-    ],
+    tooltip: { trigger: 'axis', renderMode: 'richText', axisPointer: { type: 'line' } },
+    legend: { type: 'scroll', bottom: 0, textStyle: { color: colors.muted } },
+    grid: { left: 55, right: 25, top: 25, bottom: 75 },
+    xAxis: { type: 'category', boundaryGap: false, data: parsed.roundSummaries.map(r => String(r.round)), axisLabel: { color: colors.muted }, name: t('charts.roundAxis'), nameLocation: 'middle', nameGap: 28 },
+    yAxis: { type: 'value', minInterval: 1, axisLabel: { color: colors.muted }, splitLine: { lineStyle: { color: colors.border } } },
+    series,
   };
 }
 
@@ -154,10 +117,11 @@ function playerRadarOption(parsed: ParsedDemo, steamids: string[], t: TFunction,
 export function ChartsTab({ parsed }: { parsed: ParsedDemo }) {
   const { t } = useTranslation();
   const { colors } = useAppTheme();
+  const [trend, setTrend] = useState<Trend>('kills');
   const [metric, setMetric] = useState<Metric>('kills');
   const [radarA, setRadarA] = useState(parsed.stats[0]?.steamid ?? '');
   const [radarB, setRadarB] = useState(parsed.stats.find((p) => p.team === 'B')?.steamid ?? parsed.stats[1]?.steamid ?? '');
-  const timeline = useMemo(() => roundTimelineOption(parsed, t, colors), [parsed, t, colors]);
+  const timeline = useMemo(() => roundTimelineOption(parsed, trend, t, colors), [parsed, trend, t, colors]);
   const bars = useMemo(() => playerBarsOption(parsed, metric, t, colors), [parsed, metric, t, colors]);
   const radar = useMemo(() => playerRadarOption(parsed, [radarA, radarB].filter(Boolean), t, colors), [parsed, radarA, radarB, t, colors]);
 
@@ -170,8 +134,24 @@ export function ChartsTab({ parsed }: { parsed: ParsedDemo }) {
         <Text size="1" color="gray" as="p" mb="2">
           {t('charts.timelineHint')}
         </Text>
-        <EChart option={timeline} height={300} />
+        <Flex gap="1" wrap="wrap" mb="3">
+          {TRENDS.map(key => <Button key={key} size="1" variant={key === trend ? 'solid' : 'soft'} aria-pressed={key === trend} onClick={() => setTrend(key)}>{t(`charts.trend.${key}`)}</Button>)}
+        </Flex>
+        <Box style={{ overflowX: 'auto' }}>
+          <Flex gap="1" mb="2" style={{ minWidth: parsed.roundSummaries.length * 30 }}>
+            {parsed.roundSummaries.map(r => {
+              const highlights = parsed.highlights.filter(h => h.round === r.round);
+              const detail = [t('common.roundN', { n: r.round }), r.winner ? t('charts.roundTooltipWin', { team: t(r.winner === 'A' ? 'common.teamA' : 'common.teamB') }) : t('common.unknown'), t('charts.roundKills', { a: r.killsA, b: r.killsB }), ...highlights.map(h => h.title)].join(' · ');
+              return <Box key={r.round} tabIndex={0} aria-label={detail} title={detail} style={{ flex: 1, textAlign: 'center', borderTop: '4px solid ' + (r.winner === 'A' ? colors.teamA : r.winner === 'B' ? colors.teamB : colors.muted), background: colors.panel, padding: '4px 0' }}>
+                <Text size="1">{r.round}{highlights.length > 0 ? ' ★' : ''}</Text>
+              </Box>;
+            })}
+          </Flex>
+        </Box>
+        <Text size="1" color="gray">{t(trend === 'cash' ? 'charts.cashHint' : trend === 'difference' ? 'charts.differenceHint' : 'charts.cumulativeHint')}</Text>
+        <EChart option={timeline} height={380} />
       </Card>
+      <RecoilChart parsed={parsed} />
       <Grid columns={{ initial: '1', lg: 'minmax(0, 3fr) minmax(0, 2fr)' }} gap="4" align="start">
         <Card style={{ minWidth: 0 }}>
           {/* pills that wrap: nine labels never fit one segmented row in every language */}

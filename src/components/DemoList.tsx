@@ -128,11 +128,11 @@ export function DemoList({
 
   return (
     <Flex direction="column" style={{ flex: 1, minHeight: 0 }}>
-      <div role="status" aria-live="polite" aria-atomic="true" style={{ position: 'fixed', right: 24, top: 68, zIndex: 100 }}>
+      <div role="status" aria-live="polite" aria-atomic="true" className="refresh-notice">
         {refreshStatus && (
           <Callout.Root size="1" color={refreshStatus === 'refreshFailed' ? 'red' : 'green'} variant="surface">
             <Callout.Text>{t(`demoList.${refreshStatus}`)}</Callout.Text>
-            <IconButton size="1" variant="ghost" aria-label={t('common.close')} onClick={() => setRefreshStatus(undefined)}><i aria-hidden="true" className="bi bi-x-lg app-icon"  /></IconButton>
+            <IconButton size="2" variant="ghost" aria-label={t('common.close')} onClick={() => setRefreshStatus(undefined)}><i aria-hidden="true" className="bi bi-x-lg app-icon"  /></IconButton>
           </Callout.Root>
         )}
       </div>

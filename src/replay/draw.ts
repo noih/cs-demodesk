@@ -266,8 +266,9 @@ export function draw(ctx: CanvasRenderingContext2D, width: number, height: numbe
     }
   }
 
-  // players
-  ctx.font = font;
+  // Labels stay in screen pixels while marker positions follow the map scale.
+  const labelSize = 12;
+  ctx.font = `${labelSize}px system-ui, sans-serif`;
   for (const p of state.players) {
     if (!p.alive) continue;
     const [x, y] = place(m, lay, p.x, p.y, p.z);
@@ -324,7 +325,7 @@ export function draw(ctx: CanvasRenderingContext2D, width: number, height: numbe
       // small dark label above the disc, like the in-game spectator tag
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      const lh = 12 * Math.sqrt(view.zoom);
+      const lh = labelSize + 2;
       const w = Math.max(...lines.map((t) => ctx.measureText(t).width)) + 8;
       const h = lh * lines.length + 3;
       const top = y - r - 4 - h;

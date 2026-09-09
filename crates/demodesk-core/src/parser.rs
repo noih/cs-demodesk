@@ -16,11 +16,13 @@ use parser::second_pass::variants::{VarVec, Variant};
 use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
 
-const PLAYER_EXTRA: &[&str] = &["health", "team_num", "X", "Y", "Z", "pitch", "yaw", "is_scoped", "team_name", "active_weapon_name"];
+const PLAYER_EXTRA: &[&str] = &["health", "team_num", "X", "Y", "Z", "pitch", "yaw", "is_scoped", "team_name", "active_weapon_name", "fl_recoil_idx"];
 const OTHER_EXTRA: &[&str] = &["total_rounds_played", "is_freeze_period"];
 const EVENTS: &[&str] = &[
     "player_death",
     "player_hurt",
+    "weapon_fire",
+    "player_blind",
     "round_start",
     "round_freeze_end",
     "round_end",
@@ -138,10 +140,11 @@ impl DemoParser {
         let kills = kills_from_events(groups.get("player_death").map(|v| v.as_slice()).unwrap_or(&[]));
         let (mut rounds, defusers) = rounds_from_events(&groups);
 
+        let mut cash = BTreeMap::new();
         // Roster + user ids at every freeze end.
         let wanted: Vec<i32> = rounds.iter().map(|r| r.freeze_end_tick + 1).collect();
         if !wanted.is_empty() {
-            let rows = self.ticks(bytes, &strings(&["team_num", "user_id"]), wanted)?;
+            let rows = self.ticks(bytes, &strings(&["team_num", "user_id", "balance"]), wanted)?;
             let mut by_tick: HashMap<i32, Vec<Row>> = HashMap::new();
             let mut user_ids: HashMap<String, i32> = HashMap::new();
             for row in rows.iter() {
@@ -160,6 +163,7 @@ impl DemoParser {
                         _ => continue,
                     };
                     if let Some(sid) = row.steamid() {
+                        if let Some(value) = row.num("balance") { cash.insert((r.round, sid.clone()), value.max(0.0) as u32); }
                         roster.insert(sid, team);
                     }
                 }
@@ -175,7 +179,23 @@ impl DemoParser {
 
         let damage = damage_from_events(groups.get("player_hurt").map(|v| v.as_slice()).unwrap_or(&[]), &rounds);
 
+        let recoil = crate::aim::recoil(&out.game_events, &rounds, 64.0);
+        let aim = crate::aim::compute(&out.game_events, &rounds, 64.0);
+        let activity = activity_from_events(&out.game_events, &rounds);
+        let round_metrics = rounds.iter().map(|r| {
+            let window = std::slice::from_ref(r);
+            let damage = damage_from_events(groups.get("player_hurt").map(|v| v.as_slice()).unwrap_or(&[]), window);
+            let activity = activity_from_events(&out.game_events, window);
+            let metrics = players.iter().map(|p| (p.steamid.clone(), RoundMetrics {
+                cash: cash.get(&(r.round, p.steamid.clone())).copied(),
+                damage: damage.get(&p.steamid).map_or(0, |d| d.total),
+                flashed: activity.get(&p.steamid).map_or(0, |a| a.enemies_flashed),
+                ..Default::default()
+            })).collect();
+            (r.round, metrics)
+        }).collect();
         Ok(DemoData {
+            round_metrics,
             info: DemoInfo {
                 path: path.to_string_lossy().to_string(),
                 map_name: header.get("map_name").cloned().unwrap_or_default(),
@@ -186,6 +206,9 @@ impl DemoParser {
             kills,
             rounds,
             damage,
+            activity,
+            aim,
+            recoil,
         })
     }
 }
@@ -446,6 +469,11 @@ fn damage_from_events(events: &[&GameEvent], rounds: &[RoundInfo]) -> BTreeMap<S
             continue;
         }
         entry.total += damage;
+        match f.str("weapon").as_str() {
+            "hegrenade" => entry.he += damage,
+            "inferno" | "molotov" | "incgrenade" => entry.fire += damage,
+            _ => {}
+        }
         if UTILITY_WEAPONS.contains(&f.str("weapon").as_str()) { entry.utility += damage; }
     }
     out
@@ -569,5 +597,72 @@ mod damage_tests {
         }
         let damage = damage_from_events(&events.iter().collect::<Vec<_>>(), &[round(1), round(101)]);
         assert_eq!(damage["enemy"].total, 200);
+    }
+}
+
+fn activity_from_events(events: &[GameEvent], rounds: &[RoundInfo]) -> BTreeMap<String, ActivityStats> {
+    let mut out: BTreeMap<String, ActivityStats> = BTreeMap::new();
+    for event in events {
+        if !matches!(event.name.as_str(), "weapon_fire" | "player_blind") { continue; }
+        let f = Fields(event);
+        if f.bool("is_freeze_period") || !rounds.iter().any(|r| f.tick() >= r.start_tick && f.tick() <= r.officially_ended_tick) { continue; }
+        if event.name == "player_blind" {
+            let id = f.str("attacker_steamid");
+            let duration = f.num("blind_duration");
+            // The demo can emit blinds for dead targets; these provide no combat effect.
+            if id.is_empty() || duration <= 1.0 || f.opt_num("user_health").is_some_and(|hp| hp <= 0.0) { continue; }
+            let (at, vt) = (f.int("attacker_team_num"), f.int("user_team_num"));
+            if ![2,3].contains(&at) || ![2,3].contains(&vt) { continue; }
+            let s = out.entry(id).or_default();
+            if at == vt { s.teammates_flashed += 1; }
+            else { s.enemies_flashed += 1; s.enemy_blind_seconds += duration; }
+            continue;
+        }
+        let id = f.str("user_steamid");
+        if id.is_empty() { continue; }
+        let weapon = f.str("weapon");
+        let weapon = weapon.strip_prefix("weapon_").unwrap_or(&weapon);
+        let s = out.entry(id).or_default();
+        if UTILITY_WEAPONS.contains(&weapon) {
+            match weapon {
+                "flashbang" => s.flashes += 1,
+                "smokegrenade" => s.smokes += 1,
+                "hegrenade" => s.hes += 1,
+                "molotov" | "incgrenade" => s.fires += 1,
+                _ => {}
+            }
+        } else if !weapon.contains("knife") && !weapon.contains("bayonet") && weapon != "c4" && !UTILITY_WEAPONS.contains(&weapon) {
+            s.shots += 1;
+        }
+    }
+    out
+}
+
+#[cfg(test)]
+mod activity_tests {
+    use super::*;
+    use parser::second_pass::game_events::EventField;
+    #[test]
+    fn counts_throws_and_qualifying_blinds_without_counting_grenades_as_shots() {
+        let round: RoundInfo = serde_json::from_value(serde_json::json!({"round":1,"startTick":10,"freezeEndTick":10,"endTick":100,"officiallyEndedTick":110,"reason":"","roster":{}})).unwrap();
+        let event = |name: &str, weapon: &str, duration: f32, team: i32, tick: i32| GameEvent { name: name.into(), tick, fields: vec![
+            EventField { name: "weapon".into(), data: Some(Variant::String(weapon.into())) },
+            EventField { name: "user_steamid".into(), data: Some(Variant::String("a".into())) },
+            EventField { name: "attacker_steamid".into(), data: Some(Variant::String("a".into())) },
+            EventField { name: "attacker_team_num".into(), data: Some(Variant::I32(3)) },
+            EventField { name: "user_team_num".into(), data: Some(Variant::I32(team)) },
+            EventField { name: "blind_duration".into(), data: Some(Variant::F32(duration)) },
+        ] };
+        let mut dead = event("player_blind", "", 4.2, 2, 70);
+        dead.fields.push(EventField { name: "user_health".into(), data: Some(Variant::I32(0)) });
+        let events = vec![event("weapon_fire","weapon_flashbang",0.0,3,20), event("weapon_fire","weapon_ak47",0.0,3,30),
+            event("weapon_fire","weapon_knife",0.0,3,40), event("weapon_fire","weapon_hegrenade",0.0,3,50),
+            event("player_blind","",3.0,2,60), event("player_blind","",0.5,2,60), event("player_blind","",2.0,3,60),
+            event("weapon_fire","weapon_ak47",0.0,3,111), event("player_blind","",1.05,2,80),
+            event("player_blind","",1.0,2,80), dead];
+        let stats = activity_from_events(&events, &[round]);
+        let a = &stats["a"];
+        assert_eq!((a.shots,a.flashes,a.hes,a.enemies_flashed,a.teammates_flashed),(1,1,1,2,1));
+        assert!((a.enemy_blind_seconds - 4.05).abs() < 0.0001);
     }
 }

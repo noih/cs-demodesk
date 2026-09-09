@@ -64,6 +64,11 @@ export interface Highlight {
   breakdown: Record<string, number>;
 }
 export type TeamKey = 'A' | 'B';
+export interface AimStats {
+  shots: number; hits: number; headHits: number; headEligibleHits: number;
+  firstShots: number; firstHits: number; sprayShots: number; sprayHits: number;
+}
+export interface RecoilPoint { x: number; y: number; samples: number }
 export interface PlayerStats {
   steamid: string;
   name: string;
@@ -71,6 +76,21 @@ export interface PlayerStats {
   kills: number;
   deaths: number;
   assists: number;
+  openingKills: number;
+  openingDeaths: number;
+  flashAssists: number;
+  roundsPlayed: number;
+  roundsSurvived: number;
+  kast: number;
+  tradeKills: number;
+  tradedDeaths: number;
+  heDamage: number;
+  fireDamage: number;
+  opponents: Record<string, number>;
+  aim: Record<string, AimStats>;
+  recoil: Record<string, RecoilPoint[]>;
+  activity: { shots: number; flashes: number; smokes: number; hes: number; fires: number; enemiesFlashed: number; teammatesFlashed: number; enemyBlindSeconds: number };
+  clutches: { round: number; side: Team; versus: number; kills: number; outcome: 'won' | 'saved' | 'lost' }[];
   headshots: number;
   headshotPct: number;
   kd: number;
@@ -84,6 +104,7 @@ export interface PlayerStats {
   bestScore: number;
 }
 export interface RoundSummary {
+  players?: Record<string, { kills: number; deaths: number; damage: number; awp: number; flashed: number; cash?: number | null }>;
   round: number;
   winner?: TeamKey;
   reason: string;
@@ -328,9 +349,20 @@ export const api = {
   kills: (id: string) => invoke<KillEvent[]>('get_kills', { id }),
   replay: async (id: string): Promise<ReplayData> => {
     const f = await invoke<{ path: string; bytes: number }>('get_replay', { id });
-    const res = await fetch(convertFileSrc(f.path));
-    if (!res.ok) throw new Error(`replay file: HTTP ${res.status}`);
-    return (await res.json()) as ReplayData;
+    const worker = new Worker(new URL('./replay/load.worker.ts', import.meta.url), { type: 'module' });
+    try {
+      return await new Promise<ReplayData>((resolve, reject) => {
+        worker.onmessage = (event: MessageEvent<{ data: ReplayData } | { error: string }>) => {
+          if ('error' in event.data) reject(new Error(event.data.error));
+          else resolve(event.data.data);
+        };
+        worker.onerror = event => reject(new Error(event.message || 'Replay worker failed'));
+        worker.onmessageerror = () => reject(new Error('Replay worker response could not be read'));
+        worker.postMessage(convertFileSrc(f.path));
+      });
+    } finally {
+      worker.terminate();
+    }
   },
   mapAssets: (mapName: string) => invoke<MapAssets>('get_map_assets', { mapName }),
   clearRadar: () => invoke<number>('clear_radar'),

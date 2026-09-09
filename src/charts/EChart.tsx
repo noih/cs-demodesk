@@ -3,10 +3,11 @@ import { useAppTheme } from '../AppTheme.tsx';
 import * as echarts from 'echarts/core';
 import { BarChart, LineChart, RadarChart, ScatterChart } from 'echarts/charts';
 import { GridComponent, LegendComponent, TooltipComponent, RadarComponent } from 'echarts/components';
+import { LabelLayout } from 'echarts/features';
 import { CanvasRenderer } from 'echarts/renderers';
 import type { EChartsCoreOption, ECharts } from 'echarts/core';
 
-echarts.use([BarChart, LineChart, RadarChart, ScatterChart, GridComponent, LegendComponent, TooltipComponent, RadarComponent, CanvasRenderer]);
+echarts.use([BarChart, LineChart, RadarChart, ScatterChart, GridComponent, LegendComponent, TooltipComponent, RadarComponent, CanvasRenderer, LabelLayout]);
 
 /** Ten distinct colours, one per player in a match (team A takes the first five). */
 export const PLAYER_COLORS = ['#5b9cf6', '#f59e0b', '#22c55e', '#ef4444', '#a855f7', '#2dd4bf', '#facc15', '#f472b6', '#e5e7eb', '#a3e635'];
@@ -17,7 +18,7 @@ export function playerColors(stats: Array<{ steamid: string; team: 'A' | 'B' }>,
   return new Map(ordered.map((p, i) => [p.steamid, palette[i % palette.length]!]));
 }
 
-export function EChart({ option, height = 320 }: { option: EChartsCoreOption; height?: number }) {
+export function EChart({ option, height = 320 }: { option: EChartsCoreOption; height?: number | string }) {
   const { colors } = useAppTheme();
   const ref = useRef<HTMLDivElement>(null);
   const chart = useRef<ECharts | undefined>(undefined);

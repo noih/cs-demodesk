@@ -14,3 +14,5 @@ pub mod store;
 pub use model::*;
 
 mod demo_readiness;
+
+pub mod aim;

@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readdir } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { preview } from 'vite';
 import { initialAppearance, THEMES } from '../src/themes.ts';
@@ -19,12 +20,15 @@ try {
     const demos = Array.from({ length: 1000 }, (_, i) => ({ id: 'demo-' + i, name: 'match_' + i + '.dem', path: 'E:/replays/' + i + '.dem', bytes: 214800000, mtimeMs: new Date(2026, 8, 8, 17, i % 60).getTime(), status: 'parsed', mapName: i % 2 ? 'Inferno' : 'Mirage', summary: { rounds: 22, kills: 100, highlights: 1, scoreA: 13, scoreB: 9, players: ['Player'] } }));
     const options = { width: 1920, height: 1080, fps: 60, codec: 'h264', hud: true, crosshair: true, radar: true, killFeed: true, viewmodel: true, tracers: true, maxSizeMb: 20, trueView: true };
     const jobs = Array.from({ length: 100 }, (_, i) => ({ id: 'job-' + i, demoId: i === 1 ? 'demo-999' : 'demo-0', highlightIds: ['highlight-1'], options, status: i === 0 ? 'running' : i === 1 ? 'queued' : 'done', stage: i === 0 ? 'recording 1/2' : '', createdAt: '2026-09-08T17:30:00Z', startedAt: '2026-09-08T17:30:00Z', finishedAt: i > 1 ? '2026-09-08T17:32:18Z' : undefined, outputs: i < 2 ? [] : Array.from({length:i===2?3:1},(_,j)=>({ file: 'E:/clips/' + i + '-' + j + '.mp4', bytes: 18400000, title: 'Round 08', highlightId: 'highlight-1', isFinal: j===2 })), log: ['recording'] }));
-    const player = {steamid:'1',name:'Player',team:'A',kills:20,deaths:10,assists:3,headshots:10,headshotPct:50,kd:2,multiKills:{'2k':2,'3k':1,'4k':0,'5k':0},clutchesWon:1,damage:2000,utilityDamage:30,friendlyDamage:0,adr:90,highlights:1,bestScore:8};
+    const player = {steamid:'1',name:'Player',team:'A',kills:20,deaths:10,assists:3,openingKills:4,openingDeaths:2,flashAssists:1,roundsPlayed:22,roundsSurvived:12,kast:77.3,tradeKills:2,tradedDeaths:1,heDamage:20,fireDamage:10,opponents:{'2':3},aim:{all:{shots:100,hits:25,headHits:5,headEligibleHits:20,firstShots:10,firstHits:4,sprayShots:30,sprayHits:9}},activity:{shots:100,flashes:2,smokes:3,hes:2,fires:1,enemiesFlashed:3,teammatesFlashed:1,enemyBlindSeconds:7},clutches:[{round:8,side:'CT',versus:2,kills:2,outcome:'won'}],headshots:10,headshotPct:50,kd:2,multiKills:{'2k':2,'3k':1,'4k':0,'5k':0},clutchesWon:1,damage:2000,utilityDamage:30,friendlyDamage:0,adr:90,highlights:1,bestScore:8};
+    player.recoil = {ak47:[{x:0,y:0,samples:2},{x:-1,y:-2,samples:2},{x:1,y:-4,samples:2},{x:2,y:-5,samples:1}]};
     const status = { ok:true,problems:[],dataDir:'E:/data',activeRender:'job-0',version:'test' };
     window.testCalls = [];
     window.__TAURI_INTERNALS__ = { transformCallback: () => 1, unregisterCallback: () => {}, convertFileSrc: () => 'data:video/mp4;base64,', invoke: async (cmd, args) => {
       window.testCalls.push({cmd,args});
       if(cmd==='get_startup_error')return null;
+      if(cmd==='get_replay' || cmd==='get_map_assets')return new Promise(()=>{});
+      if(cmd==='get_kills')return [];
       if(cmd==='parse_demo')return new Promise(resolve=>window.releaseParse=resolve);
       if(cmd==='get_status')return window.missingTools ? {...status,ok:false} : status;
       if(cmd==='get_settings')return { settings:{language:'en',replayFolders:[],scanGameReplays:true},doctor:{ok:true,problems:[],paths:{}},detected:{},setup:{running:false,log:[]},dataDir:'E:/data',defaultDataDir:'E:/data',parsedBytes:0,clipsBytes:0,radarBytes:0 };
@@ -33,7 +37,7 @@ try {
       if(cmd==='get_demo' && window.emptyParsed)return {meta:demos.find(d=>d.id===args.id)};
       if(cmd==='get_demo' && window.failDemo)throw Error('Cannot read demo');
       if(cmd==='get_demo' && window.holdDemo)await new Promise(resolve=>window.releaseDemo=resolve);
-      if(cmd==='get_demo')return { meta:demos.find(d=>d.id===args.id),parsed:{info:{mapName:demos.find(d=>d.id===args.id).mapName,tickRate:64,players:[]},parsedAt:'2026-09-08',score:{A:13,B:9},rounds:[],roundSummaries:[{round:1,winner:'A',killsA:5,killsB:2}],stats:[player,{...player,steamid:'2',name:'Opponent',team:'B'}],highlights:[{id:'highlight-1',player:{steamid:'1',name:'Player'},round:8,startTick:640,endTick:1280,score:8,tags:['3k'],title:'Player — 3 kills · R8',kills:[],breakdown:{}}]}};
+      if(cmd==='get_demo')return { meta:demos.find(d=>d.id===args.id),parsed:{info:{mapName:demos.find(d=>d.id===args.id).mapName,tickRate:64,players:[]},parsedAt:'2026-09-08',score:{A:13,B:9},rounds:[],roundSummaries:[{round:1,winner:'A',killsA:5,killsB:2,players:{'1':{kills:5,deaths:2,damage:450,awp:1,flashed:2,cash:800},'2':{kills:2,deaths:5,damage:220,awp:0,flashed:0,cash:300}}}],stats:[player,{...player,steamid:'2',name:'Opponent',team:'B',recoil:{},opponents:{'1':1}}],highlights:[{id:'highlight-1',player:{steamid:'1',name:'Player'},round:8,startTick:640,endTick:1280,score:8,tags:['3k'],title:'Player — 3 kills · R8',kills:[],breakdown:{}}]}};
       if(cmd.startsWith('plugin:event|'))return 1;
       throw Error('Unexpected command '+cmd);
     }};
@@ -41,6 +45,33 @@ try {
   });
   await page.goto(server.resolvedUrls.local[0]);
   await page.locator('.demo-item').first().waitFor();
+  const workerFile = (await readdir(new URL('../dist/assets/', import.meta.url))).find(name => name.startsWith('load.worker-') && name.endsWith('.js'));
+  assert.ok(workerFile, 'Replay JSON worker is emitted');
+  const workerResult = await page.evaluate(async workerUrl => {
+    const read = url => new Promise((resolve, reject) => {
+      const worker = new Worker(workerUrl, {type:'module'});
+      worker.onmessage = e => { worker.terminate(); resolve(e.data); };
+      worker.onerror = e => { worker.terminate(); reject(new Error(e.message)); };
+      worker.postMessage(url);
+    });
+    const payload = {frames:Array.from({length:50000}, (_,i)=>({t:i,p:[[1,2,3,4,5,6,7,8,9,10]]}))};
+    const url = URL.createObjectURL(new Blob([JSON.stringify(payload)], {type:'application/json'}));
+    let paints = 0;
+    let running = true;
+    const paint = () => { if (running) { paints++; requestAnimationFrame(paint); } };
+    requestAnimationFrame(paint);
+    try {
+      const result = await read(url);
+      const invalid = await read('data:application/json,not-json');
+      const missing = await read('http://127.0.0.1:1/unavailable');
+      return {frames:result.data.frames.length,last:result.data.frames.at(-1).t,paints,invalid:typeof invalid.error,missing:typeof missing.error};
+    } finally { running = false; URL.revokeObjectURL(url); }
+  }, '/assets/'+workerFile);
+  assert.equal(workerResult.frames,50000);
+  assert.equal(workerResult.last,49999);
+  assert.ok(workerResult.paints > 0, 'UI paints while replay worker loads');
+  assert.equal(workerResult.invalid,'string');
+  assert.equal(workerResult.missing,'string');
   await page.evaluate(() => document.fonts.ready);
   assert.ok(await page.evaluate(() => document.fonts.check('15px bootstrap-icons')), 'Bootstrap icon font is loaded');
   assert.ok(await page.locator('.bi-funnel').count(), 'Filter uses Bootstrap Icons');
@@ -81,8 +112,104 @@ try {
   await about.click();
   await page.getByRole('dialog').waitFor();
   await page.getByRole('button', { name: 'Close', exact: true }).click();
+  await page.getByRole('tab').filter({hasText:'Players'}).click();
+  const tables = page.getByRole('table');
+  assert.equal(await tables.count(), 2);
+  assert.equal(await tables.first().getByRole('columnheader', {name:'Opening kills',exact:true}).count(), 1);
+  const cells = tables.first().locator('tbody tr').first().getByRole('cell');
+  assert.deepEqual(await cells.allTextContents(), ['20 / 10 / 3','2.00','90.0','50%','77.3%','4','2','2 / 1 / 0 / 0','1']);
+  assert.match(await cells.nth(4).getAttribute('style'), /77.3%/, 'KAST bar uses the percentage');
+  assert.match(await cells.nth(2).getAttribute('style'), /100%/, 'ADR bar uses the match maximum');
+  for (const width of [1360, 900]) {
+    await page.setViewportSize({width,height:940});
+    const top = await tables.first().boundingBox();
+    const bottom = await tables.last().boundingBox();
+    assert.ok(bottom.y >= top.y + top.height, 'Teams stack at every width');
+    assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), 'Table overflow stays inside the page');
+    if (process.env.UI_SCREENSHOT_DIR) await page.screenshot({path:process.env.UI_SCREENSHOT_DIR+'/players-'+width+'.png'});
+  }
+  for (const category of ['Aim','Activity','Utility','Opening duels','Trades','Clutches','Duels']) {
+    await page.getByRole('button',{name:category,exact:true}).click();
+    assert.equal(await tables.count(),2);
+    assert.ok(!(await tables.allTextContents()).join().includes('NaN'));
+    assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
+    if (process.env.UI_SCREENSHOT_DIR) await page.screenshot({path:process.env.UI_SCREENSHOT_DIR+'/stats-'+category.replaceAll(' ','-')+'.png'});
+  }
+  await page.getByRole('button',{name:'Aim',exact:true}).click();
+  assert.ok((await tables.first().textContent()).includes('25.0%'));
+  await page.getByRole('button',{name:'AWP',exact:true}).click();
+  assert.ok((await tables.first().textContent()).includes('—'));
+  assert.ok(!(await tables.first().textContent()).includes('NaN'));
+  await page.getByRole('button',{name:'Duels',exact:true}).click();
+  const duelCells = tables.first().locator('tbody tr').first().getByRole('cell');
+  assert.equal(await duelCells.nth(1).innerText(), '3 (75.0%)');
+  assert.match(await duelCells.nth(1).getAttribute('style'), /75%/);
+  assert.match(await duelCells.nth(0).getAttribute('style'), / 0%/);
+  await page.getByRole('button',{name:'Utility',exact:true}).click();
+  assert.equal(await tables.first().getByRole('columnheader',{name:'Damage / HE',exact:true}).count(),1);
+  assert.ok((await tables.first().textContent()).includes('10.00'));
+  await page.setViewportSize({width:1360,height:940});
+  await page.getByRole('tab').filter({hasText:'2D'}).click();
+  const replaySpinner = page.locator('.app-spinner').filter({visible:true}).last();
+  await replaySpinner.waitFor();
+  for(const reducedMotion of ['reduce','no-preference']) {
+    await page.emulateMedia({reducedMotion});
+    const before = await replaySpinner.evaluate(el=>({name:getComputedStyle(el).animationName,transform:getComputedStyle(el).transform,duration:getComputedStyle(el).animationDuration}));
+    assert.equal(before.name,'app-spinner-rotate');
+    assert.equal(before.duration,reducedMotion==='reduce'?'1.8s':'0.9s');
+    await page.waitForTimeout(120);
+    assert.notEqual(await replaySpinner.evaluate(el=>getComputedStyle(el).transform),before.transform,'Loading spinner advances while 2D remains pending');
+  }
   await page.getByRole('tab').filter({hasText:'Charts'}).click();
   await page.locator('canvas').first().waitFor();
+  for (const name of ['Deaths','Damage','AWP kills','Enemies flashed','Score difference','Team cash']) {
+    await page.getByRole('button',{name,exact:true}).first().click();
+    assert.equal(await page.getByRole('button',{name,exact:true}).first().getAttribute('aria-pressed'),'true');
+    assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
+  }
+  if(process.env.UI_SCREENSHOT_DIR) await page.screenshot({path:process.env.UI_SCREENSHOT_DIR+'/trends.png'});
+  const recoil = page.getByTestId('recoil-chart');
+  await recoil.getByText('2 bursts',{exact:true}).waitFor();
+  assert.equal(await recoil.getByText('No qualifying bursts',{exact:true}).count(),2);
+  await recoil.locator('summary').click();
+  const lastShot = recoil.getByRole('table').locator('tbody tr').last();
+  assert.deepEqual(await lastShot.getByRole('cell').allTextContents(),['2.00','-5.00','1']);
+  await recoil.locator('summary').click();
+  await recoil.scrollIntoViewIfNeeded();
+  const zoomIn = recoil.getByRole('button',{name:'Zoom in',exact:true});
+  const zoomOut = recoil.getByRole('button',{name:'Zoom out',exact:true});
+  const resetZoom = recoil.getByRole('button',{name:'Reset zoom (fit all)',exact:true});
+  assert.ok(!(await zoomOut.isDisabled()));
+  const fittedPlot = await recoil.locator('canvas').first().evaluate(canvas=>canvas.toDataURL());
+  await zoomIn.click();
+  assert.equal(await resetZoom.innerText(),'125%');
+  await page.waitForFunction(original=>document.querySelector('[data-testid="recoil-chart"] canvas').toDataURL()!==original,fittedPlot);
+  await zoomOut.click();
+  assert.equal(await resetZoom.innerText(),'100%');
+  await page.waitForFunction(original=>document.querySelector('[data-testid="recoil-chart"] canvas').toDataURL()===original,fittedPlot);
+  for(let step=0;step<4;step++) await zoomIn.click();
+  assert.equal(await resetZoom.innerText(),'200%');
+  assert.ok(await zoomIn.isDisabled());
+  for(let step=0;step<7;step++) await zoomOut.click();
+  assert.equal(await resetZoom.innerText(),'25%');
+  assert.ok(await zoomOut.isDisabled());
+  await resetZoom.click();
+  await page.waitForFunction(original=>document.querySelector('[data-testid="recoil-chart"] canvas').toDataURL()===original,fittedPlot);
+  await zoomIn.click();
+  for(const width of [1360,900]) {
+    await page.setViewportSize({width,height:940});
+    await recoil.scrollIntoViewIfNeeded();
+    const bounds = await recoil.locator('canvas').first().boundingBox();
+    assert.ok(bounds.width>100 && Math.abs(bounds.width-bounds.height)<2,'Recoil plot uses equal angle scales');
+    assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
+    if(process.env.UI_SCREENSHOT_DIR) await recoil.screenshot({path:process.env.UI_SCREENSHOT_DIR+'/recoil-'+width+'.png'});
+  }
+  await recoil.getByRole('combobox',{name:'Spray player'}).click();
+  await page.getByRole('option',{name:'Opponent',exact:true}).click();
+  assert.equal(await recoil.getByText('No qualifying bursts',{exact:true}).count(),3);
+  assert.equal(await resetZoom.innerText(),'100%','Changing player fits the new trajectories');
+  assert.ok(await zoomIn.isDisabled() && await zoomOut.isDisabled() && await resetZoom.isDisabled(),'Empty charts do not offer zoom');
+  await page.setViewportSize({width:1360,height:940});
   await page.getByRole('button',{name:'Switch to dark mode'}).click();
   await page.getByRole('button',{name:'Filter demos'}).click();
   await page.getByRole('textbox').fill('   ');
@@ -172,6 +299,28 @@ try {
     await page.locator('.queue-trigger').click();
     await checkPanel(page.locator('.rt-DialogContent'));
     await page.keyboard.press('Escape');
+    await page.locator('.header-tools .bi-arrow-clockwise').locator('..').click();
+    const notice = page.locator('.refresh-notice .rt-CalloutRoot');
+    await notice.getByText('Updated',{exact:true}).waitFor();
+    const feedback = await notice.evaluate(el=>{
+      const text=el.querySelector('.rt-CalloutText').getBoundingClientRect();
+      const close=el.querySelector('button').getBoundingClientRect();
+      const box=el.getBoundingClientRect();
+      const header=document.querySelector('.app-header').getBoundingClientRect();
+      const probe=document.createElement('span');
+      probe.style.color='var(--app-panel)';el.append(probe);
+      const expected=getComputedStyle(probe).color;probe.remove();
+      return { background:getComputedStyle(el).backgroundColor, expected,
+        gap:close.x-text.right, aligned:Math.abs((text.y+text.height/2)-(close.y+close.height/2))<1,
+        inset:text.x-box.x, bottom:innerHeight-box.bottom, belowHeader:box.y>header.bottom };
+    });
+    assert.equal(feedback.background,feedback.expected,'Status notification has an opaque theme surface');
+    assert.ok(feedback.aligned && feedback.gap>=16 && feedback.inset>=12,'Status text and close button have separate, aligned space');
+    assert.equal(feedback.bottom,24);
+    assert.ok(feedback.belowHeader,'Status does not cover the toolbar');
+    if(process.env.UI_SCREENSHOT_DIR) await notice.screenshot({path:process.env.UI_SCREENSHOT_DIR+'/refresh-'+mode+'.png'});
+    await notice.getByRole('button',{name:'Close',exact:true}).click();
+    await notice.waitFor({state:'detached'});
   }
   await page.emulateMedia({ reducedMotion: 'no-preference' });
   await page.evaluate(()=>window.holdRefresh=true);
@@ -184,7 +333,7 @@ try {
   assert.notEqual(initial,animated.transform,'Spinner rotates');
   assert.equal(animated.opacity,'1','Spinner does not pulse');
   await page.emulateMedia({reducedMotion:'reduce'});
-  assert.equal(await spinner.evaluate(e=>getComputedStyle(e).animationName),'none','Reduced motion stays static');
+  assert.equal(await spinner.evaluate(e=>getComputedStyle(e).animationName),'app-spinner-rotate','Reduced motion retains slow loading feedback');
   await page.waitForFunction(()=>typeof window.releaseRefresh==='function');
   await page.evaluate(()=>{window.holdRefresh=false;window.releaseRefresh()});
   await spinner.waitFor({state:'detached'});

@@ -135,12 +135,20 @@ pub struct RoundInfo {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DemoData {
+    #[serde(default)]
+    pub round_metrics: BTreeMap<i32, BTreeMap<SteamId, RoundMetrics>>,
     pub info: DemoInfo,
     pub kills: Vec<KillEvent>,
     pub rounds: Vec<RoundInfo>,
     /// Damage dealt to enemies, per attacker steamid (from player_hurt)
     #[serde(default)]
     pub damage: BTreeMap<SteamId, DamageTotals>,
+    #[serde(default)]
+    pub activity: BTreeMap<SteamId, ActivityStats>,
+    #[serde(default)]
+    pub aim: BTreeMap<SteamId, BTreeMap<String, crate::aim::AimStats>>,
+    #[serde(default)]
+    pub recoil: BTreeMap<SteamId, BTreeMap<String, Vec<crate::aim::RecoilPoint>>>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -153,6 +161,8 @@ pub struct DamageTotals {
     pub total: u32,
     /// share of `total` done by grenades / molotov fire
     pub utility: u32,
+    pub he: u32,
+    pub fire: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -209,4 +219,28 @@ pub fn seconds_to_ticks(seconds: f64, tick_rate: f64) -> i32 {
 pub fn format_clock(ticks: i32, tick_rate: f64) -> String {
     let total = (ticks.max(0) as f64 / tick_rate).floor() as i64;
     format!("{}:{:02}", total / 60, total % 60)
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ActivityStats {
+    pub shots: u32,
+    pub flashes: u32,
+    pub smokes: u32,
+    pub hes: u32,
+    pub fires: u32,
+    pub enemies_flashed: u32,
+    pub teammates_flashed: u32,
+    pub enemy_blind_seconds: f64,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RoundMetrics {
+    pub cash: Option<u32>,
+    pub kills: u32,
+    pub deaths: u32,
+    pub awp: u32,
+    pub damage: u32,
+    pub flashed: u32,
 }
