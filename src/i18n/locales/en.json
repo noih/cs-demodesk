@@ -6,6 +6,7 @@
     "default": "Use default directory"
   },
   "common": {
+    "unnamed": "Unnamed",
     "cancel": "Cancel",
     "close": "Close",
     "delete": "Delete",
@@ -68,7 +69,7 @@
       "parsed": "Parsed",
       "error": "Error"
     },
-    "addTooltip": "Add .dem files (keep original location)",
+    "addTooltip": "Add .dem files",
     "add": "Add demo",
     "rescanTooltip": "Rescan folders",
     "rescan": "Rescan",
@@ -265,7 +266,7 @@
     "hudScale": "HUD scale {{n}}",
     "clips": "Clips",
     "notReady": "Rendering is not ready - download the tools in Settings first.",
-    "showGame": "Show game window",
+    "hideGame": "Hide game in background",
     "visibleGame": "CS2 remains visible while recording; do not close it manually.",
     "hiddenGame": "CS2 runs hidden with Windows audio muted while recording; do not close it manually.",
     "submitting": "Submitting..."
@@ -289,7 +290,7 @@
     "sizeLimit": "≤ {{mb}} MB",
     "noSizeLimit": "No size limit",
     "openFolder": "Open folder",
-    "viewLog": "View log ({{n}} lines)",
+    "viewLog": "View log",
     "deleteJob": "Delete this export (videos included)",
     "merged": "Merged video",
     "openInPlayer": "Open in player",
@@ -315,6 +316,7 @@
     "empty": "No exported videos yet."
   },
   "replay": {
+    "toolsMissing": "Source 2 Viewer is missing. Open Settings to download tools.",
     "imageLoadFailed": "Cannot load {{file}}",
     "downloadTools": "Download tools",
     "preparing": "Preparing",
@@ -350,7 +352,8 @@
     "sound": "Hearing range",
     "soundAll": "All",
     "soundFocus": "Followed",
-    "soundOff": "Off"
+    "soundOff": "Off",
+    "money": "Money"
   },
   "settings": {
     "title": "Settings",
@@ -414,6 +417,10 @@
     "autoParseHint": "New demos are parsed automatically, one at a time. Failed demos are retried only when you click Parse."
   },
   "ui": {
+    "fontSize": "Text size",
+    "fontSize_small": "Small",
+    "fontSize_medium": "Medium",
+    "fontSize_large": "Large",
     "filter": "Filter demos",
     "light": "Switch to light mode",
     "dark": "Switch to dark mode",
@@ -425,21 +432,25 @@
     "queueEmpty": "No active jobs"
   },
   "recoil": {
-    "clipped": "{{n}} player points outside the view; zoom out to see them.",
     "noReference": "No paired firing-angle samples; reference unavailable.",
-    "reference": "Reference (estimated)",
-    "you": "Your mean",
+    "reference": "Actual",
+    "you": "Player",
     "resetZoom": "Reset zoom (reference)",
     "title": "Single-match spray movement",
     "player": "Spray player",
-    "hint": "Mean view movement versus compensation estimated from this demo’s firing angles, pooled by weapon. First shots align; the reference is centred. Subtick aim changes can affect the estimate; this is not an official ideal curve or a recoil score.",
     "bursts": "{{n}} bursts",
     "empty": "No qualifying bursts",
     "horizontal": "X° · right +",
     "vertical": "Y° · up + / down −. All weapons share the same scale.",
-    "details": "Per-shot data",
-    "shot": "Shot",
     "point": "Shot {{shot}}\nX {{x}}° · Y {{y}}°\n{{n}} bursts",
     "definition": "Fresh recoil index (≈0), at least 3 consecutive shots, gaps ≤300 ms with index increasing by 1. Missing samples break the burst. Each point averages only bursts reaching that shot; later points have fewer samples."
+  },
+  "diagnostics": {
+    "windows": "Recording requires Windows.",
+    "steam": "Steam was not found. Set the CS2 folder manually.",
+    "cs2": "cs2.exe was not found. Set the CS2 folder in Settings.",
+    "hlae": "HLAE is missing. Download tools in Settings.",
+    "hook": "HLAE is missing x64/AfxHookSource2.dll. Download tools again.",
+    "ffmpeg": "FFmpeg is missing. Download tools or set its path."
   }
 }

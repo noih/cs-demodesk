@@ -385,7 +385,7 @@ impl<'a> SecondPassParser<'a> {
             _ => {}
         }
         let is_projectile_prop =
-            (class.name.contains("Projectile") || class.name.contains("Grenade") || class.name.contains("Flash")) && !class.name.contains("Player");
+            (class.name == "CInferno" || class.name.contains("Projectile") || class.name.contains("Grenade") || class.name.contains("Flash")) && !class.name.contains("Player");
         if is_projectile_prop {
             return Ok(EntityType::Projectile);
         }

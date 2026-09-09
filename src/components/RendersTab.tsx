@@ -55,7 +55,7 @@ function JobCard({ job, parsed, onChanged }: { job: RenderJob; parsed: ParsedDem
         <Badge color={COLOR[job.status]} size="2">
           {t(`renders.status.${job.status}`)}
         </Badge>
-        <Heading size="3">{fmtDateTime(job.createdAt)}</Heading>
+        <Heading data-text-role="body-heading" size="3">{fmtDateTime(job.createdAt)}</Heading>
         <Text size="2" color="gray">
           {t('renders.summary', { n: job.highlightIds.length })} · {job.options.maxSizeMb ? t('renders.sizeLimit', { mb: job.options.maxSizeMb }) : t('renders.noSizeLimit')} · {job.options.height}p{job.options.fps} · {job.options.codec}
         </Text>
@@ -78,7 +78,7 @@ function JobCard({ job, parsed, onChanged }: { job: RenderJob; parsed: ParsedDem
           </DropdownMenu.Trigger>
           <DropdownMenu.Content align="end">
             <DropdownMenu.Item onSelect={() => setLogOpen(true)}>
-              <i aria-hidden="true" className="bi bi-file-earmark-text app-icon"  /> {t('renders.viewLog', { n: job.log.length })}
+              <i aria-hidden="true" className="bi bi-file-earmark-text app-icon"  /> {t('renders.viewLog')}
             </DropdownMenu.Item>
             {!active && (
               <>
@@ -267,7 +267,7 @@ export function RendersTab({ jobs, parsed, onChanged, scrollRef }: { jobs: Rende
     return <Text as="p" size="2" color="gray">{t('renders.empty')}</Text>;
   }
   return (
-    <><Flex align="center" gap="3" mb="3"><Heading size="3">{t('demoView.tabs.videos')}</Heading><Text size="1" color="gray">{t('demoList.videos', { n: jobs.reduce((n, job) => n + job.outputs.length, 0) })} · {mb(jobs.reduce((n, job) => n + job.outputs.reduce((bytes, output) => bytes + output.bytes, 0), 0))}</Text></Flex>
+    <><Flex align="center" gap="3" mb="3"><Heading data-text-role="subtitle" size="3">{t('demoView.tabs.videos')}</Heading><Text size="1" color="gray">{t('demoList.videos', { n: jobs.reduce((n, job) => n + job.outputs.length, 0) })} · {mb(jobs.reduce((n, job) => n + job.outputs.reduce((bytes, output) => bytes + output.bytes, 0), 0))}</Text></Flex>
     <div ref={listRef} style={{ height: virtualizer.getTotalSize(), position: 'relative', overflowAnchor: 'none' }}>
       {virtualizer.getVirtualItems().map((row) => (
         <div

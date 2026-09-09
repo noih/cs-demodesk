@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 /// Bump when the layout below changes; older files are rebuilt.
-pub const REPLAY_SCHEMA_VERSION: u32 = 3;
+pub const REPLAY_SCHEMA_VERSION: u32 = 5;
 /// Ticks between frames: 64 tick / 4 = 16 frames per second, interpolated in the UI.
 pub const STEP: i32 = 4;
 
@@ -29,9 +29,10 @@ pub const FLAG_DUCKING: i32 = 64;
 pub const FLAG_WALKING: i32 = 128;
 pub const FLAG_DEFUSING: i32 = 256;
 
-const PLAYER_PROPS: &[&str] = &["X", "Y", "Z", "yaw", "health", "armor_value", "is_alive", "has_helmet", "has_defuser", "flash_duration", "active_weapon_name", "is_scoped", "ducking", "is_walking", "is_defusing", "balance", "inventory"];
+const PLAYER_PROPS: &[&str] = &["X", "Y", "Z", "yaw", "health", "armor_value", "is_alive", "has_helmet", "has_defuser", "active_weapon_name", "is_scoped", "ducking", "is_walking", "is_defusing", "balance", "inventory"];
 const EVENTS: &[&str] = &[
     "weapon_fire",
+    "player_blind",
     "smokegrenade_detonate",
     "smokegrenade_expired",
     "flashbang_detonate",
@@ -69,6 +70,9 @@ pub struct Frame {
     pub p: Vec<[i32; 10]>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub g: Vec<[i32; 6]>,
+    /// Active fire-cell world positions, sampled directly from CInferno.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub f: Vec<[i32; 3]>,
 }
 
 pub const GRENADE_KINDS: &[&str] = &["smoke", "flash", "he", "molotov", "decoy"];
@@ -198,7 +202,8 @@ pub fn build_replay(parser: &DemoParser, info: &DemoInfo, rounds: &[RoundInfo], 
     let mut weapons = Interner::new("");
     let mut frames = player_frames(parser, bytes, wanted.clone(), &mut players, &mut weapons)?;
     add_grenades(parser, bytes, wanted, &mut players, &mut frames)?;
-    let events = point_events(parser, bytes, first_tick, last_tick, &mut players)?;
+    let (events, blinds) = point_events(parser, bytes, first_tick, last_tick, &mut players)?;
+    apply_blinds(&mut frames, &blinds, info.tick_rate);
     drop_detonated(&mut frames, &events);
 
     Ok(ReplayData { schema_version: REPLAY_SCHEMA_VERSION, tick_rate: info.tick_rate, step: STEP, first_tick, last_tick, players: players.list, weapons: weapons.names, frames, events })
@@ -217,7 +222,6 @@ fn player_frames(parser: &DemoParser, bytes: &[u8], wanted: Vec<i32>, players: &
             (row.flag("is_alive"), FLAG_ALIVE),
             (row.flag("has_helmet"), FLAG_HELMET),
             (row.flag("has_defuser"), FLAG_DEFUSER),
-            (row.num("flash_duration").unwrap_or(0.0) > 0.0, FLAG_BLIND),
             (row.strs("inventory").is_some_and(|inv| inv.iter().any(|w| w.starts_with("C4"))), FLAG_BOMB),
             (row.flag("is_scoped"), FLAG_SCOPED),
             (row.flag("ducking"), FLAG_DUCKING),
@@ -229,7 +233,7 @@ fn player_frames(parser: &DemoParser, bytes: &[u8], wanted: Vec<i32>, players: &
         let entry = [p, round(row.num("X")), round(row.num("Y")), round(row.num("Z")), round(row.num("yaw")), round(row.num("health")), round(row.num("armor_value")), flags, weapon, round(row.num("balance"))];
         match frames.last_mut() {
             Some(f) if f.t == tick => f.p.push(entry),
-            _ => frames.push(Frame { t: tick, p: vec![entry], g: vec![] }),
+            _ => frames.push(Frame { t: tick, p: vec![entry], g: vec![], f: vec![] }),
         }
     }
     // rows come tick-sorted from the parser; frames therefore are too
@@ -241,12 +245,23 @@ fn add_grenades(parser: &DemoParser, bytes: &[u8], wanted: Vec<i32>, players: &m
     let mut by_tick: HashMap<i32, usize> = frames.iter().enumerate().map(|(i, f)| (f.t, i)).collect();
     for row in parser.projectiles(bytes, wanted)?.iter() {
         let Some(tick) = row.tick() else { continue };
+        if row.str("grenade_type") == Some("CInferno") {
+            if let Some(&idx) = by_tick.get(&tick) {
+                for cell in row.strs("m_firePositions").unwrap_or_default() {
+                    let coords: Vec<f64> = cell.split(',').filter_map(|v| v.parse().ok()).collect();
+                    if coords.len() == 3 && coords.iter().all(|v| v.is_finite()) {
+                        frames[idx].f.push([coords[0].round() as i32, coords[1].round() as i32, coords[2].round() as i32]);
+                    }
+                }
+            }
+            continue;
+        }
         let Some(kind) = row.str("grenade_type").and_then(grenade_kind) else { continue };
         let (Some(x), Some(y), Some(z)) = (row.num("x"), row.num("y"), row.num("z")) else { continue };
         let thrower = row.steamid().map(|s| players.pid(&s, || row.str("name").map(str::to_string))).unwrap_or(-1);
         let id = round(row.num("grenade_entity_id"));
         let idx = *by_tick.entry(tick).or_insert_with(|| {
-            frames.push(Frame { t: tick, p: vec![], g: vec![] });
+            frames.push(Frame { t: tick, p: vec![], g: vec![], f: vec![] });
             frames.len() - 1
         });
         frames[idx].g.push([id, kind, x.round() as i32, y.round() as i32, z.round() as i32, thrower]);
@@ -256,11 +271,12 @@ fn add_grenades(parser: &DemoParser, bytes: &[u8], wanted: Vec<i32>, players: &m
 }
 
 /// Pass 3: the point events the replay draws, inside the round range.
-fn point_events(parser: &DemoParser, bytes: &[u8], first_tick: i32, last_tick: i32, players: &mut Players) -> Result<Vec<ReplayEvent>> {
+fn point_events(parser: &DemoParser, bytes: &[u8], first_tick: i32, last_tick: i32, players: &mut Players) -> Result<(Vec<ReplayEvent>, Vec<Blind>)> {
     let names: Vec<String> = EVENTS.iter().map(|s| s.to_string()).collect();
     let extra: Vec<String> = EVENT_PLAYER_EXTRA.iter().map(|s| s.to_string()).collect();
     let out = parser.events(bytes, &names, &extra, &[])?;
     let mut events: Vec<ReplayEvent> = vec![];
+    let mut blinds = Vec::new();
     for ev in &out.game_events {
         let tick = ev.tick;
         if tick < first_tick || tick > last_tick {
@@ -269,6 +285,14 @@ fn point_events(parser: &DemoParser, bytes: &[u8], first_tick: i32, last_tick: i
         let f = Fields(ev);
         let coord = |key: &str| f.opt_num(key).map(|v| v.round() as i32);
         let user = f.opt_str("user_steamid").filter(|s| s != "0").map(|s| players.pid(&s, || f.opt_str("user_name")));
+        if ev.name == "player_blind" {
+            if let (Some(pid), Some(duration)) = (user, f.opt_num("blind_duration")) {
+                if duration.is_finite() && duration > 0.0 {
+                    blinds.push(Blind { tick, pid, duration });
+                }
+            }
+            continue;
+        }
         let user_pos = || (coord("user_X"), coord("user_Y"), coord("user_Z"));
         let world_pos = || (coord("x"), coord("y"), coord("z"));
         let base = |k: &str, pos: (Option<i32>, Option<i32>, Option<i32>)| ReplayEvent { t: tick, k: k.to_string(), x: pos.0, y: pos.1, z: pos.2, p: user, a: None, yaw: None, id: f.opt_num("entityid").map(|v| v as i32), kit: None };
@@ -304,7 +328,8 @@ fn point_events(parser: &DemoParser, bytes: &[u8], first_tick: i32, last_tick: i
         events.push(event);
     }
     events.sort_by_key(|e| e.t);
-    Ok(events)
+    blinds.sort_by_key(|b| b.tick);
+    Ok((events, blinds))
 }
 
 /// A grenade entity lingers after it went off; drop its in-flight marker once
@@ -321,5 +346,47 @@ fn drop_detonated(frames: &mut [Frame], events: &[ReplayEvent]) {
     for f in frames.iter_mut() {
         let t = f.t;
         f.g.retain(|g| !detonations.iter().any(|(et, kind, x, y)| *kind == g[1] && *et <= t && *et > t - 64 * 30 && ((x - g[2]).pow(2) + (y - g[3]).pow(2)) < 250 * 250));
+    }
+}
+
+struct Blind {
+    tick: i32,
+    pid: i32,
+    duration: f64,
+}
+
+// m_flFlashDuration is not a countdown; derive expiry from player_blind events.
+fn apply_blinds(frames: &mut [Frame], blinds: &[Blind], tick_rate: f64) {
+    let mut expiry = HashMap::new();
+    let mut events = blinds.iter().peekable();
+    for frame in frames {
+        while let Some(event) = events.next_if(|b| b.tick <= frame.t) {
+            expiry.insert(event.pid, event.tick as f64 + event.duration * tick_rate);
+        }
+        for player in &mut frame.p {
+            player[7] &= !FLAG_BLIND;
+            if player[7] & FLAG_ALIVE == 0 {
+                expiry.remove(&player[0]);
+            } else if expiry.get(&player[0]).is_some_and(|end| (frame.t as f64) < *end) {
+                player[7] |= FLAG_BLIND;
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn blind_expires_and_does_not_survive_death() {
+        let mut frames: Vec<Frame> = [96, 100, 164, 228, 240, 244, 248, 300].into_iter().map(|t| {
+            let mut p = [0; 10];
+            p[7] = if t == 244 { 0 } else { FLAG_ALIVE };
+            Frame { t, p: vec![p], g: vec![], f: vec![] }
+        }).collect();
+        let blinds = [Blind { tick: 100, pid: 0, duration: 2.0 }, Blind { tick: 240, pid: 0, duration: 3.0 }];
+        apply_blinds(&mut frames, &blinds, 64.0);
+        assert_eq!(frames.iter().map(|f| f.p[0][7] & FLAG_BLIND != 0).collect::<Vec<_>>(), [false, true, true, false, true, false, false, false]);
     }
 }

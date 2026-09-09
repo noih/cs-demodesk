@@ -1,7 +1,8 @@
+import { displayPlayerName } from '../playerName.ts';
 import { useAppTheme } from '../AppTheme.tsx';
 import type { AppColors } from '../themes.ts';
 import { useMemo, useState } from 'react';
-import { Box, Button, Card, Flex, Grid, Heading, Select, Text } from '@radix-ui/themes';
+import { Box, Button, Card, Flex, Grid, Heading, Select, Text, Tooltip } from '@radix-ui/themes';
 import type { EChartsCoreOption } from 'echarts/core';
 import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
@@ -13,21 +14,21 @@ import type { ParsedDemo, PlayerStats } from '../api.ts';
 /** Multi-kill rounds weighted by size (2k = 1 … 5k = 4). */
 const multiScore = (p: PlayerStats) => p.multiKills['2k'] + p.multiKills['3k'] * 2 + p.multiKills['4k'] * 3 + p.multiKills['5k'] * 4;
 
-function roundTimelineOption(parsed: ParsedDemo, metric: Trend, t: TFunction, colors: AppColors): EChartsCoreOption {
+function roundTimelineOption(parsed: ParsedDemo, metric: Trend, t: TFunction, colors: AppColors, fontSize: number): EChartsCoreOption {
   const palette = playerColors(parsed.stats, colors.players.split(','));
   const teamMetric = metric === 'cash' || metric === 'difference';
   const series = trendSeries(parsed, metric).map(s => ({
     id: s.id,
-    name: teamMetric ? s.id === 'difference' ? t('charts.trend.difference') : t(s.id === 'B' ? 'common.teamB' : 'common.teamA') : (parsed.stats.find(p => p.steamid === s.id)?.name ?? s.id),
-    type: 'line', data: s.values, showSymbol: true, symbolSize: 4, connectNulls: false,
+    name: teamMetric ? s.id === 'difference' ? t('charts.trend.difference') : t(s.id === 'B' ? 'common.teamB' : 'common.teamA') : displayPlayerName(parsed.stats.find(p => p.steamid === s.id)?.name),
+    type: 'line', data: s.values, showSymbol: false, symbolSize: 4, connectNulls: false,
     lineStyle: { width: 2 },
     itemStyle: { color: teamMetric ? s.id === 'B' ? colors.teamB : colors.teamA : palette.get(s.id) },
   }));
   return {
     tooltip: { trigger: 'axis', renderMode: 'richText', axisPointer: { type: 'line' } },
-    legend: { type: 'scroll', bottom: 0, textStyle: { color: colors.muted } },
-    grid: { left: 55, right: 25, top: 25, bottom: 75 },
-    xAxis: { type: 'category', boundaryGap: false, data: parsed.roundSummaries.map(r => String(r.round)), axisLabel: { color: colors.muted }, name: t('charts.roundAxis'), nameLocation: 'middle', nameGap: 28 },
+    legend: { show: false },
+    grid: { left: fontSize * 4, right: 25, top: 25, bottom: fontSize * 3 + 12 },
+    xAxis: { type: 'category', boundaryGap: false, data: parsed.roundSummaries.map(r => String(r.round)), axisLabel: { color: colors.muted }, name: t('charts.roundAxis'), nameLocation: 'middle', nameGap: fontSize + 16 },
     yAxis: { type: 'value', minInterval: 1, axisLabel: { color: colors.muted }, splitLine: { lineStyle: { color: colors.border } } },
     series,
   };
@@ -37,7 +38,7 @@ function roundTimelineOption(parsed: ParsedDemo, metric: Trend, t: TFunction, co
 const METRICS = ['kills', 'kd', 'hs', 'damage', 'adr', 'utility', 'multi', 'clutch', 'best'] as const;
 type Metric = (typeof METRICS)[number];
 
-function playerBarsOption(parsed: ParsedDemo, metric: Metric, t: TFunction, colors: AppColors): EChartsCoreOption {
+function playerBarsOption(parsed: ParsedDemo, metric: Metric, t: TFunction, colors: AppColors, fontSize: number): EChartsCoreOption {
   const players = playerColors(parsed.stats, colors.players.split(','));
   const value = (p: ParsedDemo['stats'][number]) => {
     switch (metric) {
@@ -64,9 +65,9 @@ function playerBarsOption(parsed: ParsedDemo, metric: Metric, t: TFunction, colo
   const stats = [...parsed.stats].sort((a, b) => value(b) - value(a));
   return {
     tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
-    grid: { left: 110, right: 56, top: 10, bottom: 30 },
-    xAxis: { type: 'value', name: t(`charts.metric.${metric}`), nameLocation: 'middle', nameGap: 22, splitLine: { lineStyle: { color: colors.border } }, axisLabel: { color: colors.muted }, nameTextStyle: { color: colors.muted } },
-    yAxis: { type: 'category', inverse: true, data: stats.map((p) => p.name), axisLabel: { color: colors.text, width: 96, overflow: 'truncate' }, axisLine: { lineStyle: { color: colors.border } } },
+    grid: { left: fontSize * 8, right: fontSize * 4, top: 10, bottom: fontSize * 3 + 12 },
+    xAxis: { type: 'value', name: t(`charts.metric.${metric}`), nameLocation: 'middle', nameGap: fontSize + 16, splitLine: { lineStyle: { color: colors.border } }, axisLabel: { color: colors.muted }, nameTextStyle: { color: colors.muted } },
+    yAxis: { type: 'category', inverse: true, data: stats.map((p) => displayPlayerName(p.name)), axisLabel: { color: colors.text, width: fontSize * 7, overflow: 'truncate' }, axisLine: { lineStyle: { color: colors.border } } },
     series: [
       {
         type: 'bar',
@@ -78,14 +79,16 @@ function playerBarsOption(parsed: ParsedDemo, metric: Metric, t: TFunction, colo
   };
 }
 
-function playerRadarOption(parsed: ParsedDemo, steamids: string[], t: TFunction, colors: AppColors): EChartsCoreOption {
+function playerRadarOption(parsed: ParsedDemo, steamids: string[], t: TFunction, colors: AppColors, fontSize: number): EChartsCoreOption {
   const players = playerColors(parsed.stats, colors.players.split(','));
   const max = { adr: Math.max(1, ...parsed.stats.map((p) => p.adr)), kills: Math.max(1, ...parsed.stats.map((p) => p.kills)), kd: Math.max(1, ...parsed.stats.map((p) => p.kd)), hs: 100, multi: Math.max(1, ...parsed.stats.map((p) => multiScore(p))), clutch: Math.max(1, ...parsed.stats.map((p) => p.clutchesWon)), best: Math.max(1, ...parsed.stats.map((p) => p.bestScore)) };
   const picked = parsed.stats.filter((p) => steamids.includes(p.steamid));
   return {
     tooltip: {},
-    legend: { data: picked.map((p) => p.name), textStyle: { color: colors.muted }, bottom: 0 },
+    legend: { data: picked.map((p) => displayPlayerName(p.name)), textStyle: { color: colors.muted }, bottom: 0 },
     radar: {
+      radius: '58%',
+      axisNameGap: fontSize,
       indicator: [
         { name: t('charts.radar.kills'), max: max.kills },
         { name: 'ADR', max: max.adr },
@@ -103,7 +106,7 @@ function playerRadarOption(parsed: ParsedDemo, steamids: string[], t: TFunction,
       {
         type: 'radar',
         data: picked.map((p) => ({
-          name: p.name,
+          name: displayPlayerName(p.name),
           value: [p.kills, p.adr, p.kd, p.headshotPct, multiScore(p), p.clutchesWon, p.bestScore],
           lineStyle: { color: players.get(p.steamid) },
           itemStyle: { color: players.get(p.steamid) },
@@ -116,40 +119,47 @@ function playerRadarOption(parsed: ParsedDemo, steamids: string[], t: TFunction,
 
 export function ChartsTab({ parsed }: { parsed: ParsedDemo }) {
   const { t } = useTranslation();
-  const { colors } = useAppTheme();
+  const { colors, typography } = useAppTheme();
   const [trend, setTrend] = useState<Trend>('kills');
+  const [hiddenSeries, setHiddenSeries] = useState<string[]>([]);
   const [metric, setMetric] = useState<Metric>('kills');
   const [radarA, setRadarA] = useState(parsed.stats[0]?.steamid ?? '');
   const [radarB, setRadarB] = useState(parsed.stats.find((p) => p.team === 'B')?.steamid ?? parsed.stats[1]?.steamid ?? '');
-  const timeline = useMemo(() => roundTimelineOption(parsed, trend, t, colors), [parsed, trend, t, colors]);
-  const bars = useMemo(() => playerBarsOption(parsed, metric, t, colors), [parsed, metric, t, colors]);
-  const radar = useMemo(() => playerRadarOption(parsed, [radarA, radarB].filter(Boolean), t, colors), [parsed, radarA, radarB, t, colors]);
+  const timeline = useMemo(() => roundTimelineOption(parsed, trend, t, colors, typography[3]!), [parsed, trend, t, colors, typography]);
+  const bars = useMemo(() => playerBarsOption(parsed, metric, t, colors, typography[3]!), [parsed, metric, t, colors, typography]);
+  const radar = useMemo(() => playerRadarOption(parsed, [radarA, radarB].filter(Boolean), t, colors, typography[3]!), [parsed, radarA, radarB, t, colors, typography]);
 
   return (
     <Flex direction="column" gap="4">
       <Card>
-        <Heading size="3" mb="1">
+        <Heading data-text-role="subtitle" size="3" mb="1">
           {t('charts.timelineTitle')}
         </Heading>
         <Text size="1" color="gray" as="p" mb="2">
           {t('charts.timelineHint')}
         </Text>
         <Flex gap="1" wrap="wrap" mb="3">
-          {TRENDS.map(key => <Button key={key} size="1" variant={key === trend ? 'solid' : 'soft'} aria-pressed={key === trend} onClick={() => setTrend(key)}>{t(`charts.trend.${key}`)}</Button>)}
+          {TRENDS.map(key => <Button key={key} size="1" color={key === trend ? 'amber' : 'gray'} variant={key === trend ? 'solid' : 'soft'} aria-pressed={key === trend} onClick={() => setTrend(key)}>{t(`charts.trend.${key}`)}</Button>)}
         </Flex>
         <Box style={{ overflowX: 'auto' }}>
           <Flex gap="1" mb="2" style={{ minWidth: parsed.roundSummaries.length * 30 }}>
             {parsed.roundSummaries.map(r => {
               const highlights = parsed.highlights.filter(h => h.round === r.round);
               const detail = [t('common.roundN', { n: r.round }), r.winner ? t('charts.roundTooltipWin', { team: t(r.winner === 'A' ? 'common.teamA' : 'common.teamB') }) : t('common.unknown'), t('charts.roundKills', { a: r.killsA, b: r.killsB }), ...highlights.map(h => h.title)].join(' · ');
-              return <Box key={r.round} tabIndex={0} aria-label={detail} title={detail} style={{ flex: 1, textAlign: 'center', borderTop: '4px solid ' + (r.winner === 'A' ? colors.teamA : r.winner === 'B' ? colors.teamB : colors.muted), background: colors.panel, padding: '4px 0' }}>
-                <Text size="1">{r.round}{highlights.length > 0 ? ' ★' : ''}</Text>
-              </Box>;
+              return <Tooltip delayDuration={150} key={r.round} content={detail}><Box className="round-summary" tabIndex={0} aria-label={detail} style={{ flex: 1, textAlign: 'center', borderTop: '4px solid ' + (r.winner === 'A' ? colors.teamA : r.winner === 'B' ? colors.teamB : colors.muted), background: colors.panel, padding: '10px 4px', minWidth: 36, cursor: 'help' }}>
+                <Text as="div" size="1" style={{ fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>{r.round}</Text>
+                <Text as="div" size="1" aria-hidden="true" style={{ minHeight: '1.5em' }}>{highlights.length > 0 ? '★' : '\u00a0'}</Text>
+              </Box></Tooltip>;
             })}
           </Flex>
         </Box>
         <Text size="1" color="gray">{t(trend === 'cash' ? 'charts.cashHint' : trend === 'difference' ? 'charts.differenceHint' : 'charts.cumulativeHint')}</Text>
-        <EChart option={timeline} height={380} />
+        <EChart option={{ ...timeline, series: (timeline.series as Array<{ id: string }>).filter(series => !hiddenSeries.includes(series.id)) }} height={380} />
+        <div className="chart-legend" aria-label={t('charts.timelineTitle')}>
+          {(timeline.series as Array<{ id: string; name: string; itemStyle: { color: string } }>).map(series => <button type="button" key={series.id} aria-pressed={!hiddenSeries.includes(series.id)} onClick={() => setHiddenSeries(current => current.includes(series.id) ? current.filter(name => name !== series.id) : [...current, series.id])}>
+            <span aria-hidden="true" style={{ background: series.itemStyle.color }} />{series.name}
+          </button>)}
+        </div>
       </Card>
       <RecoilChart parsed={parsed} />
       <Grid columns={{ initial: '1', lg: 'minmax(0, 3fr) minmax(0, 2fr)' }} gap="4" align="start">
@@ -166,7 +176,7 @@ export function ChartsTab({ parsed }: { parsed: ParsedDemo }) {
         </Card>
         <Card style={{ minWidth: 0 }}>
           <Flex justify="between" align="center" mb="2" gap="2" wrap="wrap">
-            <Heading size="3">{t('charts.radarTitle')}</Heading>
+            <Heading data-text-role="subtitle" size="3">{t('charts.radarTitle')}</Heading>
             <Flex gap="2">
               {[
                 [radarA, setRadarA],
@@ -177,7 +187,7 @@ export function ChartsTab({ parsed }: { parsed: ParsedDemo }) {
                   <Select.Content>
                     {parsed.stats.map((p) => (
                       <Select.Item key={p.steamid} value={p.steamid}>
-                        {p.name}
+                        {displayPlayerName(p.name)}
                       </Select.Item>
                     ))}
                   </Select.Content>

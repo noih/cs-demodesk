@@ -6,6 +6,7 @@
     "default": "Каталог по умолчанию"
   },
   "common": {
+    "unnamed": "Без имени",
     "cancel": "Отмена",
     "close": "Закрыть",
     "delete": "Удалить",
@@ -68,7 +69,7 @@
       "parsed": "Разобрано",
       "error": "Ошибка"
     },
-    "addTooltip": "Добавить файлы .dem (сохранить исходное расположение)",
+    "addTooltip": "Добавить файлы .dem",
     "add": "Добавить демо",
     "rescanTooltip": "Пересканировать папки",
     "rescan": "Пересканировать",
@@ -112,7 +113,7 @@
     "deleteConfirm": "Удалить файл"
   },
   "players": {
-    "aim": "Aim",
+    "aim": "Прицеливание",
     "weaponGroup": "Weapon group",
     "weapon_all": "All weapons",
     "weapon_rifles": "Rifles",
@@ -155,13 +156,13 @@
     "shots": "Shots fired",
     "fireDamage": "Fire damage",
     "heDamage": "HE damage",
-    "duels": "Duels",
-    "clutches": "Clutches",
-    "trades": "Trades",
-    "opening": "Opening duels",
-    "utility": "Utility",
-    "activity": "Activity",
-    "general": "General",
+    "duels": "Дуэли",
+    "clutches": "Клатчи",
+    "trades": "Размены",
+    "opening": "Первые дуэли",
+    "utility": "Гранаты",
+    "activity": "Активность",
+    "general": "Основное",
     "category": "Statistics category",
     "openingKills": "Первые убийства",
     "openingDeaths": "Первые смерти",
@@ -204,7 +205,7 @@
       "best": "Счёт хайлайта"
     },
     "timelineTitle": "Хронология раундов",
-    "timelineHint": "The strip shows round winners; ★ marks highlights. Hover or focus for round details. Click a legend to hide a player.",
+    "timelineHint": "Цвет показывает победителя раунда, ★ — хайлайты. Наведите указатель или установите фокус для подробностей. Нажмите на имя в легенде, чтобы скрыть линию.",
     "seg": {
       "kills": "Убийства",
       "kd": "K/D",
@@ -218,18 +219,18 @@
     },
     "radarTitle": "Сравнение на радаре",
     "trend": {
-      "kills": "Kills",
-      "deaths": "Deaths",
-      "damage": "Damage",
-      "awp": "AWP kills",
-      "flashed": "Enemies flashed",
-      "difference": "Score difference",
-      "cash": "Team cash"
+      "kills": "Убийства",
+      "deaths": "Смерти",
+      "damage": "Урон",
+      "awp": "Убийства с AWP",
+      "flashed": "Ослепления врагов",
+      "difference": "Разница счёта",
+      "cash": "Деньги команды"
     },
-    "roundAxis": "Round",
-    "cashHint": "Team cash immediately after freeze end, excluding equipment value. Missing samples are omitted.",
-    "differenceHint": "Team A wins minus Team B wins.",
-    "cumulativeHint": "Cumulative through each round; flashed counts enemy blind events over 1.1 seconds."
+    "roundAxis": "Раунд",
+    "cashHint": "Деньги команды сразу после окончания времени подготовки, без стоимости снаряжения. Пропущенные замеры не отображаются.",
+    "differenceHint": "Победы команды A минус победы команды B.",
+    "cumulativeHint": "Накопительные значения к концу раунда. Учитываются ослепления врагов длительностью более 1,1 секунды."
   },
   "highlights": {
     "allPlayers": "Все игроки",
@@ -273,7 +274,7 @@
     "hudScale": "Масштаб HUD {{n}}",
     "clips": "Клипы",
     "notReady": "Рендеринг не готов - сначала скачайте инструменты в настройках.",
-    "showGame": "Показывать окно игры",
+    "hideGame": "Скрывать игру и запускать в фоне",
     "visibleGame": "Во время записи окно CS2 остаётся видимым; не закрывайте игру вручную.",
     "hiddenGame": "При записи CS2 работает скрыто; звук отключается в Windows. Не закрывайте игру вручную.",
     "submitting": "Отправка..."
@@ -297,7 +298,7 @@
     "sizeLimit": "≤ {{mb}} МБ",
     "noSizeLimit": "Без ограничения размера",
     "openFolder": "Открыть папку",
-    "viewLog": "Показать журнал ({{n}} строк)",
+    "viewLog": "Показать журнал",
     "deleteJob": "Удалить этот экспорт (вместе с видео)",
     "merged": "Объединённое видео",
     "openInPlayer": "Открыть в плеере",
@@ -323,6 +324,7 @@
     "empty": "Экспортированных видео пока нет."
   },
   "replay": {
+    "toolsMissing": "Source 2 Viewer отсутствует. Откройте настройки, чтобы скачать инструменты.",
     "imageLoadFailed": "Не удалось загрузить {{file}}",
     "downloadTools": "Скачать инструменты",
     "preparing": "Подготовка",
@@ -358,7 +360,8 @@
     "sound": "Слышимость",
     "soundAll": "Все",
     "soundFocus": "Отслеживаемый",
-    "soundOff": "Выкл."
+    "soundOff": "Выкл.",
+    "money": "Деньги"
   },
   "settings": {
     "title": "Настройки",
@@ -422,6 +425,10 @@
     "autoParseHint": "Новые демо анализируются автоматически по одному. После ошибки повторный анализ запускается только кнопкой «Анализировать»."
   },
   "ui": {
+    "fontSize": "Размер текста",
+    "fontSize_small": "Малый",
+    "fontSize_medium": "Средний",
+    "fontSize_large": "Большой",
     "filter": "Фильтр демо",
     "light": "Светлая тема",
     "dark": "Тёмная тема",
@@ -433,21 +440,25 @@
     "queueEmpty": "Нет активных задач"
   },
   "recoil": {
-    "clipped": "{{n}} точек вне области; уменьшите масштаб.",
     "noReference": "Нет парных углов выстрела; эталон недоступен.",
-    "reference": "Эталон (оценка)",
-    "you": "Ваше среднее",
+    "reference": "Фактическая",
+    "you": "Игрок",
     "resetZoom": "Сброс масштаба (эталон)",
     "title": "Траектория очередей за матч (углы обзора)",
     "player": "Игрок для очередей",
-    "hint": "Среднее движение прицела и оценка компенсации по углам выстрелов этого матча. Данные объединены по оружию, первые выстрелы совмещены, опорная кривая по центру. Изменения прицела внутри тика дают погрешность; это не официальный эталон или оценка навыка.",
     "bursts": "Очередей: {{n}}",
     "empty": "Нет подходящих очередей",
     "horizontal": "X° · вправо +",
     "vertical": "Y° · вверх + / вниз −. Масштаб одинаков для всех видов оружия.",
-    "details": "Данные по выстрелам",
-    "shot": "Выстрел",
     "point": "Выстрел {{shot}}\nX {{x}}° · Y {{y}}°\nОчередей: {{n}}",
     "definition": "Индекс отдачи начинается около 0; минимум 3 выстрела с интервалами ≤300 мс и приростом индекса на 1. Пропуск данных прерывает очередь. Каждая точка усредняет только очереди, достигшие этого выстрела; в конце выборка меньше."
+  },
+  "diagnostics": {
+    "windows": "Запись поддерживается только в Windows.",
+    "steam": "Steam не найден. Укажите папку CS2 вручную.",
+    "cs2": "cs2.exe не найден. Укажите папку CS2 в настройках.",
+    "hlae": "HLAE не установлен. Скачайте инструменты.",
+    "hook": "В HLAE отсутствует x64/AfxHookSource2.dll. Скачайте инструменты заново.",
+    "ffmpeg": "FFmpeg не найден. Скачайте инструменты или укажите путь."
   }
 }

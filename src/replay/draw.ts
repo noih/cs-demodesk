@@ -1,3 +1,4 @@
+import { displayPlayerName } from '../playerName.ts';
 // Canvas drawing for the 2D replay. One radar image per vertical layer, laid out
 // side by side; every marker lands on the layer its z belongs to.
 import { GRENADE_KINDS, type MapAssets } from '../api.ts';
@@ -87,7 +88,7 @@ function place(m: MapAssets, lay: Layout, x: number, y: number, z: number): [num
   return [ox + ix * lay.k, oy + iy * lay.k, li];
 }
 
-export function draw(ctx: CanvasRenderingContext2D, width: number, height: number, m: MapAssets, images: HTMLImageElement[], state: TickState, tg: DrawToggles, view: View, focus?: number) {
+export function draw(ctx: CanvasRenderingContext2D, width: number, height: number, m: MapAssets, images: HTMLImageElement[], state: TickState, tg: DrawToggles, view: View, focus?: number, labelSize = 14) {
   ctx.clearRect(0, 0, width, height);
   const lay = layout(width, height, m.layers.length, view);
   const k = lay.k;
@@ -123,6 +124,7 @@ export function draw(ctx: CanvasRenderingContext2D, width: number, height: numbe
           ctx.fill();
           break;
         case 'fire':
+          if (state.fireCells !== undefined) break;
           ctx.fillStyle = COLORS.fire;
           ctx.arc(x, y, 150 / m.scale * k, 0, Math.PI * 2);
           ctx.fill();
@@ -145,6 +147,20 @@ export function draw(ctx: CanvasRenderingContext2D, width: number, height: numbe
         }
       }
     }
+  }
+
+  if (tg.grenades && state.fireCells) {
+    ctx.fillStyle = COLORS.fire;
+    ctx.beginPath();
+    // Half the default 42-unit flame spacing visualizes each recorded cell.
+    // These footprints approximate coverage, not the game's damage boundary.
+    const cellRadius = 21 / m.scale * k;
+    for (const [wx, wy, wz] of state.fireCells) {
+      const [x, y] = place(m, lay, wx!, wy!, wz!);
+      ctx.moveTo(x + cellRadius, y);
+      ctx.arc(x, y, cellRadius, 0, Math.PI * 2);
+    }
+    ctx.fill();
   }
 
   // hearing radius: who is making noise right now, and how far it carries
@@ -256,7 +272,7 @@ export function draw(ctx: CanvasRenderingContext2D, width: number, height: numbe
     for (const g of state.grenades) {
       const [x, y] = place(m, lay, g.x, g.y, g.z);
       const kind = GRENADE_KINDS[g.kind] ?? 'he';
-      ctx.fillStyle = kind === 'smoke' ? '#cfd3da' : kind === 'flash' ? '#ffffff' : kind === 'he' ? '#ff6b6b' : kind === 'molotov' ? '#ff9a3c' : '#8fe38f';
+      ctx.fillStyle = kind === 'smoke' ? '#9ca3af' : kind === 'flash' ? '#60a5fa' : kind === 'he' ? '#ff6b6b' : kind === 'molotov' ? '#ff9a3c' : '#8fe38f';
       ctx.beginPath();
       ctx.arc(x, y, Math.max(2.5, r * 0.45), 0, Math.PI * 2);
       ctx.fill();
@@ -267,12 +283,12 @@ export function draw(ctx: CanvasRenderingContext2D, width: number, height: numbe
   }
 
   // Labels stay in screen pixels while marker positions follow the map scale.
-  const labelSize = 12;
   ctx.font = `${labelSize}px system-ui, sans-serif`;
-  for (const p of state.players) {
+  const orderedPlayers = [...state.players].sort((a, b) => Number(a.pid === focus) - Number(b.pid === focus));
+  for (const p of orderedPlayers) {
     if (!p.alive) continue;
     const [x, y] = place(m, lay, p.x, p.y, p.z);
-    const color = teamColor(p.team);
+    const color = p.pid === focus ? '#b995ff' : teamColor(p.team);
     // disc: filled from the bottom up to the health left, the rest at 20% (so the
     // outline still reads as a full circle)
     ctx.save();
@@ -291,13 +307,6 @@ export function draw(ctx: CanvasRenderingContext2D, width: number, height: numbe
     ctx.lineWidth = p.blind ? 3 : 1.5;
     ctx.strokeStyle = p.blind ? '#fff' : 'rgba(0,0,0,0.8)';
     ctx.stroke();
-    if (focus === p.pid) {
-      ctx.beginPath();
-      ctx.arc(x, y, r + 4, 0, Math.PI * 2);
-      ctx.lineWidth = 2;
-      ctx.strokeStyle = '#fff';
-      ctx.stroke();
-    }
     if (tg.view) {
       // facing tick on the disc
       const a = (-p.yaw * Math.PI) / 180;
@@ -318,8 +327,13 @@ export function draw(ctx: CanvasRenderingContext2D, width: number, height: numbe
       ctx.lineWidth = 1;
       ctx.stroke();
     }
+  }
+  // Labels are drawn above every player marker; the focused label is last.
+  for (const p of orderedPlayers) {
+    if (!p.alive) continue;
+    const [x, y] = place(m, lay, p.x, p.y, p.z);
     const lines: string[] = [];
-    if (tg.names) lines.push(p.name);
+    if (tg.names) lines.push(displayPlayerName(p.name));
     if (tg.weapon && p.weapon) lines.push(p.weapon);
     if (lines.length) {
       // small dark label above the disc, like the in-game spectator tag

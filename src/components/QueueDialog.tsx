@@ -1,3 +1,4 @@
+import { Tooltip } from '@radix-ui/themes';
 import { Spinner } from './Spinner.tsx';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Badge, Button, Dialog, Flex, IconButton, Text } from '@radix-ui/themes';
@@ -67,7 +68,7 @@ export function QueueDialog({ jobs, demos, onSelect }: { jobs: RenderJob[]; demo
   const active = jobs.filter(j => j.status === 'running' || j.status === 'queued');
 
   return <Dialog.Root open={open} onOpenChange={setOpen}>
-    <Dialog.Trigger>{active.length ? <Button variant="soft" color="gray" className="queue-trigger"><span className="queue-dot" />{t('ui.queueCount', { running: active.filter(j => j.status === 'running').length, queued: active.filter(j => j.status === 'queued').length })}</Button> : <IconButton variant="ghost" className="queue-trigger" aria-label={t('ui.queue')} title={t('ui.queue')}><i aria-hidden="true" className="bi bi-list-task app-icon" /></IconButton>}</Dialog.Trigger>
+    <Tooltip delayDuration={150} content={t('ui.queue')}><Dialog.Trigger>{active.length ? <Button variant="soft" color="gray" className="queue-trigger"><span className="queue-dot" />{t('ui.queueCount', { running: active.filter(j => j.status === 'running').length, queued: active.filter(j => j.status === 'queued').length })}</Button> : <IconButton variant="ghost" className="queue-trigger" aria-label={t('ui.queue')} ><i aria-hidden="true" className="bi bi-list-task app-icon" /></IconButton>}</Dialog.Trigger></Tooltip>
     <Dialog.Content maxWidth="720px" aria-describedby={undefined}><Dialog.Title>{t('ui.queue')}</Dialog.Title>
       <QueueList jobs={active} demos={demos} onSelect={id => { onSelect(id); setOpen(false); }} />
       <Flex justify="end" mt="4"><Dialog.Close><Button variant="soft">{t('common.close')}</Button></Dialog.Close></Flex>

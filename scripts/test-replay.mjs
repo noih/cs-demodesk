@@ -1,3 +1,4 @@
+import { draw, DEFAULT_TOGGLES } from '../src/replay/draw.ts';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { Replay } from '../src/replay/engine.ts';
@@ -71,4 +72,36 @@ test('a dead defuser cannot keep a countdown active', () => {
     { t: 46119, k: 'plant' }, { t: 47628, k: 'defuseStart', p: 0 },
   ]);
   assert.equal(r.stateAt(47632).bomb.defuse, undefined);
+});
+
+test('player labels stay above every marker and focus is painted last', () => {
+  const calls = [];
+  const ctx = new Proxy({}, {
+    get(target, key) {
+      if (key in target) return target[key];
+      if (key === 'measureText') return text => ({ width: text.length * 8 });
+      return (...args) => calls.push({ key, args, color: target.fillStyle });
+    },
+  });
+  const player = { x: 100, y: 100, z: 0, yaw: 0, hp: 100, alive: true, team: 'CT' };
+  const players = [{ ...player, pid: 1, name: 'Focused' }, { ...player, pid: 2, name: 'Other' }];
+  const map = { posX: 0, posY: 0, scale: 1, layers: [{ altitudeMin: -100, altitudeMax: 100 }] };
+  const state = { players, grenades: [], effects: [], shots: [], deaths: [] };
+  draw(ctx, 500, 500, map, [], state, { ...DEFAULT_TOGGLES, sound: 'off' }, { zoom: 2, panX: 0, panY: 0 }, 1);
+  const firstLabel = calls.findIndex(call => call.key === 'fillText');
+  assert.ok(firstLabel > calls.findLastIndex(call => call.key === 'arc'));
+  assert.deepEqual(calls.filter(call => call.key === 'fillText').map(call => call.args[0]), ['Other', 'Focused']);
+  assert.equal(calls.filter(call => call.key === 'fillRect')[2].color, '#b995ff');
+  assert.deepEqual(players.map(p => p.pid), [1, 2], 'Drawing must not reorder replay state');
+});
+
+test('sampled fire cells disappear and seeking restores their recorded state', () => {
+  const r = replay([frame(100), frame(104), frame(108)], []);
+  r.data.schemaVersion = 5;
+  r.data.frames[0].f = [[10, 20, 30], [40, 50, 30]];
+  r.data.frames[1].f = [[10, 20, 30]];
+  assert.deepEqual(r.stateAt(102).fireCells, [[10, 20, 30], [40, 50, 30]]);
+  assert.deepEqual(r.stateAt(104).fireCells, [[10, 20, 30]]);
+  assert.deepEqual(r.stateAt(108).fireCells, []);
+  assert.equal(r.stateAt(100).fireCells.length, 2);
 });

@@ -10,7 +10,7 @@ import { RendersTab } from './RendersTab.tsx';
 import { ChartsTab } from './ChartsTab.tsx';
 import { ReplayTab } from './ReplayTab.tsx';
 
-export function DemoView({ meta, jobs, status, onChanged, onRemoved, requestedTab, selectionRequest }: { requestedTab: string; selectionRequest: number; meta: DemoMeta; jobs: RenderJob[]; status?: Status; onChanged: () => Promise<void>; onRemoved: () => void }) {
+export function DemoView({ meta, jobs, status, onChanged, onRemoved, requestedTab, selectionRequest, onSetup }: { onSetup: () => void; requestedTab: string; selectionRequest: number; meta: DemoMeta; jobs: RenderJob[]; status?: Status; onChanged: () => Promise<void>; onRemoved: () => void }) {
   const { t } = useTranslation();
   const [parsed, setParsed] = useState<ParsedDemo>();
   const [loading, setLoading] = useState(true);
@@ -79,13 +79,13 @@ export function DemoView({ meta, jobs, status, onChanged, onRemoved, requestedTa
     <Flex direction="column" gap="3" style={{ height: '100%' }}>
       <Flex direction="column" gap="2" className="demo-heading">
         <Flex justify="between" align="center" gap="3">
-          <Heading size="6" truncate style={{ minWidth: 0 }}>
+          <Heading data-text-role="title" size="6" truncate style={{ minWidth: 0 }}>
             {parsed ? parsed.info.mapName : meta.name.replace(/\.dem$/i, '')}
           </Heading>
           {parsed && <div className="match-score"><div className="team-a"><small>{t('common.teamA')}</small><strong>{parsed.score.A}</strong></div><div className="team-b"><small>{t('common.teamB')}</small><strong>{parsed.score.B}</strong></div></div>}
           <Flex gap="2" style={{ flex: 'none' }}>
             {(parsed || meta.status === 'parsed' || parsing) && (
-              <Tooltip content={t('demoView.reparse')}>
+              <Tooltip delayDuration={150} content={t('demoView.reparse')}>
                 <IconButton variant="soft" onClick={() => void reparse()} disabled={parsing} aria-busy={parsing} aria-label={t('demoView.reparse')}>
                   {parsing ? <Spinner size="1" /> : <i aria-hidden="true" className="bi bi-arrow-clockwise app-icon" />}
                 </IconButton>
@@ -113,26 +113,26 @@ export function DemoView({ meta, jobs, status, onChanged, onRemoved, requestedTa
         <Flex align="center" gap="2" wrap="wrap">
           {parsed && (
             <>
-              <Text size="2" color="gray">
+              <Text size="1" color="gray">
                 {t('demoView.rounds', { count: parsed.rounds.length })}
               </Text>
-              <Text size="2" color="gray">
+              <Text size="1" color="gray">
                 ·
               </Text>
             </>
           )}
-          <Text size="2" color="gray">
+          <Text size="1" color="gray">
             {meta.name}
           </Text>
-          <Text size="2" color="gray">
+          <Text size="1" color="gray">
             · {fmtDate(meta.mtimeMs)} · {mb(meta.bytes)}
           </Text>
         </Flex>
       </Flex>
 
-      {!parsed && (
+      {(!parsed || parsing) && (
         <Flex align="center" justify="center" direction="column" gap="4" style={{ flex: 1 }}>
-          {meta.status === 'parsing' ? (
+          {parsing ? (
             <>
               <Spinner size="3" />
               <Text color="gray">{t('demoView.parsing')}</Text>
@@ -152,19 +152,19 @@ export function DemoView({ meta, jobs, status, onChanged, onRemoved, requestedTa
         </Flex>
       )}
 
-      {parsed && (
+      {parsed && !parsing && (
         <Tabs.Root value={tab} onValueChange={setTab} style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
           <Tabs.List className="demo-tabs">
-            <Tabs.Trigger value="players">{t('demoView.tabs.players')}</Tabs.Trigger>
-            <Tabs.Trigger value="charts">{t('demoView.tabs.charts')}</Tabs.Trigger>
+            <Tabs.Trigger value="players"><i aria-hidden="true" className="bi bi-people app-icon" />{t('demoView.tabs.players')}</Tabs.Trigger>
+            <Tabs.Trigger value="charts"><i aria-hidden="true" className="bi bi-graph-up app-icon" />{t('demoView.tabs.charts')}</Tabs.Trigger>
             <Tabs.Trigger value="highlights">
-              {t('demoView.tabs.highlights')}
+              <i aria-hidden="true" className="bi bi-stars app-icon" />{t('demoView.tabs.highlights')}
               <Badge ml="2" variant="soft" color="gray">
                 {parsed.highlights.length}
               </Badge>
             </Tabs.Trigger>
             <Tabs.Trigger value="renders">
-              {t('demoView.tabs.videos')}
+              <i aria-hidden="true" className="bi bi-camera-video app-icon" />{t('demoView.tabs.videos')}
               <Badge ml="2" variant="soft" color="gray">
                 {videoCount}
               </Badge>
@@ -174,11 +174,11 @@ export function DemoView({ meta, jobs, status, onChanged, onRemoved, requestedTa
                 </Badge>
               )}
             </Tabs.Trigger>
-            <Tabs.Trigger value="2d">{t('demoView.tabs.replay')}</Tabs.Trigger>
+            <Tabs.Trigger value="2d"><i aria-hidden="true" className="bi bi-map app-icon" />{t('demoView.tabs.replay')}</Tabs.Trigger>
           </Tabs.List>
           <Box ref={tabScrollRef} className="tab-body">
             <Tabs.Content value="highlights">
-              <HighlightsTab meta={meta} parsed={parsed} status={status} onRendered={() => setTab('renders')} />
+              <HighlightsTab onSetup={onSetup} meta={meta} parsed={parsed} status={status} onRendered={() => setTab('renders')} />
             </Tabs.Content>
             <Tabs.Content value="players">
               <PlayersTab parsed={parsed} />
@@ -190,7 +190,7 @@ export function DemoView({ meta, jobs, status, onChanged, onRemoved, requestedTa
               <RendersTab jobs={jobs} parsed={parsed} onChanged={onChanged} scrollRef={tabScrollRef} />
             </Tabs.Content>
             <Tabs.Content value="2d" style={{ height: '100%' }}>
-              <ReplayTab meta={meta} parsed={parsed} />
+              <ReplayTab onSetup={onSetup} meta={meta} parsed={parsed} />
             </Tabs.Content>
           </Box>
         </Tabs.Root>

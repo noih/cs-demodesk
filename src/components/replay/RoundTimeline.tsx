@@ -1,3 +1,4 @@
+import { displayPlayerName } from '../../playerName.ts';
 import { useMemo, useRef } from 'react';
 import type { RoundInfo } from '../../api.ts';
 import type { Replay } from '../../replay/engine.ts';
@@ -40,7 +41,7 @@ export function RoundTimeline({ replay, round, tick, onSeek }: { replay: Replay;
       )}
       {round && <div className="tl-mark" style={{ left: pct(round.freezeEndTick), background: 'var(--gray-a8)' }} />}
       {kills.map((k, i) => (
-        <div key={i} className="tl-mark" style={{ left: pct(k.tick), background: teamColor(k.attacker?.team ?? k.victim.team) }} title={`${k.attacker?.name ?? ''} → ${k.victim.name}`} />
+        <div key={i} className="tl-mark" style={{ left: pct(k.tick), background: teamColor(k.attacker?.team ?? k.victim.team) }} title={`${k.attacker ? displayPlayerName(k.attacker.name) : ''} → ${displayPlayerName(k.victim.name)}`} />
       ))}
       <div className="tl-progress" style={{ width: pct(tick) }} />
       <div className="tl-head" style={{ left: pct(tick) }} />

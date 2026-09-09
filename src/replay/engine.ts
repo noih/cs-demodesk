@@ -81,6 +81,7 @@ export interface TickState {
   players: PlayerState[];
   grenades: GrenadeState[];
   effects: Effect[];
+  fireCells?: number[][];
   shots: Shot[];
   deaths: Death[];
   bomb?: BombState;
@@ -295,6 +296,7 @@ export class Replay {
       round,
       players,
       grenades,
+      fireCells: data.schemaVersion >= 5 ? a.f ?? [] : undefined,
       effects: acc.effects.filter((f) => f.end > tick),
       shots: acc.shots,
       deaths: acc.deaths,

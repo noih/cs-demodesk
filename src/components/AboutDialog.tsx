@@ -1,3 +1,4 @@
+import { Tooltip } from '@radix-ui/themes';
 import { useEffect, useState } from 'react';
 import { Badge, Button, Dialog, Flex, IconButton, Text } from '@radix-ui/themes';
 import { useTranslation } from 'react-i18next';
@@ -28,13 +29,12 @@ export function AboutDialog() {
   }, []);
   return (
     <Dialog.Root>
-      {/* a plain button: wrapping the trigger in a Tooltip swallowed the click */}
-      <Dialog.Trigger>
-        <IconButton variant="ghost" color="gray" aria-label={t('about.button')} title={t('about.button')}>
+      <Tooltip delayDuration={150} content={t('about.button')}><Dialog.Trigger>
+        <IconButton variant="ghost" color="gray" aria-label={t('about.button')} >
           <i aria-hidden="true" className="bi bi-info-circle app-icon" />
         </IconButton>
-      </Dialog.Trigger>
-      <Dialog.Content maxWidth="600px" style={{ padding: 32 }}>
+      </Dialog.Trigger></Tooltip>
+      <Dialog.Content maxWidth="800px" style={{ padding: 32 }}>
         <Flex justify="between" align="center" gap="3">
           <Flex align="center" gap="3">
             <img src={logo} alt="" width="48" height="48" style={{ background: 'var(--app-logo-background, #121518)', borderRadius: 10, padding: 4 }} />

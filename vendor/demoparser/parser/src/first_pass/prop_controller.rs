@@ -12,6 +12,8 @@ use ahash::AHashMap;
 pub const PLAYER_ENTITY_HANDLE_MISSING: i32 = 2047;
 pub const SPECTATOR_TEAM_NUM: u32 = 1;
 pub const BUTTONS_BASEID: u32 = 100000;
+pub const FIRE_POSITIONS_ID: u32 = 700000000;
+pub const FIRE_BURNING_ID: u32 = 700000100;
 pub const NORMAL_PROP_BASEID: u32 = 1000;
 pub const WEAPON_SKIN_NAME: u32 = 420420420;
 pub const WEAPON_ORIGINGAL_OWNER_ID: u32 = 6942000;
@@ -458,6 +460,16 @@ impl PropController {
         self.path_to_name.insert(a, prop_name.to_string());
         let grenade_or_weapon = is_grenade_or_weapon(full_name);
 
+        if prop_name == "m_firePositions" || prop_name == "m_bFireIsBurning" {
+            f.prop_id = if prop_name == "m_firePositions" { FIRE_POSITIONS_ID } else { FIRE_BURNING_ID };
+            if !self.name_to_id.contains_key(&prop_name) {
+                self.name_to_id.insert(prop_name.clone(), f.prop_id);
+                self.id_to_name.insert(f.prop_id, prop_name.clone());
+                self.insert_propinfo(full_name, f);
+            }
+            f.should_parse = true;
+            return;
+        }
         let prop_already_exists = self.name_to_id.contains_key(&(prop_name).to_string());
         self.set_id(&prop_name, f, grenade_or_weapon);
 

@@ -484,6 +484,14 @@ pub fn get_propinfo(field: &Field, path: &FieldPath) -> Option<FieldInfo> {
         _ => return None,
     };
 
+    // Inferno arrays are top-level fixed arrays of 64 cells.
+    if fi.prop_id == crate::first_pass::prop_controller::FIRE_POSITIONS_ID || fi.prop_id == crate::first_pass::prop_controller::FIRE_BURNING_ID {
+        if path.last == 1 && (0..64).contains(&path.path[1]) {
+            fi.prop_id += path.path[1] as u32;
+        } else {
+            return None;
+        }
+    }
     // Flatten vector props
     if fi.prop_id == MY_WEAPONS_OFFSET {
         if path.last == 1 {

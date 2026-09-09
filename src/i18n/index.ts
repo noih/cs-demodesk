@@ -51,3 +51,14 @@ export const fmtTime = (ms: number) => new Date(ms).toLocaleTimeString(i18n.lang
 export const fmtDateTime = (iso: string) => new Date(iso).toLocaleString(i18n.language);
 
 export default i18n;
+
+/** Keep unknown backend diagnostics intact while translating known setup problems. */
+export function translateProblem(problem: string): string {
+  const keys = [
+    ['rendering only runs on Windows', 'windows'], ['Steam not found', 'steam'],
+    ['cs2.exe not found', 'cs2'], ['HLAE not installed', 'hlae'],
+    ['x64/AfxHookSource2.dll missing', 'hook'], ['ffmpeg.exe not found', 'ffmpeg'],
+  ] as const;
+  const key = keys.find(([prefix]) => problem.startsWith(prefix))?.[1];
+  return key ? i18n.t(`diagnostics.${key}`) : problem;
+}

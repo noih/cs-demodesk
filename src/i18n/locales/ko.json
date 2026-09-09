@@ -6,6 +6,7 @@
     "default": "기본 폴더로 복원"
   },
   "common": {
+    "unnamed": "이름 없음",
     "cancel": "취소",
     "close": "닫기",
     "delete": "삭제",
@@ -68,7 +69,7 @@
       "parsed": "분석 완료",
       "error": "오류"
     },
-    "addTooltip": ".dem 파일 추가 (원래 위치 유지)",
+    "addTooltip": ".dem 파일 추가",
     "add": "데모 추가",
     "rescanTooltip": "폴더 다시 검색",
     "rescan": "다시 검색",
@@ -103,7 +104,7 @@
     "deleteConfirm": "파일 삭제"
   },
   "players": {
-    "aim": "Aim",
+    "aim": "조준",
     "weaponGroup": "Weapon group",
     "weapon_all": "All weapons",
     "weapon_rifles": "Rifles",
@@ -146,13 +147,13 @@
     "shots": "Shots fired",
     "fireDamage": "Fire damage",
     "heDamage": "HE damage",
-    "duels": "Duels",
-    "clutches": "Clutches",
-    "trades": "Trades",
-    "opening": "Opening duels",
-    "utility": "Utility",
-    "activity": "Activity",
-    "general": "General",
+    "duels": "맞대결",
+    "clutches": "클러치",
+    "trades": "트레이드",
+    "opening": "첫 교전",
+    "utility": "투척물",
+    "activity": "활동",
+    "general": "기본",
     "category": "Statistics category",
     "openingKills": "첫 킬",
     "openingDeaths": "첫 데스",
@@ -192,7 +193,7 @@
       "best": "하이라이트 점수"
     },
     "timelineTitle": "라운드 타임라인",
-    "timelineHint": "The strip shows round winners; ★ marks highlights. Hover or focus for round details. Click a legend to hide a player.",
+    "timelineHint": "색상은 라운드 승리 팀, ★는 하이라이트입니다. 마우스를 올리거나 포커스하면 요약이 표시됩니다. 범례를 클릭하면 선을 숨깁니다.",
     "seg": {
       "kills": "킬",
       "kd": "K/D",
@@ -206,18 +207,18 @@
     },
     "radarTitle": "레이더 비교",
     "trend": {
-      "kills": "Kills",
-      "deaths": "Deaths",
-      "damage": "Damage",
-      "awp": "AWP kills",
-      "flashed": "Enemies flashed",
-      "difference": "Score difference",
-      "cash": "Team cash"
+      "kills": "킬",
+      "deaths": "데스",
+      "damage": "피해량",
+      "awp": "AWP 킬",
+      "flashed": "섬광에 맞은 적",
+      "difference": "점수 차이",
+      "cash": "팀 보유 금액"
     },
-    "roundAxis": "Round",
-    "cashHint": "Team cash immediately after freeze end, excluding equipment value. Missing samples are omitted.",
-    "differenceHint": "Team A wins minus Team B wins.",
-    "cumulativeHint": "Cumulative through each round; flashed counts enemy blind events over 1.1 seconds."
+    "roundAxis": "라운드",
+    "cashHint": "준비 시간 종료 직후의 팀 보유 금액입니다. 장비 가치는 제외하며 누락된 표본은 표시하지 않습니다.",
+    "differenceHint": "팀 A 승리 수에서 팀 B 승리 수를 뺀 값입니다.",
+    "cumulativeHint": "각 라운드 종료까지 누적됩니다. 섬광은 적의 실명 시간이 1.1초를 초과한 이벤트를 집계합니다."
   },
   "highlights": {
     "allPlayers": "모든 플레이어",
@@ -261,7 +262,7 @@
     "hudScale": "HUD 크기 {{n}}",
     "clips": "클립",
     "notReady": "렌더링 준비가 안 됐습니다 - 먼저 설정에서 도구를 다운로드하세요.",
-    "showGame": "게임 화면 표시",
+    "hideGame": "게임을 숨기고 백그라운드에서 실행",
     "visibleGame": "녹화 중에는 CS2 게임 화면이 표시됩니다. 직접 닫지 마세요.",
     "hiddenGame": "녹화 중 CS2는 숨겨진 상태로 실행되고 Windows에서 음소거됩니다. 직접 종료하지 마세요.",
     "submitting": "요청 중..."
@@ -285,7 +286,7 @@
     "sizeLimit": "≤ {{mb}} MB",
     "noSizeLimit": "크기 제한 없음",
     "openFolder": "폴더 열기",
-    "viewLog": "로그 보기 ({{n}}줄)",
+    "viewLog": "로그 보기",
     "deleteJob": "이 내보내기 삭제 (동영상 포함)",
     "merged": "합친 동영상",
     "openInPlayer": "플레이어로 열기",
@@ -311,6 +312,7 @@
     "empty": "내보낸 동영상이 아직 없습니다."
   },
   "replay": {
+    "toolsMissing": "Source 2 Viewer가 없습니다. 설정에서 도구를 다운로드하세요.",
     "imageLoadFailed": "{{file}} 을(를) 불러올 수 없습니다",
     "downloadTools": "도구 다운로드",
     "preparing": "준비 중",
@@ -346,7 +348,8 @@
     "sound": "가청 범위",
     "soundAll": "전체",
     "soundFocus": "추적 대상",
-    "soundOff": "끔"
+    "soundOff": "끔",
+    "money": "보유 금액"
   },
   "settings": {
     "title": "설정",
@@ -410,6 +413,10 @@
     "autoParseHint": "새 데모는 하나씩 자동 분석됩니다. 실패한 데모는 분석 버튼을 클릭해야 다시 시도합니다."
   },
   "ui": {
+    "fontSize": "글자 크기",
+    "fontSize_small": "작게",
+    "fontSize_medium": "중간",
+    "fontSize_large": "크게",
     "filter": "Demo 필터",
     "light": "라이트 모드로 전환",
     "dark": "다크 모드로 전환",
@@ -421,21 +428,25 @@
     "queueEmpty": "진행 중인 작업 없음"
   },
   "recoil": {
-    "clipped": "{{n}}개 점이 화면 밖에 있습니다. 축소해서 확인하세요.",
     "noReference": "대응하는 발사 각도가 없어 기준을 표시할 수 없습니다.",
-    "reference": "기준 (추정)",
-    "you": "플레이어 평균",
+    "reference": "실측",
+    "you": "플레이어",
     "resetZoom": "확대 초기화 (기준)",
     "title": "이번 경기 연사 궤적 (시점)",
     "player": "연사 플레이어",
-    "hint": "평균 시점 이동과 이번 경기의 발사 각도로 추정한 반동 보정을 비교합니다. 무기별 표본을 합치고 첫 발을 정렬하여 기준 곡선을 중앙에 표시합니다. subtick 조준 변화로 오차가 생길 수 있으며 공식 이상 곡선이나 반동 점수가 아닙니다.",
     "bursts": "연사 {{n}}회",
     "empty": "조건에 맞는 연사 없음",
     "horizontal": "X° · 오른쪽 +",
     "vertical": "Y° · 위 + / 아래 −. 모든 무기에 같은 축척을 사용합니다.",
-    "details": "발사 순서별 데이터",
-    "shot": "발사 순서",
     "point": "{{shot}}번째 발\nX {{x}}° · Y {{y}}°\n연사 {{n}}회",
     "definition": "반동 인덱스가 약 0에서 시작하고, 300 ms 이하 간격으로 3발 이상, 발사마다 인덱스가 1 증가한 연사를 집계합니다. 누락된 표본은 연사를 끊습니다. 해당 발사 순서까지 도달한 연사만 평균하므로 후반 표본 수가 줄어듭니다."
+  },
+  "diagnostics": {
+    "windows": "녹화는 Windows에서만 지원됩니다.",
+    "steam": "Steam을 찾을 수 없습니다. CS2 폴더를 직접 지정하세요.",
+    "cs2": "cs2.exe를 찾을 수 없습니다. 설정에서 CS2 폴더를 지정하세요.",
+    "hlae": "HLAE가 없습니다. 도구를 다운로드하세요.",
+    "hook": "HLAE에 x64/AfxHookSource2.dll이 없습니다. 도구를 다시 다운로드하세요.",
+    "ffmpeg": "FFmpeg가 없습니다. 도구를 다운로드하거나 경로를 지정하세요."
   }
 }

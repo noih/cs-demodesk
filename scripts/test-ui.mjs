@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { readdir } from 'node:fs/promises';
+import { readdir, readFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { preview } from 'vite';
 import { initialAppearance, THEMES } from '../src/themes.ts';
@@ -27,6 +27,7 @@ try {
     window.__TAURI_INTERNALS__ = { transformCallback: () => 1, unregisterCallback: () => {}, convertFileSrc: () => 'data:video/mp4;base64,', invoke: async (cmd, args) => {
       window.testCalls.push({cmd,args});
       if(cmd==='get_startup_error')return null;
+      if(cmd==='get_map_assets' && window.missingTools)throw new Error('Source 2 Viewer CLI not installed');
       if(cmd==='get_replay' || cmd==='get_map_assets')return new Promise(()=>{});
       if(cmd==='get_kills')return [];
       if(cmd==='parse_demo')return new Promise(resolve=>window.releaseParse=resolve);
@@ -37,7 +38,7 @@ try {
       if(cmd==='get_demo' && window.emptyParsed)return {meta:demos.find(d=>d.id===args.id)};
       if(cmd==='get_demo' && window.failDemo)throw Error('Cannot read demo');
       if(cmd==='get_demo' && window.holdDemo)await new Promise(resolve=>window.releaseDemo=resolve);
-      if(cmd==='get_demo')return { meta:demos.find(d=>d.id===args.id),parsed:{recoilReference:{ak47:[{x:0,y:0,samples:4},{x:-1,y:-1,samples:4},{x:-2,y:-3,samples:4},{x:-2,y:-4,samples:2}]},info:{mapName:demos.find(d=>d.id===args.id).mapName,tickRate:64,players:[]},parsedAt:'2026-09-08',score:{A:13,B:9},rounds:[],roundSummaries:[{round:1,winner:'A',killsA:5,killsB:2,players:{'1':{kills:5,deaths:2,damage:450,awp:1,flashed:2,cash:800},'2':{kills:2,deaths:5,damage:220,awp:0,flashed:0,cash:300}}}],stats:[player,{...player,steamid:'2',name:'Opponent',team:'B',recoil:{},opponents:{'1':1}}],highlights:[{id:'highlight-1',player:{steamid:'1',name:'Player'},round:8,startTick:640,endTick:1280,score:8,tags:['3k'],title:'Player — 3 kills · R8',kills:[],breakdown:{}}]}};
+      if(cmd==='get_demo')return { meta:demos.find(d=>d.id===args.id),parsed:{recoilReference:{ak47:[{x:0,y:0,samples:4},{x:-1,y:-1,samples:4},{x:-2,y:-3,samples:4},{x:-2,y:-4,samples:2}]},info:{mapName:demos.find(d=>d.id===args.id).mapName,tickRate:64,players:[]},parsedAt:'2026-09-08',score:{A:13,B:9},rounds:[],roundSummaries:[{round:1,winner:'A',killsA:5,killsB:2,players:{'1':{kills:5,deaths:2,damage:450,awp:1,flashed:2,cash:800},'2':{kills:2,deaths:5,damage:220,awp:0,flashed:0,cash:300}}}],stats:[player,{...player,steamid:'2',name:'Player',team:'B',recoil:{},opponents:{'1':1}}],highlights:[{id:'highlight-1',player:{steamid:'1',name:'Player'},round:8,startTick:640,endTick:1280,score:8,tags:['3k'],title:'Player — 3 kills · R8',kills:[],breakdown:{}}]}};
       if(cmd.startsWith('plugin:event|'))return 1;
       throw Error('Unexpected command '+cmd);
     }};
@@ -99,8 +100,29 @@ try {
   await page.waitForFunction(()=>typeof window.releaseParse==='function');
   await page.evaluate(()=>window.releaseParse());
   await pendingParse.waitFor({state:'detached'});
+  for (const [name, expected] of [['Small',[20,18,16,14]],['Large',[24,22,20,18]],['Medium',[22,20,18,16]]]) {
+    await page.getByRole('button',{name:'Text size',exact:true}).click();
+    await page.getByRole('radiogroup',{name:'Text size'}).getByRole('radio',{name,exact:true}).click();
+    await page.getByRole('radiogroup',{name:'Text size'}).waitFor({state:'detached'});
+    const sizes = await page.locator('.app-root').evaluate(el => {
+      const css = getComputedStyle(el);
+      return ['title','subtitle','body','caption'].map(role=>parseInt(css.getPropertyValue('--app-font-'+role)));
+    });
+    assert.deepEqual(sizes,expected);
+    assert.equal(await page.locator('.demo-heading .rt-Heading').evaluate(el=>parseFloat(getComputedStyle(el).fontSize)),expected[0]);
+    assert.equal(await page.locator('.demo-heading .rt-Text').first().evaluate(el=>parseFloat(getComputedStyle(el).fontSize)),expected[3]);
+
+    assert.equal(await page.evaluate(()=>localStorage.getItem('demodesk.fontSize')),name.toLowerCase());
+    assert.ok(await page.locator('.demo-item').first().evaluate(el=>el.scrollHeight<=el.clientHeight),'Demo row accommodates text');
+  }
+  await page.keyboard.press('Escape');
   const widths = await page.getByRole('tab').evaluateAll(t=>t.map(e=>e.getBoundingClientRect().width));
   assert.ok(Math.max(...widths)-Math.min(...widths)<2,'Tabs are equal width');
+  const plainCursors = await page.locator('button:not(:disabled):not([data-disabled]):not([aria-disabled="true"])').evaluateAll(buttons => buttons
+    .filter(button => getComputedStyle(button).cursor !== 'pointer')
+    .map(button => button.getAttribute('aria-label') || button.textContent.trim()));
+  assert.deepEqual(plainCursors, [], 'Enabled buttons and tabs indicate clickability');
+
   if (process.env.UI_SCREENSHOT_DIR) await page.screenshot({path:process.env.UI_SCREENSHOT_DIR+'/ui-dark.png'});
   await page.getByRole('button',{name:'Switch to light mode'}).click();
   assert.match(await page.locator('.radix-themes').first().getAttribute('class'),/light/);
@@ -110,7 +132,7 @@ try {
   assert.equal(await about.innerText(), '', 'About is an icon-only button');
   const aboutBounds = await about.boundingBox();
   const settingsBounds = await page.getByRole('button', { name: 'Settings', exact: true }).boundingBox();
-  assert.ok(aboutBounds.x + aboutBounds.width + 7 <= settingsBounds.x, 'About and Settings hit areas stay separated');
+  assert.ok(settingsBounds.x + settingsBounds.width + 7 <= aboutBounds.x, 'About and Settings hit areas stay separated');
   await about.click();
   await page.getByRole('dialog').waitFor();
   await page.getByRole('button', { name: 'Close', exact: true }).click();
@@ -164,20 +186,38 @@ try {
   }
   await page.getByRole('tab').filter({hasText:'Charts'}).click();
   await page.locator('canvas').first().waitFor();
+  const playerLegends = page.locator('.chart-legend').first().locator('button');
+  assert.deepEqual(await playerLegends.allTextContents(), ['Player', 'Player']);
+  await playerLegends.first().click();
+  assert.equal(await playerLegends.first().getAttribute('aria-pressed'), 'false');
+  assert.equal(await playerLegends.nth(1).getAttribute('aria-pressed'), 'true');
+  await playerLegends.first().click();
   for (const name of ['Deaths','Damage','AWP kills','Enemies flashed','Score difference','Team cash']) {
     await page.getByRole('button',{name,exact:true}).first().click();
     assert.equal(await page.getByRole('button',{name,exact:true}).first().getAttribute('aria-pressed'),'true');
     assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
   }
   if(process.env.UI_SCREENSHOT_DIR) await page.screenshot({path:process.env.UI_SCREENSHOT_DIR+'/trends.png'});
+  const trendCanvas = page.locator('.chart canvas').first();
+  await trendCanvas.scrollIntoViewIfNeeded();
+  await page.evaluate(() => {
+    window.timelineWheelPrevented = undefined;
+    window.addEventListener('wheel', event => { window.timelineWheelPrevented = event.defaultPrevented; }, { once: true });
+  });
+  await trendCanvas.hover();
+  await page.mouse.wheel(0, 100);
+  await page.waitForFunction(() => window.timelineWheelPrevented !== undefined);
+  assert.equal(await page.evaluate(() => window.timelineWheelPrevented), false, 'Timeline wheel allows page scrolling');
+  await page.mouse.move(0, 0);
   const recoil = page.getByTestId('recoil-chart');
   await recoil.getByText('2 bursts',{exact:true}).waitFor();
   assert.equal(await recoil.getByText('No qualifying bursts',{exact:true}).count(),2);
-  await recoil.locator('summary').click();
-  const lastShot = recoil.getByRole('table').locator('tbody tr').last();
-  assert.deepEqual(await lastShot.getByRole('cell').allTextContents(),['2.00','-5.00','1','-2.00 / -4.00 / 2']);
-  await recoil.locator('summary').click();
   await recoil.scrollIntoViewIfNeeded();
+  const recoilPlayers = recoil.getByRole('button', { name: '━ Player', exact: true });
+  await recoilPlayers.first().click();
+  assert.deepEqual(await recoilPlayers.evaluateAll(buttons => buttons.map(button => button.getAttribute('aria-pressed'))), ['false', 'false', 'false']);
+  await recoilPlayers.last().click();
+  assert.deepEqual(await recoilPlayers.evaluateAll(buttons => buttons.map(button => button.getAttribute('aria-pressed'))), ['true', 'true', 'true']);
   const zoomIn = recoil.getByRole('button',{name:'Zoom in',exact:true});
   const zoomOut = recoil.getByRole('button',{name:'Zoom out',exact:true});
   const resetZoom = recoil.getByRole('button',{name:'Reset zoom (reference)',exact:true});
@@ -186,15 +226,35 @@ try {
     // Check known shot positions, without depending on tooltip/label rasterization.
     await page.waitForFunction(({ zoom, accent }) => {
       const canvas = document.querySelector('[data-testid="recoil-chart"] canvas');
-      const halfSpan = 3 / (zoom * 0.8);
-      return [[-2, -3]].every(([px, py]) => {
-        const x = (45 + (px + 1 + halfSpan) / (2 * halfSpan) * (canvas.clientWidth - 65)) * canvas.width / canvas.clientWidth;
-        const y = (20 + (halfSpan - (py + 2)) / (2 * halfSpan) * (canvas.clientHeight - 65)) * canvas.height / canvas.clientHeight;
-        const pixel = canvas.getContext('2d').getImageData(Math.round(x), Math.round(y), 1, 1).data;
-        return accent.every((value, i) => pixel[i] === value);
+      const halfSpan = 3 / (zoom * .8);
+      const cx = -1, cy = -2;
+      const inset = Math.ceil(parseFloat(getComputedStyle(canvas).getPropertyValue('--app-font-caption')) * 3 + 8);
+      const point = {x:-2,y:-3};
+      return [[point.x, point.y]].every(([px, py]) => {
+        const x = (inset + (px - cx + halfSpan) / (2 * halfSpan) * (canvas.clientWidth - inset - 20)) * canvas.width / canvas.clientWidth;
+        const y = (20 + (halfSpan - (py - cy)) / (2 * halfSpan) * (canvas.clientHeight - inset - 20)) * canvas.height / canvas.clientHeight;
+        const pixels = canvas.getContext('2d').getImageData(Math.round(x)-3, Math.round(y)-3, 7, 7).data;
+        return Array.from({length:49},(_,n)=>n*4).some(offset=>accent.every((value,i)=>Math.abs(pixels[offset+i]-value)<5));
       });
     }, { zoom, accent: THEMES.light.accent.match(/[a-f0-9]{2}/gi).map(v => parseInt(v, 16)) });
   };
+  await checkPlot(1);
+  const controlHeights = await recoil.locator('.recoil-controls .rt-Button,.recoil-controls .rt-IconButton,.recoil-controls .rt-SelectTrigger').evaluateAll(elements=>elements.map(el=>el.getBoundingClientRect().height));
+  assert.ok(Math.max(...controlHeights)-Math.min(...controlHeights)<1,'Recoil controls share a height');
+  const plot = recoil.locator('.recoil-plot').first();
+  await plot.hover();
+  await page.mouse.wheel(0,-100);
+  await page.waitForFunction(()=>document.querySelector('[aria-label="Reset zoom (reference)"]').textContent==='125%');
+  await resetZoom.click();
+  await plot.scrollIntoViewIfNeeded();
+  const box = await plot.boundingBox();
+  const beforePan = await recoil.locator('.recoil-plot canvas').evaluateAll(canvases=>canvases.map(canvas=>canvas.toDataURL()));
+  await page.mouse.move(box.x+box.width/2,box.y+box.height/2);
+  await page.mouse.down();
+  await page.mouse.move(box.x+box.width/2+40,box.y+box.height/2+25,{steps:4});
+  await page.mouse.up();
+  await page.waitForFunction(before=>Array.from(document.querySelectorAll('.recoil-plot canvas')).every((canvas,i)=>canvas.toDataURL()!==before[i]),beforePan);
+  await resetZoom.click();
   await checkPlot(1);
   await zoomIn.click();
   assert.equal(await resetZoom.innerText(),'125%');
@@ -223,11 +283,11 @@ try {
     if(process.env.UI_SCREENSHOT_DIR) await recoil.screenshot({path:process.env.UI_SCREENSHOT_DIR+'/recoil-'+width+'.png'});
   }
   await recoil.getByRole('combobox',{name:'Spray player'}).click();
-  await page.getByRole('option',{name:'Opponent',exact:true}).click();
+  await page.getByRole('option',{name:'Player',exact:true}).nth(1).click();
   assert.equal(await recoil.getByText('No qualifying bursts',{exact:true}).count(),3);
   assert.equal(await resetZoom.innerText(),'100%','Changing player fits the new trajectories');
   assert.ok(!(await resetZoom.isDisabled()),'Reference remains available without player bursts');
-  await recoil.getByText('━ Reference (estimated)',{exact:true}).first().waitFor();
+  await recoil.getByText('━ Actual',{exact:true}).first().waitFor();
   await page.setViewportSize({width:1360,height:940});
   await page.getByRole('button',{name:'Switch to dark mode'}).click();
   await page.getByRole('button',{name:'Filter demos'}).click();
@@ -259,7 +319,7 @@ try {
   assert.equal(await settingsPage.locator('.rt-Badge').count(), 0, 'Settings statuses are plain text');
   assert.equal(await settingsPage.locator('.rt-variant-ghost, .rt-variant-soft').count(), 0, 'Settings actions use clear outlined or solid controls');
   const actionHeights = await settingsPage.locator('.rt-Button, .rt-IconButton').evaluateAll(buttons => buttons.map(b => b.getBoundingClientRect().height));
-  assert.ok(actionHeights.every(height => height === 32), 'Settings action controls share a 32px height');
+  assert.ok(actionHeights.every(height => height >= 32), 'Settings action controls accommodate the selected text size');
   if (process.env.UI_SCREENSHOT_DIR) await page.screenshot({path:process.env.UI_SCREENSHOT_DIR+'/settings-redesign.png'});
   assert.deepEqual(await headerButtonBounds(), detailHeaderBounds, 'Header button positions and sizes remain stable on Settings');
   await page.setViewportSize({width:960,height:720});
@@ -281,12 +341,14 @@ try {
       const text = el.querySelector('.rt-TooltipText');
       const rect = text.getBoundingClientRect();
       const probe = document.createElement('span');
-      probe.style.color = 'var(--app-text)';
+      probe.style.color = 'var(--app-raised)';
       el.append(probe);
       const expected = getComputedStyle(probe).color;
+      probe.style.color = 'var(--app-text)';
+      const expectedForeground = getComputedStyle(probe).color;
       probe.remove();
       return {
-        background: style.backgroundColor, expected,
+        background: style.backgroundColor, expected, expectedForeground,
         foreground: getComputedStyle(text).color,
         arrow: getComputedStyle(el.querySelector('.rt-TooltipArrow')).fill,
         onTop: el.contains(document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2)),
@@ -294,7 +356,7 @@ try {
     });
     assert.equal(tip.background, tip.expected, 'Tooltip retains its contrasting background');
     assert.equal(tip.arrow, tip.background, 'Tooltip arrow matches its surface');
-    assert.notEqual(tip.foreground, tip.background, 'Tooltip text remains readable');
+    assert.equal(tip.foreground, tip.expectedForeground, 'Tooltip text uses the theme foreground');
     assert.ok(tip.onTop, 'Tooltip text is not covered or clipped');
     await page.mouse.move(500, 500);
     await page.keyboard.press('Escape');
@@ -359,20 +421,20 @@ try {
   await page.emulateMedia({reducedMotion:'no-preference'});
   await page.evaluate(()=>window.missingTools=true);
   await page.locator('.header-tools .bi-arrow-clockwise').locator('..').click();
-  const notice = page.locator('.environment-notice');
-  await notice.waitFor();
-  const noticeStyle = await notice.evaluate(el => ({background:getComputedStyle(el).backgroundColor,color:getComputedStyle(el).color}));
-  assert.ok(/^rgb\(/.test(noticeStyle.background),'Notice uses an opaque background');
-  assert.notEqual(noticeStyle.background,noticeStyle.color);
-  await notice.click();
+  await page.locator('.header-tools [aria-busy="true"]').waitFor();
+  await page.locator('.header-tools [aria-busy="true"]').waitFor({state:'detached'});
+  assert.equal(await page.locator('.app-notice').count(),0,'Missing tools do not show a global notice');
+  await page.getByRole('tab').filter({hasText:'Players'}).click();
+  await page.getByRole('tab').filter({hasText:'2D'}).click();
+  await page.getByRole('button',{name:'Source 2 Viewer is missing. Open Settings to download tools.'}).click();
   const download = page.locator('.tools-highlight');
   await download.waitFor();
   assert.equal(await download.evaluate(el=>getComputedStyle(el).animationName),'tools-highlight-pulse');
-  assert.equal(await download.evaluate(el=>getComputedStyle(el).animationDuration),'2s');
-  const outline = await download.evaluate(el=>getComputedStyle(el).outlineColor);
-  await page.waitForFunction(original=>getComputedStyle(document.querySelector('.tools-highlight')).outlineColor!==original,outline);
+  assert.equal(await download.evaluate(el=>getComputedStyle(el).animationDuration),'0.5s');
+  const outline = await download.evaluate(el=>getComputedStyle(el).backgroundColor);
+  await page.waitForFunction(original=>getComputedStyle(document.querySelector('.tools-highlight')).backgroundColor!==original,outline);
   await page.emulateMedia({reducedMotion:'reduce'});
-  assert.equal(await download.evaluate(el=>getComputedStyle(el).animationDuration),'3s');
+  assert.equal(await download.evaluate(el=>getComputedStyle(el).animationDuration),'0.5s');
   await page.emulateMedia({reducedMotion:'no-preference'});
   assert.ok(await download.evaluate(el => document.activeElement === el), 'Missing tools guidance focuses download action');
   assert.ok(await download.evaluate(el => {
@@ -380,6 +442,26 @@ try {
     return r.top >= 0 && r.bottom <= innerHeight;
   }), 'Download action is scrolled into view');
   assert.equal(await page.evaluate(()=>window.testCalls.filter(c=>c.cmd==='run_setup').length), 0, 'Guidance does not start downloads');
+  await page.getByRole('button',{name:'Settings',exact:true}).click();
+  await page.getByRole('tab').filter({hasText:'Highlights'}).click();
+  await page.getByRole('button',{name:'Select all',exact:true}).click();
+  await page.getByRole('button',{name:/^Export/}).click();
+  const exportDialog = page.getByRole('dialog');
+  await exportDialog.waitFor();
+  const hideGame = exportDialog.getByRole('switch',{name:'Hide game in background'});
+  await hideGame.waitFor();
+  assert.equal(await hideGame.isChecked(),true,'Game is hidden by default');
+  await hideGame.click();
+  assert.equal(await hideGame.isChecked(),false);
+  await hideGame.click();
+  assert.ok(await exportDialog.getByRole('button',{name:'Export',exact:true}).isDisabled());
+  assert.notEqual(await exportDialog.getByRole('button',{name:'Export',exact:true}).evaluate(el=>getComputedStyle(el).cursor),'pointer','Disabled actions do not advertise clickability');
+  await exportDialog.locator('.environment-notice').click();
+  await exportDialog.waitFor({state:'detached'});
+  await download.waitFor();
+  assert.ok(await download.evaluate(el=>document.activeElement===el),'Export guidance focuses the download action');
+  assert.equal(await page.evaluate(()=>window.testCalls.filter(c=>c.cmd==='run_setup').length),0,'Export guidance does not start downloads');
+
   const refreshList = async () => {
     await page.locator('.header-tools .bi-arrow-clockwise').locator('..').click();
     await page.locator('.header-tools [aria-busy="true"]').waitFor();

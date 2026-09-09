@@ -1,3 +1,5 @@
+import { displayPlayerName } from '../playerName.ts';
+import { useAppTheme } from '../AppTheme.tsx';
 import { Spinner } from './Spinner.tsx';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Box, Button, Callout, Flex, IconButton, Select, Text, Tooltip } from '@radix-ui/themes';
@@ -37,12 +39,11 @@ async function load(meta: DemoMeta, parsed: ParsedDemo): Promise<Loaded> {
   return { replay: new Replay(data, parsed, kills), map, images };
 }
 
-export function ReplayTab({ meta, parsed }: { meta: DemoMeta; parsed: ParsedDemo }) {
+export function ReplayTab({ meta, parsed, onSetup }: { meta: DemoMeta; parsed: ParsedDemo; onSetup: () => void }) {
   const { t } = useTranslation();
   const [loaded, setLoaded] = useState<Loaded>();
   const [error, setError] = useState<string>();
   const [attempt, setAttempt] = useState(0);
-  const [settingUp, setSettingUp] = useState(false);
 
   useEffect(() => {
     let alive = true;
@@ -56,38 +57,19 @@ export function ReplayTab({ meta, parsed }: { meta: DemoMeta; parsed: ParsedDemo
   }, [meta.id, meta.parsedAt, parsed, attempt]);
 
   const needsTools = error?.includes('Source 2 Viewer');
-  const downloadTools = async () => {
-    setSettingUp(true);
-    try {
-      await api.runSetup(false);
-      // setup runs in the background; wait for it, then retry
-      for (let i = 0; i < 120; i++) {
-        await new Promise((r) => setTimeout(r, 2000));
-        const s = await api.settings();
-        if (!s.setup.running) break;
-      }
-      setAttempt((a) => a + 1);
-    } catch (e) {
-      setError(errorText(e));
-    } finally {
-      setSettingUp(false);
-    }
-  };
 
   if (error) {
     return (
       <Flex direction="column" gap="3" align="start">
-        <Callout.Root color="red" size="1">
-          <Callout.Text className="selectable">{error}</Callout.Text>
-        </Callout.Root>
         {needsTools ? (
-          <Button onClick={() => void downloadTools()} disabled={settingUp}>
-            {settingUp && <Spinner size="1" />} {t('replay.downloadTools')}
+          <Button className="environment-notice" variant="soft" color="red" onClick={onSetup}>
+            <i aria-hidden="true" className="bi bi-exclamation-triangle app-icon" />{t('replay.toolsMissing')}<i aria-hidden="true" className="bi bi-arrow-right app-icon" />
           </Button>
         ) : (
-          <Button variant="soft" onClick={() => setAttempt((a) => a + 1)}>
-            {t('common.retry')}
-          </Button>
+          <>
+            <Callout.Root color="red" size="1"><Callout.Text className="selectable">{error}</Callout.Text></Callout.Root>
+            <Button variant="soft" onClick={() => setAttempt((a) => a + 1)}>{t('common.retry')}</Button>
+          </>
         )}
       </Flex>
     );
@@ -105,6 +87,9 @@ export function ReplayTab({ meta, parsed }: { meta: DemoMeta; parsed: ParsedDemo
 function Player({ loaded }: { loaded: Loaded }) {
   const { t } = useTranslation();
   const { replay, map, images } = loaded;
+  const { typography } = useAppTheme();
+  const labelSizeRef = useRef(typography[3]);
+  useEffect(() => { labelSizeRef.current = typography[3]; }, [typography]);
   const rounds = replay.parsed.rounds;
   const tr = replay.data.tickRate;
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -167,7 +152,6 @@ function Player({ loaded }: { loaded: Loaded }) {
       const next = focusRef.current === pid ? undefined : pid;
       setFocus(next);
       if (next !== undefined && viewRef.current.zoom < FOCUS_ZOOM) setZoomTo(FOCUS_ZOOM);
-      if (next === undefined) setZoomTo(1);
     },
     [setZoomTo],
   );
@@ -208,7 +192,7 @@ function Player({ loaded }: { loaded: Loaded }) {
             v.panX = w / 2 - (ox + ix * lay.k);
             v.panY = h / 2 - (oy + iy * lay.k);
           }
-          draw(ctx, w, h, map, images, s, togglesRef.current, viewRef.current, f);
+          draw(ctx, w, h, map, images, s, togglesRef.current, viewRef.current, f, labelSizeRef.current);
           if (now - lastUi > 100) {
             lastUi = now;
             setState(s);
@@ -289,7 +273,7 @@ function Player({ loaded }: { loaded: Loaded }) {
         </Flex>
         {/* same width/gutter as the side panel so the button lines up with its right edge */}
         <div className={panelOpen ? 'replay-side replay-side-head' : undefined}>
-          <Tooltip content={panelOpen ? t('replay.collapsePanel') : t('replay.expandPanel')}>
+          <Tooltip delayDuration={150} content={panelOpen ? t('replay.collapsePanel') : t('replay.expandPanel')}>
             <IconButton size="1" variant="soft" color="gray" onClick={() => setPanelOpen((v) => !v)} aria-label={panelOpen ? t('replay.collapsePanel') : t('replay.expandPanel')}>
               {panelOpen ? <i aria-hidden="true" className="bi bi-chevron-right app-icon"  /> : <i aria-hidden="true" className="bi bi-chevron-left app-icon"  />}
             </IconButton>
@@ -312,13 +296,13 @@ function Player({ loaded }: { loaded: Loaded }) {
             <div className="replay-hud replay-feed">
               {state.feed.map((kv, i) => (
                 <div key={`${kv.tick}-${i}`}>
-                  {kv.attacker && <span style={{ color: teamColor(kv.attacker.team) }}>{kv.attacker.name}</span>}
+                  {kv.attacker && <span style={{ color: teamColor(kv.attacker.team) }}>{displayPlayerName(kv.attacker.name)}</span>}
                   <span className="dim">
                     {' '}
                     {kv.weapon}
                     {kv.headshot && <i aria-hidden="true" className="bi bi-crosshair app-icon" />}{' '}
                   </span>
-                  <span style={{ color: teamColor(kv.victim.team) }}>{kv.victim.name}</span>
+                  <span style={{ color: teamColor(kv.victim.team) }}>{displayPlayerName(kv.victim.name)}</span>
                 </div>
               ))}
             </div>
@@ -347,8 +331,8 @@ function Player({ loaded }: { loaded: Loaded }) {
       </Flex>
 
       {/* transport */}
-      <Flex align="center" gap="2">
-        <Tooltip content={playing ? t('replay.pauseHint') : t('replay.playHint')}>
+      <Flex className="replay-transport" align="center" gap="2">
+        <Tooltip delayDuration={150} content={playing ? t('replay.pauseHint') : t('replay.playHint')}>
           <IconButton onClick={() => play(!playing)} aria-label={playing ? t('replay.pause') : t('replay.play')}>
             {playing ? <i aria-hidden="true" className="bi bi-pause-fill app-icon"  /> : <i aria-hidden="true" className="bi bi-play-fill app-icon"  />}
           </IconButton>
@@ -370,13 +354,13 @@ function Player({ loaded }: { loaded: Loaded }) {
             ))}
           </Select.Content>
         </Select.Root>
-        <Tooltip content={t('replay.prevRoundHint')}>
+        <Tooltip delayDuration={150} content={t('replay.prevRoundHint')}>
           <IconButton variant="soft" onClick={() => stepRound(-1)} aria-label={t('replay.prevRound')}>
             <i aria-hidden="true" className="bi bi-skip-start-fill app-icon"  />
           </IconButton>
         </Tooltip>
         <RoundTimeline replay={replay} round={curRound} tick={state.tick} onSeek={seek} />
-        <Tooltip content={t('replay.nextRoundHint')}>
+        <Tooltip delayDuration={150} content={t('replay.nextRoundHint')}>
           <IconButton variant="soft" onClick={() => stepRound(1)} aria-label={t('replay.nextRound')}>
             <i aria-hidden="true" className="bi bi-skip-end-fill app-icon"  />
           </IconButton>

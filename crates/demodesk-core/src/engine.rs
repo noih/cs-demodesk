@@ -330,6 +330,10 @@ impl Engine {
             Some(p) => {
                 let mut demos = self.demos.lock().unwrap();
                 if let Some(e) = demos.get_mut(id) {
+                    // A cache read begun before clearing must not restore the old result.
+                    if e.meta.status != DemoStatus::Parsed || e.meta.parsed_at != meta.parsed_at {
+                        return Some((e.meta.clone(), e.parsed.clone()));
+                    }
                     if e.parsed.is_none() {
                         e.parsed = Some(p.clone());
                     }
@@ -424,6 +428,8 @@ impl Engine {
             if !complete { return Ok(()); }
             Some(file)
         } else { None };
+        // Finish any in-flight replay write before invalidating its cache.
+        let _replay_guard = self.replay_lock.lock().unwrap();
         let meta = {
             // Same lock order as scanning; claim the demo and the automatic slot together.
             let mut demos = self.demos.lock().unwrap();
@@ -433,10 +439,12 @@ impl Engine {
                 return Ok(());
             }
             parsing.insert(id.to_string());
+            entry.reset();
             entry.meta.status = DemoStatus::Parsing;
             entry.meta.error = None;
             entry.meta.clone()
         };
+        self.store.delete_parsed(id);
         // Also covers app termination during parsing: retry then requires an explicit click.
         if let Err(error) = self.store.write_parse_error(id, "Parsing was interrupted; parse manually to retry.") {
             self.finish_parse_error(id, format!("Cannot save parse state: {error:#}"));
@@ -498,9 +506,9 @@ impl Engine {
     /// Path of the replay stream for a parsed demo, building it on first use
     /// (a few seconds: the demo is read again for positions and projectiles).
     pub fn replay_file(&self, id: &str) -> Result<PathBuf> {
+        let _guard = self.replay_lock.lock().unwrap();
         let (meta, parsed) = self.get_demo(id).ok_or_else(|| anyhow!("demo not found"))?;
         let parsed = parsed.filter(|_| meta.status == DemoStatus::Parsed).ok_or_else(|| anyhow!("demo not parsed"))?;
-        let _guard = self.replay_lock.lock().unwrap();
         let path = self.store.replay_path(id);
         if path.is_file() && self.store.replay_is_current(id) {
             return Ok(path);
@@ -533,6 +541,7 @@ impl Engine {
 
     /// Drop the parse result (memory + disk); the demo goes back to "new".
     pub fn clear_analysis(&self, id: &str) -> Result<()> {
+        let _replay_guard = self.replay_lock.lock().unwrap();
         self.ensure_idle(id)?;
         self.store.delete_parsed(id);
         let meta = self.update_meta(id, DemoEntry::reset).ok_or_else(|| anyhow!("demo not found"))?;
@@ -542,6 +551,7 @@ impl Engine {
 
     /// Delete every parse result (disk + memory). Refused while something is parsing or rendering.
     pub fn clear_all_analysis(&self) -> Result<u64> {
+        let _replay_guard = self.replay_lock.lock().unwrap();
         if !self.parsing.lock().unwrap().is_empty() {
             return Err(anyhow!("a demo is being parsed"));
         }
@@ -1000,9 +1010,21 @@ mod tests {
         let restarted = Engine::new(data, Arc::new(Events(send))).unwrap();
         assert!(restarted.list_demos().iter().all(|d| d.status == DemoStatus::Error));
         assert!(receive.try_recv().is_err());
+        // A failed reparse must not leave old statistics or a reusable 2D cache.
+        let id = &completed[0].id;
+        let cache_dir = restarted.store.replay_path(id).parent().unwrap().to_path_buf();
+        let caches: Vec<_> = ["json", "summary.json", "replay.json"].iter().map(|suffix| cache_dir.join(format!("{id}.{suffix}"))).collect();
+        for path in &caches { std::fs::write(path, b"old cached data").unwrap(); }
+        let other_replay = restarted.store.replay_path(&completed[1].id);
+        std::fs::write(&other_replay, b"other demo").unwrap();
+        let source_before = std::fs::read(&completed[0].path).unwrap();
         restarted.parse_demo(&completed[0].id).unwrap();
         let retried = terminal_events(&receive, 1);
         assert_eq!(retried[0].id, completed[0].id);
         assert_eq!(retried[0].status, DemoStatus::Error);
+        assert!(caches.iter().all(|path| !path.exists()));
+        assert!(restarted.parsed(id).is_none());
+        assert_eq!(std::fs::read(&other_replay).unwrap(), b"other demo");
+        assert_eq!(std::fs::read(&completed[0].path).unwrap(), source_before);
     }
 }

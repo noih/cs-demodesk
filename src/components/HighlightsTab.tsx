@@ -1,5 +1,6 @@
+import { displayPlayerName } from '../playerName.ts';
 import { useMemo, useState } from 'react';
-import { Badge, Box, Button, Callout, Checkbox, DataList, Dialog, Flex, Grid, SegmentedControl, Select, Slider, Switch, Table, Text } from '@radix-ui/themes';
+import { Badge, Box, Button, Checkbox, DataList, Dialog, Flex, Grid, SegmentedControl, Select, Slider, Switch, Table, Text } from '@radix-ui/themes';
 import { useTranslation } from 'react-i18next';
 import { api, clock, errorText, DEFAULT_RENDER_OPTIONS, type DemoMeta, type Highlight, type ParsedDemo, type RenderOptions, type Status } from '../api.ts';
 
@@ -13,10 +14,10 @@ const HOT_TAGS = new Set(['ace', '4k', 'clutch', 'knife', 'noscope']);
 const HUD_TOGGLES = ['hud', 'crosshair', 'radar', 'killFeed', 'chat', 'viewmodel', 'tracers', 'xray', 'trueView'] as const;
 
 function summaryOf(h: Highlight): string {
-  return h.title.replace(`${h.player.name} — `, '').replace(/ · R\d+$/, '');
+  return h.title.replace(`${displayPlayerName(h.player.name)} — `, '').replace(/ · R\d+$/, '');
 }
 
-export function HighlightsTab({ meta, parsed, status, onRendered }: { meta: DemoMeta; parsed: ParsedDemo; status?: Status; onRendered: () => void }) {
+export function HighlightsTab({ meta, parsed, status, onRendered, onSetup }: { meta: DemoMeta; parsed: ParsedDemo; status?: Status; onRendered: () => void; onSetup: () => void }) {
   const { t } = useTranslation();
   const [playerFilter, setPlayerFilter] = useState<string>('all');
   const [minScore, setMinScore] = useState(3);
@@ -61,7 +62,7 @@ export function HighlightsTab({ meta, parsed, status, onRendered }: { meta: Demo
             <Select.Item value="all">{t('highlights.allPlayers')}</Select.Item>
             {parsed.stats.map((p) => (
               <Select.Item key={p.steamid} value={p.steamid}>
-                {p.name} ({p.kills}K/{p.deaths}D)
+                {displayPlayerName(p.name)} ({p.kills}K/{p.deaths}D)
               </Select.Item>
             ))}
           </Select.Content>
@@ -111,7 +112,7 @@ export function HighlightsTab({ meta, parsed, status, onRendered }: { meta: Demo
               <Table.Cell align="right">{Math.round((h.endTick - h.startTick) / tr)}s</Table.Cell>
               <Table.Cell>
                 <Text truncate style={{ maxWidth: 160, display: 'block' }}>
-                  {h.player.name}
+                  {displayPlayerName(h.player.name)}
                 </Text>
               </Table.Cell>
               <Table.Cell style={{ whiteSpace: 'nowrap' }}>{summaryOf(h)}</Table.Cell>
@@ -209,8 +210,8 @@ export function HighlightsTab({ meta, parsed, status, onRendered }: { meta: Demo
               </Box>
               <Text as="label" size="1">
                 <Flex align="center" justify="between" gap="3">
-                  {t('highlights.showGame')}
-                  <Switch size="1" checked={opts.showGame} onCheckedChange={(showGame) => setOpts({ ...opts, showGame })} />
+                  {t('highlights.hideGame')}
+                  <Switch size="1" checked={!opts.showGame} onCheckedChange={(hideGame) => setOpts({ ...opts, showGame: !hideGame })} />
                 </Flex>
               </Text>
             </Flex>
@@ -258,7 +259,7 @@ export function HighlightsTab({ meta, parsed, status, onRendered }: { meta: Demo
                           <Table.Cell align="right">{h.round}</Table.Cell>
                           <Table.Cell>
                             <Text truncate style={{ display: 'block', maxWidth: 100 }}>
-                              {h.player.name}
+                              {displayPlayerName(h.player.name)}
                             </Text>
                           </Table.Cell>
                           <Table.Cell style={{ whiteSpace: 'nowrap' }}>{summaryOf(h)}</Table.Cell>
@@ -271,15 +272,15 @@ export function HighlightsTab({ meta, parsed, status, onRendered }: { meta: Demo
             </Box>
           </Grid>
           {status && !status.ok && (
-            <Callout.Root color="red" size="1" mt="4">
-              <Callout.Text>{t('highlights.notReady')}</Callout.Text>
-            </Callout.Root>
+            <Button className="environment-notice" variant="soft" color="red" mt="4" onClick={() => { setDialog(false); onSetup(); }}>
+              <i aria-hidden="true" className="bi bi-exclamation-triangle app-icon" />{t('highlights.notReady')}<i aria-hidden="true" className="bi bi-arrow-right app-icon" />
+            </Button>
           )}
-          <Flex justify="between" align="center" mt="4" gap="3">
+          <Flex direction="column" mt="4" gap="4">
             <Text size="1" color="gray">
               {t(opts.showGame ? 'highlights.visibleGame' : 'highlights.hiddenGame')}
             </Text>
-            <Flex gap="3">
+            <Flex gap="3" justify="end">
               <Dialog.Close>
                 <Button variant="soft" color="gray">
                   {t('common.cancel')}

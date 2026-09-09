@@ -1,3 +1,4 @@
+import { useAppTheme } from '../AppTheme.tsx';
 import { Spinner } from './Spinner.tsx';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
@@ -10,7 +11,7 @@ import { api, errorText, type DemoMeta, type RenderJob } from '../api.ts';
 import { DateField, dayOf } from './DateField.tsx';
 
 const STATUS_COLOR: Record<DemoMeta['status'], 'gray' | 'amber' | 'green' | 'red'> = { new: 'gray', parsing: 'amber', parsed: 'green', error: 'red' };
-const ROW_HEIGHT = 80;
+
 
 export function DemoList({
   demos,
@@ -34,6 +35,8 @@ export function DemoList({
   onRefresh: () => Promise<boolean>;
 }) {
   const { t } = useTranslation();
+  const { typography } = useAppTheme();
+  const rowHeight = 40 + typography[2]! * 3 + typography[3]! * 2;
   const [busy, setBusy] = useState(false);
   const [refreshStatus, setRefreshStatus] = useState<'refreshing' | 'refreshed' | 'refreshFailed'>();
   const refreshRequest = useRef(0);
@@ -89,7 +92,7 @@ export function DemoList({
   const virtualizer = useVirtualizer({
     count: visible.length,
     getScrollElement: () => scrollRef.current,
-    estimateSize: () => ROW_HEIGHT,
+    estimateSize: () => rowHeight,
     overscan: 6,
   });
 
@@ -126,6 +129,8 @@ export function DemoList({
     }
   }, [selectionRequest, selectedId, visible, query, from, to, virtualizer]);
 
+  useEffect(() => { virtualizer.measure(); }, [rowHeight, virtualizer]);
+
   return (
     <Flex direction="column" style={{ flex: 1, minHeight: 0 }}>
       <div role="status" aria-live="polite" aria-atomic="true" className="refresh-notice">
@@ -138,19 +143,19 @@ export function DemoList({
       </div>
       {toolbar && createPortal(<Flex align="center" gap="2">
         <Flex align="center" gap="2">
-          <Tooltip content={t('demoList.addTooltip')}>
+          <Tooltip delayDuration={150} content={t('demoList.addTooltip')}>
             <IconButton size="2" variant="ghost" onClick={() => void addFiles()} disabled={busy} aria-label={t('demoList.add')}>
               <i aria-hidden="true" className="bi bi-plus-lg app-icon"  />
             </IconButton>
           </Tooltip>
-          <Tooltip content={t('demoList.rescanTooltip')}>
+          <Tooltip delayDuration={150} content={t('demoList.rescanTooltip')}>
             <IconButton size="2" variant="soft" onClick={() => void handleRefresh()} disabled={busy || refreshStatus === 'refreshing'} aria-busy={refreshStatus === 'refreshing'} aria-label={t('demoList.rescan')}>
               {refreshStatus === 'refreshing' ? <Spinner size="1" /> : <i aria-hidden="true" className="bi bi-arrow-clockwise app-icon"  />}
             </IconButton>
           </Tooltip>
         </Flex>
         <Popover.Root>
-          <Popover.Trigger><IconButton variant="ghost" className="filter-trigger" data-filtered={filtered} aria-label={t('ui.filter')}><i aria-hidden="true" className={'bi app-icon ' + (filtered ? 'bi-funnel-fill' : 'bi-funnel')} /></IconButton></Popover.Trigger>
+          <Tooltip delayDuration={150} content={t('ui.filter')}><Popover.Trigger><IconButton variant="ghost" className="filter-trigger" data-filtered={filtered} aria-label={t('ui.filter')}><i aria-hidden="true" className={'bi app-icon ' + (filtered ? 'bi-funnel-fill' : 'bi-funnel')} /></IconButton></Popover.Trigger></Tooltip>
           <Popover.Content width="320px" align="start"><Flex direction="column" gap="3">
         <TextField.Root size="2" placeholder={t('demoList.searchPlaceholder')} value={query} onChange={(e) => setQuery(e.target.value)}>
           <TextField.Slot>

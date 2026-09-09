@@ -29,7 +29,7 @@ export function StartupGate({ children }: { children: ReactNode }) {
   return (
     <Flex direction="column" align="center" justify="center" gap="4" p="6" style={{ minHeight: '100vh' }}>
       {error === undefined ? <Spinner /> : <>
-        <Heading size="5">{t('startup.title')}</Heading>
+        <Heading data-text-role="title" size="5">{t('startup.title')}</Heading>
         <Text align="center">{t('startup.hint')}</Text>
         <Callout.Root color="red" style={{ maxWidth: 720, overflowWrap: 'anywhere' }}><Callout.Text>{error}</Callout.Text></Callout.Root>
         <Flex gap="3" wrap="wrap" justify="center">

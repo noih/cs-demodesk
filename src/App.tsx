@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Button, Callout, Flex, IconButton, Text, Tooltip } from '@radix-ui/themes';
+import { Button, Callout, Flex, IconButton, Popover, Text, Tooltip } from '@radix-ui/themes';
 import { api, errorText, type DemoMeta, type RenderJob, type Status } from './api.ts';
 import { createAppSync } from './appSync.ts';
 import { applyLanguage } from './i18n/index.ts';
@@ -20,6 +20,7 @@ export function App() {
 function ReadyApp() {
   const { t } = useTranslation();
   const theme = useAppTheme();
+  const [fontSizeOpen, setFontSizeOpen] = useState(false);
   const [toolbar, setToolbar] = useState<HTMLDivElement | null>(null);
   const [selectionRequest, setSelectionRequest] = useState(0);
   const [requestedTab, setRequestedTab] = useState('players');
@@ -67,8 +68,19 @@ function ReadyApp() {
         <div ref={setToolbar} className="header-tools" />
         <Flex align="center" gap="2" ml="auto">
           <QueueDialog jobs={jobs} demos={demos} onSelect={id => { setSelectedId(id); setShowSettings(false); setRequestedTab('renders'); setSelectionRequest(n => n + 1); }} />
-          <Tooltip content={t(theme.appearance === 'dark' ? 'ui.light' : 'ui.dark')}><IconButton variant="ghost" aria-label={t(theme.appearance === 'dark' ? 'ui.light' : 'ui.dark')} onClick={theme.toggle}>{theme.appearance === 'dark' ? <i aria-hidden="true" className="bi bi-sun app-icon"  /> : <i aria-hidden="true" className="bi bi-moon app-icon" />}</IconButton></Tooltip>
-          <AboutDialog /><Button variant="ghost" aria-pressed={showSettings} color="gray" onClick={() => setShowSettings(v => !v)}>{t('common.settings')}</Button>
+          <Tooltip delayDuration={150} content={t(theme.appearance === 'dark' ? 'ui.light' : 'ui.dark')}><IconButton variant="ghost" aria-label={t(theme.appearance === 'dark' ? 'ui.light' : 'ui.dark')} onClick={theme.toggle}>{theme.appearance === 'dark' ? <i aria-hidden="true" className="bi bi-sun app-icon"  /> : <i aria-hidden="true" className="bi bi-moon app-icon" />}</IconButton></Tooltip>
+          <Popover.Root open={fontSizeOpen} onOpenChange={setFontSizeOpen}>
+            <Tooltip delayDuration={150} content={t('ui.fontSize')}><Popover.Trigger><Button variant="ghost" aria-label={t('ui.fontSize')}>Aa</Button></Popover.Trigger></Tooltip>
+            <Popover.Content size="1">
+          <div className="font-size-control" role="radiogroup" aria-label={t('ui.fontSize')}>
+            {(['small', 'medium', 'large'] as const).map((size, index) => <label key={size} title={t(`ui.fontSize_${size}`)}>
+              <input type="radio" name="font-size" value={size} checked={theme.fontSize === size} onClick={() => setFontSizeOpen(false)} onChange={() => theme.setFontSize(size)} aria-label={t(`ui.fontSize_${size}`)} />
+              <span aria-hidden="true" style={{ fontSize: 14 + index * 3 }}>Aa</span>
+            </label>)}
+          </div>
+            </Popover.Content>
+          </Popover.Root>
+          <Tooltip delayDuration={150} content={t('common.settings')}><IconButton variant="ghost" aria-label={t('common.settings')} aria-pressed={showSettings} color="gray" onClick={() => setShowSettings(v => !v)}><i aria-hidden="true" className="bi bi-gear app-icon" /></IconButton></Tooltip><AboutDialog />
         </Flex>
       </header>
       <aside className="sidebar">
@@ -88,26 +100,21 @@ function ReadyApp() {
         />
 
       </aside>
-      {(error || (status && !status.ok)) && <div className="app-notice">
-        {error ? <Callout.Root color="red" size="1"><Callout.Text>{t('app.backendError', { error })}</Callout.Text><Button size="1" variant="soft" onClick={() => setShowSettings(true)}>{t('common.settings')}</Button></Callout.Root>
-          : <Button className="environment-notice" variant="surface" color="amber" onClick={showTools}><i aria-hidden="true" className="bi bi-exclamation-triangle app-icon" />{t('app.renderNotReady')}<i aria-hidden="true" className="bi bi-arrow-right app-icon" /></Button>}
+      {error && <div className="app-notice">
+        <Callout.Root color="red" size="1"><Callout.Text>{t('app.backendError', { error })}</Callout.Text><Button size="1" variant="soft" onClick={() => setShowSettings(true)}>{t('common.settings')}</Button></Callout.Root>
       </div>}
       <main className="main">
         {showSettings ? (
           <SettingsView onChanged={refresh} toolsRequest={toolsRequest} />
         ) : selected ? (
-          <DemoView requestedTab={requestedTab} selectionRequest={selectionRequest} key={selected.id} meta={selected} jobs={jobs.filter((j) => j.demoId === selected.id)} status={status} onChanged={refresh} onRemoved={() => setSelectedId(undefined)} />
+          <DemoView onSetup={showTools} requestedTab={requestedTab} selectionRequest={selectionRequest} key={selected.id} meta={selected} jobs={jobs.filter((j) => j.demoId === selected.id)} status={status} onChanged={refresh} onRemoved={() => setSelectedId(undefined)} />
         ) : (
           <Flex align="center" justify="center" style={{ height: '100%' }}>
             <Flex direction="column" align="center">
               <Text as="p" align="center" color="gray" size="3">
                 {t('app.pickDemo')}
               </Text>
-              {status && !status.ok && (
-                <Button mt="3" onClick={showTools}>
-                  {t('app.goToSettings')}
-                </Button>
-              )}
+
             </Flex>
           </Flex>
         )}

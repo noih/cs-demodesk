@@ -111,7 +111,7 @@ impl DemoParser {
     /// One row per (tick, grenade projectile) with `grenade_type`, `grenade_entity_id`,
     /// `x`, `y`, `z`, `tick`, `steamid` (thrower), `name`.
     pub fn projectiles(&self, bytes: &[u8], wanted_ticks: Vec<i32>) -> Result<Rows> {
-        let inputs = self.inputs_ex(&[], &[], &[], wanted_ticks, true)?;
+        let inputs = self.inputs_ex(&["m_firePositions".into(), "m_fireCount".into(), "m_nInfernoType".into(), "m_nVoxelFrameDataSize".into()], &[], &[], wanted_ticks, true)?;
         let mut parser = Parser::new(inputs, ParsingMode::Normal);
         let out = parser.parse_demo(bytes).map_err(|e| anyhow!("projectiles: {e:?}"))?;
         Ok(Rows::from_output(out))

@@ -1,3 +1,4 @@
+import { displayPlayerName } from '../playerName.ts';
 import { useState, type ReactNode } from 'react';
 import { useAppTheme } from '../AppTheme.tsx';
 import { Badge, Button, Card, Flex, Heading, Table, Text, Tooltip } from '@radix-ui/themes';
@@ -10,7 +11,7 @@ const percent = (n: number, d: number) => d ? `${(n / d * 100).toFixed(1)}%` : '
 const EMPTY_AIM: AimStats = { shots: 0, hits: 0, headHits: 0, headEligibleHits: 0, firstShots: 0, firstHits: 0, sprayShots: 0, sprayHits: 0 };
 const WEAPON_GROUPS = ['all', 'rifles', 'awp', 'pistols'] as const;
 const average = (n: number, d: number) => d ? (n / d).toFixed(2) : '—';
-interface Column { label: string; value: (p: PlayerStats) => ReactNode; ratio?: (p: PlayerStats) => number }
+interface Column { id?: string; label: string; value: (p: PlayerStats) => ReactNode; ratio?: (p: PlayerStats) => number }
 
 export function PlayersTab({ parsed }: { parsed: ParsedDemo }) {
   const { t } = useTranslation();
@@ -86,7 +87,7 @@ export function PlayersTab({ parsed }: { parsed: ParsedDemo }) {
       { label: t('players.successRate'), value: p => percent(p.clutchesWon, p.clutches.length), ratio: p => p.clutchesWon / (p.clutches.length || 1) },
       { label: t('players.details'), value: p => p.clutches.length ? <Flex direction="column" gap="1">{p.clutches.map(c => <Text key={c.round} size="1">{t('common.roundN', { n: c.round })} · {c.side === 'CT' ? 'CT' : 'T'} · 1v{c.versus} · {c.kills} K · {t(`players.${c.outcome}`)}</Text>)}</Flex> : '—' },
     ],
-    duels: parsed.stats.map(opponent => ({ label: opponent.name, value: p => {
+    duels: parsed.stats.map(opponent => ({ id: opponent.steamid, label: displayPlayerName(opponent.name), value: p => {
       if (p.steamid === opponent.steamid || p.team === opponent.team) return '—';
       const kills = p.opponents[opponent.steamid] ?? 0;
       const deaths = opponent.opponents[p.steamid] ?? 0;
@@ -98,26 +99,30 @@ export function PlayersTab({ parsed }: { parsed: ParsedDemo }) {
       return kills / (kills + deaths || 1);
     } })),
   };
+  const playerWidth = Math.max(24, ...parsed.stats.map(p => Array.from(displayPlayerName(p.name)).reduce((n, char) => n + (/[^\x00-\x7f]/.test(char) ? 2 : 1), 0) + 4));
+  const columnWidths = columns[group].map(c => Math.max(12, Array.from(c.label).reduce((n, char) => n + (/[^\x00-\x7f]/.test(char) ? 2 : 1), 0) + 4));
   return <Flex direction="column" gap="3">
     <Flex gap="2" wrap="wrap" role="group" aria-label={t('players.category')}>
-      {GROUPS.map(key => <Button key={key} type="button" size="1" variant={group === key ? 'solid' : 'soft'} aria-pressed={group === key} onClick={() => setGroup(key)}>{t(`players.${key}`)}</Button>)}
+      {GROUPS.map(key => <Button key={key} type="button" size="1" color={group === key ? 'amber' : 'gray'} variant={group === key ? 'solid' : 'soft'} aria-pressed={group === key} onClick={() => setGroup(key)}>{t(`players.${key}`)}</Button>)}
     </Flex>
     {group === 'aim' && <Flex gap="2" wrap="wrap" role="group" aria-label={t('players.weaponGroup')}>
-      {WEAPON_GROUPS.map(key => <Button key={key} size="1" variant={weaponGroup === key ? 'solid' : 'soft'} aria-pressed={weaponGroup === key} onClick={() => setWeaponGroup(key)}>{t(`players.weapon_${key}`)}</Button>)}
+      {WEAPON_GROUPS.map(key => <Button key={key} size="1" color={weaponGroup === key ? 'amber' : 'gray'} variant={weaponGroup === key ? 'solid' : 'soft'} aria-pressed={weaponGroup === key} onClick={() => setWeaponGroup(key)}>{t(`players.weapon_${key}`)}</Button>)}
     </Flex>}
     {(['A', 'B'] as const).map(team => <Card key={team}>
       <Flex align="center" gap="2" mb="2">
         <Badge color={team === 'A' ? 'blue' : 'orange'}>{t(team === 'A' ? 'players.teamA' : 'players.teamB')}</Badge>
-        <Heading size="4">{parsed.score[team]}</Heading>
+        <Heading data-text-role="subtitle" size="4">{parsed.score[team]}</Heading>
+        {group === 'general' && <Text size="1" color="gray">{t('players.kills', { count: parsed.stats.filter(p => p.team === team).reduce((sum, p) => sum + p.kills, 0) })}</Text>}
       </Flex>
-      <Table.Root size="1" className="nowrap-headers" style={{ overflowX: 'auto' }}>
+      <Table.Root size="1" layout={group === 'clutches' ? 'auto' : 'fixed'} className={`nowrap-headers ${group === 'clutches' ? 'clutch-table' : ''}`} style={{ overflowX: 'auto', minWidth: 0 }}>
+        <colgroup><col style={{ width: group === 'clutches' ? '40%' : `${playerWidth}ch` }} />{columnWidths.map((width, i) => <col key={i} style={{ width: group === 'clutches' ? ['20%', '20%', '20%', '1%'][i] : `${width}ch` }} />)}</colgroup>
         <Table.Header><Table.Row>
           <Table.ColumnHeaderCell style={{ minWidth: 140 }}>{t('common.player')}</Table.ColumnHeaderCell>
-          {columns[group].map(c => <Table.ColumnHeaderCell key={c.label} align="right">{c.label}</Table.ColumnHeaderCell>)}
+          {columns[group].map(c => <Table.ColumnHeaderCell key={c.id ?? c.label} align="right">{c.label}</Table.ColumnHeaderCell>)}
         </Table.Row></Table.Header>
         <Table.Body>{parsed.stats.filter(p => p.team === team).map(p => <Table.Row key={p.steamid} className="row-hover">
-          <Table.RowHeaderCell><Flex align="center" gap="2"><span className="player-dot" style={{ background: colors.get(p.steamid) }} /><Tooltip content={p.name}><Text truncate style={{ maxWidth: 180 }}>{p.name}</Text></Tooltip></Flex></Table.RowHeaderCell>
-          {columns[group].map(c => <Table.Cell key={c.label} align="right" style={{ whiteSpace: 'nowrap', backgroundOrigin: 'content-box', backgroundClip: 'content-box', backgroundRepeat: 'no-repeat', backgroundImage: c.ratio ? `linear-gradient(to right, var(--accent-a3) ${Math.max(0, Math.min(1, c.ratio(p))) * 100}%, transparent 0)` : undefined }}>{c.value(p)}</Table.Cell>)}
+          <Table.RowHeaderCell><Flex align="center" gap="2"><span className="player-dot" style={{ background: colors.get(p.steamid) }} /><Tooltip delayDuration={150} content={displayPlayerName(p.name)}><Text>{displayPlayerName(p.name)}</Text></Tooltip></Flex></Table.RowHeaderCell>
+          {columns[group].map(c => <Table.Cell key={c.id ?? c.label} align="right" style={{ whiteSpace: 'nowrap', backgroundOrigin: 'content-box', backgroundClip: 'content-box', backgroundRepeat: 'no-repeat', backgroundImage: c.ratio ? `linear-gradient(to right, var(--accent-a3) ${Math.max(0, Math.min(1, c.ratio(p))) * 100}%, transparent 0)` : undefined }}>{c.value(p)}</Table.Cell>)}
         </Table.Row>)}</Table.Body>
       </Table.Root>
     </Card>)}

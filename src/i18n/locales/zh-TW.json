@@ -6,6 +6,7 @@
     "default": "恢復預設目錄"
   },
   "common": {
+    "unnamed": "未命名",
     "cancel": "取消",
     "close": "關閉",
     "delete": "刪除",
@@ -68,7 +69,7 @@
       "parsed": "已解析",
       "error": "錯誤"
     },
-    "addTooltip": "加入 .dem 檔（保留原始位置）",
+    "addTooltip": "加入 .dem 檔",
     "add": "加入 demo",
     "rescanTooltip": "重新掃描目錄",
     "rescan": "重新掃描",
@@ -161,7 +162,7 @@
     "flashNote": "閃光助攻已包含在助攻數內",
     "teamA": "Team A（上半場 CT）",
     "teamB": "Team B（上半場 T）",
-    "kills_other": "{{count}} 擊殺",
+    "kills_other": "{{count}} 殺",
     "best": "最高分",
     "multiKillNote": "多殺欄位為 2k / 3k / 4k / 5k 的回合數"
   },
@@ -261,7 +262,7 @@
     "hudScale": "介面大小 {{n}}",
     "clips": "片段",
     "notReady": "渲染環境未就緒，請先到設定完成工具下載。",
-    "showGame": "顯示遊戲畫面",
+    "hideGame": "隱藏遊戲在背景執行",
     "visibleGame": "錄影時會顯示 CS2 遊戲畫面，請不要手動結束它。",
     "hiddenGame": "錄影時 CS2 會隱藏執行並由 Windows 靜音，請不要手動結束它。",
     "submitting": "送出中…"
@@ -285,7 +286,7 @@
     "sizeLimit": "≤ {{mb}} MB",
     "noSizeLimit": "大小不限",
     "openFolder": "開啟目錄",
-    "viewLog": "檢視 log（{{n}} 行）",
+    "viewLog": "檢視 log",
     "deleteJob": "刪除這次輸出（含影片）",
     "merged": "合併影片",
     "openInPlayer": "在播放器開啟",
@@ -311,6 +312,7 @@
     "empty": "還沒有輸出的影片。"
   },
   "replay": {
+    "toolsMissing": "缺少 Source 2 Viewer，點此前往設定下載工具。",
     "imageLoadFailed": "無法載入 {{file}}",
     "downloadTools": "下載工具",
     "preparing": "準備中",
@@ -346,7 +348,8 @@
     "sound": "聲音範圍",
     "soundAll": "全部",
     "soundFocus": "跟隨",
-    "soundOff": "關"
+    "soundOff": "關",
+    "money": "金錢"
   },
   "settings": {
     "title": "設定",
@@ -410,6 +413,10 @@
     "autoParseHint": "新 demo 會依序自動解析；解析失敗後，只有手動點選解析才會重試。"
   },
   "ui": {
+    "fontSize": "字級",
+    "fontSize_small": "小",
+    "fontSize_medium": "中",
+    "fontSize_large": "大",
     "filter": "篩選 Demo",
     "light": "切換為淺色模式",
     "dark": "切換為深色模式",
@@ -421,21 +428,25 @@
     "queueEmpty": "目前沒有處理中的工作"
   },
   "recoil": {
-    "clipped": "有 {{n}} 個玩家點超出範圍，可縮小檢視。",
     "noReference": "缺少可配對的射擊角度，無法提供參考曲線。",
-    "reference": "參考 (估算)",
-    "you": "你的平均",
+    "reference": "實際",
+    "you": "玩家",
     "resetZoom": "重設縮放（參考曲線）",
     "title": "單場壓槍軌跡（視角）",
     "player": "壓槍玩家",
-    "hint": "玩家平均視角移動，對照本場射擊角度估算的壓槍補償（同武器合併樣本）。第一發對齊，以參考曲線置中；subtick 瞄準變化可能造成誤差，並非官方理想曲線或壓槍評分。",
     "bursts": "{{n}} 段連射",
     "empty": "沒有符合條件的連射",
     "horizontal": "X° · 向右為正",
     "vertical": "Y° · 向上為正／向下為負。各武器使用相同刻度。",
-    "details": "逐發數據",
-    "shot": "第幾發",
     "point": "第 {{shot}} 發\nX {{x}}° · Y {{y}}°\n{{n}} 段連射",
     "definition": "後座力索引從約 0 開始，連續至少 3 發、間隔 ≤300 ms，索引每發加 1。缺少取樣即中斷該段；每個點只平均打到該發的連射，後段樣本較少。"
+  },
+  "diagnostics": {
+    "windows": "錄製僅支援 Windows。",
+    "steam": "找不到 Steam，請手動設定 CS2 資料夾。",
+    "cs2": "找不到 cs2.exe，請在設定中指定 CS2 資料夾。",
+    "hlae": "尚未安裝 HLAE，請下載工具。",
+    "hook": "HLAE 缺少 x64/AfxHookSource2.dll，請重新下載工具。",
+    "ffmpeg": "找不到 FFmpeg，請下載工具或指定路徑。"
   }
 }

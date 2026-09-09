@@ -136,6 +136,8 @@ export interface ReplayFrame {
   t: number;
   p: number[][];
   g?: number[][];
+  /** Active fire-cell world coordinates, replay schema 5+. */
+  f?: number[][];
 }
 export interface ReplayEvent {
   t: number;

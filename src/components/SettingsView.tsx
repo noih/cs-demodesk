@@ -4,7 +4,7 @@ import { open } from '@tauri-apps/plugin-dialog';
 import { useTranslation } from 'react-i18next';
 import { api, errorText, mb, type Settings, type SettingsResponse } from '../api.ts';
 import { LogView } from './LogView.tsx';
-import i18n, { applyLanguage, detectLanguage, LANGUAGE_NAMES, LANGUAGES } from '../i18n/index.ts';
+import i18n, { applyLanguage, translateProblem, detectLanguage, LANGUAGE_NAMES, LANGUAGES } from '../i18n/index.ts';
 
 type PickOptions = { directory?: boolean; filters?: Array<{ name: string; extensions: string[] }> };
 
@@ -34,7 +34,7 @@ function PathField({ label, value, placeholder, hint, onChange, pick }: { label:
       <Flex align="center" gap="2">
         <TextField.Root size="2" aria-label={label} value={value} placeholder={placeholder ?? t('settings.notDetected')} onChange={(e) => onChange(e.target.value)} className="mono" style={{ flex: 1, minWidth: 0 }} />
         {value && (
-          <Tooltip content={t('settings.clearToAuto')}>
+          <Tooltip delayDuration={150} content={t('settings.clearToAuto')}>
             <IconButton size="2" variant="outline" color="gray" onClick={() => onChange('')} aria-label={t('settings.clear')}>
               <i aria-hidden="true" className="bi bi-x-lg app-icon" />
             </IconButton>
@@ -106,7 +106,7 @@ function CheckRow({ label, value, ok, extra, source }: { label: string; value?: 
           {ok === undefined ? null : ok ? <i aria-hidden="true" className="bi bi-check-circle app-icon" style={{ color: "var(--green-9)" }} /> : <i aria-hidden="true" className="bi bi-x-circle app-icon" style={{ color: "var(--red-9)" }} />}
           <Text size="2" weight="medium" style={{ flex: 1 }}>{label}</Text>
           {source && (
-            <Tooltip content={t('settings.source', { repo: source.repo })}>
+            <Tooltip delayDuration={150} content={t('settings.source', { repo: source.repo })}>
               <IconButton size="2" variant="outline" color="gray" aria-label={t('settings.sourceLabel')} ml="2" onClick={() => void api.openUrl(source.url)}>
                 <i aria-hidden="true" className="bi bi-box-arrow-up-right app-icon"  />
               </IconButton>
@@ -141,7 +141,7 @@ export function SettingsView({ onChanged, toolsRequest = 0 }: { onChanged: () =>
     button?.scrollIntoView({ block: 'center', behavior: 'instant' });
     button?.focus({ preventScroll: true });
     setHighlightTools(true);
-    const timer = setTimeout(() => setHighlightTools(false), 4000);
+    const timer = setTimeout(() => setHighlightTools(false), 5000);
     return () => clearTimeout(timer);
   }, [toolsRequest, loaded]);
   const [form, setForm] = useState<Settings>({ language: null, cs2Dir: null, replayFolders: [], scanGameReplays: true, hlaeExe: null, ffmpegExe: null, toolsDir: null });
@@ -197,7 +197,7 @@ export function SettingsView({ onChanged, toolsRequest = 0 }: { onChanged: () =>
     setMessage(undefined);
     try {
       const r = await load();
-      setMessage(r.doctor.ok ? { ok: true, text: t('settings.envReady') } : { ok: false, text: t('settings.envNotReady', { problems: r.doctor.problems.join('; ') }) });
+      setMessage(r.doctor.ok ? { ok: true, text: t('settings.envReady') } : { ok: false, text: t('settings.envNotReady', { problems: r.doctor.problems.map(translateProblem).join('; ') }) });
       await onChanged();
     } catch (e) {
       setMessage({ ok: false, text: errorText(e) });
@@ -240,8 +240,8 @@ export function SettingsView({ onChanged, toolsRequest = 0 }: { onChanged: () =>
     <Flex direction="column" gap="4" className="settings-page">
       <Flex justify="between" align="center" gap="3" wrap="wrap">
         <Box>
-          <Heading size="6">{t('settings.title')}</Heading>
-          <Text size="2" color="gray">
+          <Heading data-text-role="title" size="6">{t('settings.title')}</Heading>
+          <Text size="1" color="gray">
             {t('settings.hint')}
           </Text>
         </Box>
@@ -292,7 +292,7 @@ export function SettingsView({ onChanged, toolsRequest = 0 }: { onChanged: () =>
           </Card>
 
           <Card>
-            <Heading size="3" mb="3">
+            <Heading data-text-role="subtitle" size="3" mb="3">
               {t('settings.gameSection')}
             </Heading>
             <Flex direction="column" gap="3">
@@ -349,7 +349,7 @@ export function SettingsView({ onChanged, toolsRequest = 0 }: { onChanged: () =>
           </Card>
 
           <Card>
-            <Heading size="3" mb="3">
+            <Heading data-text-role="subtitle" size="3" mb="3">
               {t('settings.storageSection')}
             </Heading>
             <Flex direction="column" gap="3">
@@ -372,7 +372,7 @@ export function SettingsView({ onChanged, toolsRequest = 0 }: { onChanged: () =>
         <Flex direction="column" gap="4">
           <Card>
             <Flex justify="between" align="center" mb="3" gap="2">
-              <Heading size="3">{t('settings.toolsSection')}</Heading>
+              <Heading data-text-role="subtitle" size="3">{t('settings.toolsSection')}</Heading>
               <Text color={d.ok ? 'green' : 'red'} size="2" weight="medium">
                 {d.ok ? t('settings.ready') : t('settings.notReady')}
               </Text>
@@ -391,7 +391,7 @@ export function SettingsView({ onChanged, toolsRequest = 0 }: { onChanged: () =>
 
           <Card>
             <Flex justify="between" align="center" mb="3">
-              <Heading size="3">{t('settings.checkSection')}</Heading>
+              <Heading data-text-role="subtitle" size="3">{t('settings.checkSection')}</Heading>
               <Button size="2" variant="outline" color="gray" onClick={() => void check()}>
                 {t('settings.recheck')}
               </Button>
@@ -411,7 +411,7 @@ export function SettingsView({ onChanged, toolsRequest = 0 }: { onChanged: () =>
                 <Callout.Text>
                   {d.problems.map((p) => (
                     <Text as="div" key={p}>
-                      {p}
+                      {translateProblem(p)}
                     </Text>
                   ))}
                 </Callout.Text>

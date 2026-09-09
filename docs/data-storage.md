@@ -52,11 +52,6 @@ cargo clippy -p demodesk-core -p demodesk --all-targets -- -D warnings
 npm run build
 ```
 
-The parser regression uses invalid demo files to verify sequential attempts,
-persisted failure state, disconnected folders, restarts, and explicit retry.
-Directory tests cover selection precedence, clearing, executable relocation,
-restart behavior, and rejecting relative paths or file paths.
-
 Individually added demos stay at their original paths. The store records those
 paths in `registered-demos.json`; adding a file neither copies it nor adds its
 parent as a scan folder. Missing files remain registered for later availability.
@@ -64,13 +59,6 @@ Demo IDs use the existing 12-character hash of the normalized full path, so
 same-named files in different directories have separate analysis records. The
 list tooltip shows the source path. Hashing reads only the path, not demo content.
 Moving a source file changes its ID; source relocation is not inferred.
-
-The registration regression covers same-named files, repeated registration,
-unchanged source contents, unselected siblings, and persistence across restart.
-
-Additional regressions cover truncated frames and varints, active Windows write
-handles, immediate parsing after completion, unavailable selected directories, explicit
-replacement/default recovery, and preservation of the original selection/data.
 
 The official Tauri single-instance plugin is registered before other plugins
 and engine setup. Reopening the app restores and focuses the existing main
@@ -80,3 +68,17 @@ Recovery requests restart through the event loop so plugin exit cleanup runs.
 Manual desktop checks: reopen normally and while minimized; verify the original
 window returns and no second engine starts. Repeat from another portable copy,
 then verify closing/reopening and data-directory recovery restart.
+
+## Clearing and rebuilding one demo
+
+The demo menu's Clear analysis removes the statistical result, summary and
+`parsed/<demo-id>.replay.json` together. Re-parse also discards these caches and
+the in-memory result before starting a fresh parse. A failed reparse leaves no
+old 2D cache to reuse. Replay writes and explicit cache clearing are serialized,
+and a replay request checks the current parsed state after taking that lock.
+The old 2D view is unmounted while reparsing.
+
+General statistics are rebuilt by the parse. The detailed 2D stream is generated
+on demand when 2D is opened again. Shared radar assets, source demos and exported
+videos are retained. Paths are relative to the selected data folder, which is
+`demodesk-data` beside the executable unless changed in Settings.

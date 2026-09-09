@@ -6,6 +6,7 @@
     "default": "既定のフォルダーに戻す"
   },
   "common": {
+    "unnamed": "名前なし",
     "cancel": "キャンセル",
     "close": "閉じる",
     "delete": "削除",
@@ -68,7 +69,7 @@
       "parsed": "解析済み",
       "error": "エラー"
     },
-    "addTooltip": ".dem ファイルを追加（元の場所を維持）",
+    "addTooltip": ".dem ファイルを追加",
     "add": "デモを追加",
     "rescanTooltip": "フォルダーを再スキャン",
     "rescan": "再スキャン",
@@ -103,7 +104,7 @@
     "deleteConfirm": "ファイルを削除"
   },
   "players": {
-    "aim": "Aim",
+    "aim": "エイム",
     "weaponGroup": "Weapon group",
     "weapon_all": "All weapons",
     "weapon_rifles": "Rifles",
@@ -146,13 +147,13 @@
     "shots": "Shots fired",
     "fireDamage": "Fire damage",
     "heDamage": "HE damage",
-    "duels": "Duels",
-    "clutches": "Clutches",
-    "trades": "Trades",
-    "opening": "Opening duels",
-    "utility": "Utility",
-    "activity": "Activity",
-    "general": "General",
+    "duels": "対戦",
+    "clutches": "クラッチ",
+    "trades": "トレード",
+    "opening": "オープニング",
+    "utility": "ユーティリティ",
+    "activity": "アクティビティ",
+    "general": "基本",
     "category": "Statistics category",
     "openingKills": "先制キル",
     "openingDeaths": "先制デス",
@@ -192,7 +193,7 @@
       "best": "ハイライトスコア"
     },
     "timelineTitle": "ラウンドタイムライン",
-    "timelineHint": "The strip shows round winners; ★ marks highlights. Hover or focus for round details. Click a legend to hide a player.",
+    "timelineHint": "色はラウンド勝者、★はハイライトです。ホバーまたはフォーカスで詳細を表示し、凡例のクリックで線を非表示にできます。",
     "seg": {
       "kills": "キル",
       "kd": "K/D",
@@ -206,18 +207,18 @@
     },
     "radarTitle": "レーダー比較",
     "trend": {
-      "kills": "Kills",
-      "deaths": "Deaths",
-      "damage": "Damage",
-      "awp": "AWP kills",
-      "flashed": "Enemies flashed",
-      "difference": "Score difference",
-      "cash": "Team cash"
+      "kills": "キル",
+      "deaths": "デス",
+      "damage": "ダメージ",
+      "awp": "AWP キル",
+      "flashed": "敵へのフラッシュ",
+      "difference": "スコア差",
+      "cash": "チーム所持金"
     },
-    "roundAxis": "Round",
-    "cashHint": "Team cash immediately after freeze end, excluding equipment value. Missing samples are omitted.",
-    "differenceHint": "Team A wins minus Team B wins.",
-    "cumulativeHint": "Cumulative through each round; flashed counts enemy blind events over 1.1 seconds."
+    "roundAxis": "ラウンド",
+    "cashHint": "フリーズタイム終了直後のチーム所持金です。装備価格は含まず、欠損データは表示しません。",
+    "differenceHint": "チーム A の勝利数からチーム B の勝利数を引いた値です。",
+    "cumulativeHint": "各ラウンド終了までの累計です。フラッシュは敵の視界を1.1秒超奪ったイベントを集計します。"
   },
   "highlights": {
     "allPlayers": "すべてのプレイヤー",
@@ -261,7 +262,7 @@
     "hudScale": "HUD サイズ {{n}}",
     "clips": "クリップ",
     "notReady": "レンダリング環境が未準備です。先に設定でツールをダウンロードしてください。",
-    "showGame": "ゲーム画面を表示",
+    "hideGame": "ゲームを非表示でバックグラウンド実行",
     "visibleGame": "録画中は CS2 のゲーム画面を表示します。手動で終了しないでください。",
     "hiddenGame": "録画中の CS2 は非表示で動作し、Windows 側でミュートされます。手動で終了しないでください。",
     "submitting": "送信中…"
@@ -285,7 +286,7 @@
     "sizeLimit": "≤ {{mb}} MB",
     "noSizeLimit": "サイズ無制限",
     "openFolder": "フォルダーを開く",
-    "viewLog": "ログを表示（{{n}} 行）",
+    "viewLog": "ログを表示",
     "deleteJob": "この書き出しを削除（動画を含む）",
     "merged": "結合動画",
     "openInPlayer": "プレイヤーで開く",
@@ -311,6 +312,7 @@
     "empty": "書き出した動画はまだありません。"
   },
   "replay": {
+    "toolsMissing": "Source 2 Viewer がありません。設定を開いてツールをダウンロードしてください。",
     "imageLoadFailed": "{{file}} を読み込めません",
     "downloadTools": "ツールをダウンロード",
     "preparing": "準備中",
@@ -346,7 +348,8 @@
     "sound": "音の範囲",
     "soundAll": "すべて",
     "soundFocus": "追従中のみ",
-    "soundOff": "オフ"
+    "soundOff": "オフ",
+    "money": "所持金"
   },
   "settings": {
     "title": "設定",
@@ -410,6 +413,10 @@
     "autoParseHint": "新しいデモは1つずつ自動解析されます。失敗したデモは「解析」をクリックするまで再試行されません。"
   },
   "ui": {
+    "fontSize": "文字サイズ",
+    "fontSize_small": "小",
+    "fontSize_medium": "中",
+    "fontSize_large": "大",
     "filter": "Demo を絞り込む",
     "light": "ライトモードに切替",
     "dark": "ダークモードに切替",
@@ -421,21 +428,25 @@
     "queueEmpty": "実行中のジョブはありません"
   },
   "recoil": {
-    "clipped": "{{n}} 点が表示範囲外です。縮小すると表示できます。",
     "noReference": "対応する射撃角度がないため、基準を表示できません。",
-    "reference": "基準（推定）",
-    "you": "プレイヤー平均",
+    "reference": "実測",
+    "you": "プレイヤー",
     "resetZoom": "ズームをリセット（基準）",
     "title": "この試合の連射軌跡（視点）",
     "player": "連射のプレイヤー",
-    "hint": "視点移動の平均と、この試合の射撃角度から推定した反動補正を比較します。同じ武器のサンプルを集計し、初弾を合わせて基準曲線を中央に表示します。subtick の照準変化による誤差を含み、公式の理想曲線や評価ではありません。",
     "bursts": "連射 {{n}} 回",
     "empty": "条件を満たす連射がありません",
     "horizontal": "X° · 右が正",
     "vertical": "Y° · 上が正／下が負。全武器で同じ縮尺です。",
-    "details": "弾ごとのデータ",
-    "shot": "弾数",
     "point": "{{shot}} 発目\nX {{x}}° · Y {{y}}°\n連射 {{n}} 回",
     "definition": "反動インデックスがほぼ 0 から始まり、300 ms 以下の間隔で 3 発以上、毎発インデックスが 1 増える連射を集計。欠損で区切り、その弾数まで達した連射だけを平均します。後半ほどサンプルが減ります。"
+  },
+  "diagnostics": {
+    "windows": "録画には Windows が必要です。",
+    "steam": "Steam が見つかりません。CS2 フォルダーを手動で指定してください。",
+    "cs2": "cs2.exe が見つかりません。設定で CS2 フォルダーを指定してください。",
+    "hlae": "HLAE がありません。ツールをダウンロードしてください。",
+    "hook": "HLAE に x64/AfxHookSource2.dll がありません。ツールを再ダウンロードしてください。",
+    "ffmpeg": "FFmpeg がありません。ツールをダウンロードするか、パスを指定してください。"
   }
 }

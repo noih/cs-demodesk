@@ -295,10 +295,12 @@ impl<'a> SecondPassParser<'a> {
             };
             let steamid = match self.find_thrower_steamid(projectile_entid) {
                 Ok(u) => u,
+                _ if grenade_type == "CInferno" => 0,
                 _ => continue,
             };
             let name = match self.find_thrower_name(projectile_entid) {
                 Ok(x) => x,
+                _ if grenade_type == "CInferno" => String::new(),
                 _ => continue,
             };
             // Projectiles are the only ones with coordinates others map to 0.0, map them to None as it is clearer.
@@ -313,7 +315,7 @@ impl<'a> SecondPassParser<'a> {
 
             // Insert these always
             let pairs = vec![
-                (GRENADE_TYPE_ID, Some(Variant::String(grenade_type))),
+                (GRENADE_TYPE_ID, Some(Variant::String(grenade_type.clone()))),
                 (STEAMID_ID, Some(Variant::U64(steamid))),
                 (NAME_ID, Some(Variant::String(name))),
                 (TICK_ID, Some(Variant::I32(self.tick))),
@@ -337,6 +339,20 @@ impl<'a> SecondPassParser<'a> {
                     || prop_info.id == GRENADE_Y
                     || prop_info.id == GRENADE_Z
                 {
+                    continue;
+                }
+                if prop_info.id == FIRE_POSITIONS_ID {
+                    // Reuse StringVec to transport the active XYZ cells without a new column type.
+                    let cells = if grenade_type == "CInferno" {
+                        (0..64).filter_map(|i| {
+                            if self.get_prop_from_ent(&(FIRE_BURNING_ID + i), projectile_entid).ok() != Some(Variant::Bool(true)) { return None; }
+                            match self.get_prop_from_ent(&(FIRE_POSITIONS_ID + i), projectile_entid).ok()? {
+                                Variant::VecXYZ([x, y, z]) if x.is_finite() && y.is_finite() && z.is_finite() => Some(format!("{x},{y},{z}")),
+                                _ => None,
+                            }
+                        }).collect()
+                    } else { Vec::new() };
+                    self.output.entry(prop_info.id).or_insert_with(PropColumn::new).push(Some(Variant::StringVec(cells)));
                     continue;
                 }
                 let prop = match self.get_prop_from_ent(&prop_info.id, &projectile_entid) {
