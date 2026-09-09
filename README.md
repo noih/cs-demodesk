@@ -39,14 +39,16 @@ Nothing is written into the game folder: no plugin, script, or cfg, and no game 
 ## Notes
 
 - Windows only; CS2 must be installed.
-- Recording runs a hidden CS2 instance by default; enable "Show game window" in the export dialog to watch it. One Steam account can run only one CS2 at a time, so the game cannot be played while recording. Export jobs run one at a time and queue.
+- Recording hides CS2 by default. Turn off "Hide game in background" in the export dialog to show the game window.
+- One Steam account can run only one CS2 at a time, so the game cannot be played while recording. Export jobs run one at a time and queue.
 - The recording instance is launched with `-insecure` and cannot join VAC-secured servers; it closes when recording finishes and does not affect normal launches.
 - A CS2 update can break HLAE until HLAE releases a fix; re-download the tools from Settings once a new HLAE version is available.
-- Choose H.264 for playback in chat apps and browsers. NVIDIA encoders require an NVIDIA GPU.
+- Choose H.264 for playback in chat apps and browsers.
+- NVIDIA encoders require an NVIDIA GPU.
 
 ## Design
 
-No database and as little internal state as possible. Everything lives as plain files under `demodesk-data\` next to the executable: settings and export jobs are JSON records; parse results, replay streams, and radar images are versioned caches that can be deleted at any time and are rebuilt when the demo, the schema, or the game version changes. The demo list is scanned from the replay folders on every refresh, so files can be added, moved, or removed outside the app without side effects.
+No database is required. Settings, export jobs and analysis caches are stored as files in `demodesk-data/` beside the executable by default; the data folder can be changed in Settings. Demos stay at their original paths and can be added individually or discovered through scan folders.
 
 ## Build
 
