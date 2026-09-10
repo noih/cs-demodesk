@@ -52,7 +52,7 @@
   },
   "about": {
     "updateAvailable": "Version {{version}} available",
-    "updateFailed": "Unable to check for updates. Try again next time you start the app.",
+    "updateFailed": "Unable to check for updates. Reopen About to try again.",
     "button": "About",
     "tagline": "Analyze match stats, replay key moments, and export highlights.",
     "author": "Author NOIH",

@@ -35,7 +35,7 @@ try {
       if(cmd==='browse_directory')return args.path ? 'E:/tools' : 'E:/Desktop';
       if(cmd==='plugin:dialog|open')return null;
       if(cmd==='run_setup')return true;
-      if(cmd==='check_for_updates')return {status:'available',version:'1.0.10'};
+      if(cmd==='check_for_updates'){if(window.failUpdate)throw new Error('offline');return {status:'available',version:'1.0.10'};}
       if(cmd==='open_url'){window.openedUrl=args.url;return;}
       if(cmd==='get_status')return window.missingTools ? {...status,ok:false,missingRenderTools:window.missingRenderTools ?? ['HLAE','ffmpeg']} : status;
       if(cmd==='get_settings')return { settings:{language:'en',replayFolders:[],scanGameReplays:true},doctor:{ok:true,problems:[],paths:window.toolPaths || {}},detected:{},setup:{running:false,log:[]},dataDir:'E:/data',defaultDataDir:'E:/data',parsedBytes:0,clipsBytes:0,radarBytes:0 };
@@ -155,6 +155,18 @@ try {
   await updateNotice.locator('..').getByRole('button').click();
   assert.equal(await page.evaluate(() => window.openedUrl), 'https://github.com/noih/cs-demodesk/releases/latest');
   await page.getByRole('button', { name: 'Close', exact: true }).click();
+  const updateCount = () => page.evaluate(() => window.testCalls.filter(c => c.cmd === 'check_for_updates').length);
+  const initialChecks = await updateCount();
+  await page.evaluate(() => window.failUpdate = true);
+  await about.click();
+  await page.waitForFunction(n => window.testCalls.filter(c => c.cmd === 'check_for_updates').length === n + 1, initialChecks);
+  await page.getByRole('dialog').getByRole('button', {name:'Close',exact:true}).click();
+  assert.equal(await updateCount(), initialChecks + 1, 'Closing About does not check again');
+  await page.evaluate(() => window.failUpdate = false);
+  await page.getByRole('button', {name:'About',exact:true}).click();
+  await page.getByText('Version 1.0.10 available', {exact:true}).waitFor();
+  assert.equal(await updateCount(), initialChecks + 2, 'Reopening About retries after failure');
+  await page.getByRole('dialog').getByRole('button', {name:'Close',exact:true}).click();
   await page.getByRole('tab').filter({hasText:'Players'}).click();
   const tables = page.getByRole('table');
   assert.equal(await tables.count(), 2);

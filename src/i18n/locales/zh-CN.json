@@ -52,7 +52,7 @@
   },
   "about": {
     "updateAvailable": "有新版本 {{version}}",
-    "updateFailed": "无法检查更新，将于下次启动时重试。",
+    "updateFailed": "无法检查更新，请重新打开关于窗口再试一次。",
     "button": "关于",
     "tagline": "分析对局数据，回放关键时刻，导出精彩片段。",
     "author": "作者 NOIH",

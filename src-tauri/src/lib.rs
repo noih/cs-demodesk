@@ -87,10 +87,8 @@ async fn blocking<T: Send + 'static>(engine: &Eng, f: impl FnOnce(&Eng) -> CmdRe
 
 #[tauri::command]
 async fn check_for_updates() -> CmdResult<demodesk_core::updates::Update> {
-    static CHECK: std::sync::OnceLock<CmdResult<demodesk_core::updates::Update>> = std::sync::OnceLock::new();
-    tauri::async_runtime::spawn_blocking(|| {
-        CHECK.get_or_init(|| demodesk_core::updates::check().map_err(err)).clone()
-    }).await.map_err(err)?
+    tauri::async_runtime::spawn_blocking(|| demodesk_core::updates::check().map_err(err))
+        .await.map_err(err)?
 }
 fn existing_browse_directory(path: &Path) -> Option<PathBuf> {
     if !path.is_absolute() { return None; }

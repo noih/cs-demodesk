@@ -1,5 +1,5 @@
 import { Tooltip } from '@radix-ui/themes';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Badge, Button, Dialog, Flex, IconButton, Text } from '@radix-ui/themes';
 import { useTranslation } from 'react-i18next';
 import { api, type UpdateStatus } from '../api.ts';
@@ -24,18 +24,24 @@ function LinkIcon({ url, label }: { url: string; label: string }) {
 export function AboutDialog() {
   const { t } = useTranslation();
   const [update, setUpdate] = useState<UpdateStatus | 'failed'>();
-  useEffect(() => {
-    let active = true;
-    void api.checkForUpdates().then(value => { if (active) setUpdate(value); }).catch(() => { if (active) setUpdate('failed'); });
-    return () => { active = false; };
+  const updateRequest = useRef(0);
+  const checkUpdates = useCallback(() => {
+    const request = ++updateRequest.current;
+    setUpdate(undefined);
+    void api.checkForUpdates().then(value => { if (request === updateRequest.current) setUpdate(value); })
+      .catch(() => { if (request === updateRequest.current) setUpdate('failed'); });
   }, []);
+  useEffect(() => {
+    checkUpdates();
+    return () => { updateRequest.current++; };
+  }, [checkUpdates]);
   const available = update !== 'failed' && update?.status === 'available' ? update.version : undefined;
   const [version, setVersion] = useState<string>();
   useEffect(() => {
     void api.status().then((s) => setVersion(s.version)).catch(() => undefined);
   }, []);
   return (
-    <Dialog.Root>
+    <Dialog.Root onOpenChange={open => { if (open) checkUpdates(); }}>
       <Tooltip delayDuration={150} content={t('about.button')}><Dialog.Trigger>
         <IconButton variant="ghost" color="gray" aria-label={available ? t('about.button') + ': ' + t('about.updateAvailable', { version: available }) : t('about.button')} >
           <i aria-hidden="true" className={available ? "bi bi-arrow-up-circle-fill app-icon" : "bi bi-info-circle app-icon"} style={available ? { color: "var(--green-11)" } : undefined} />
