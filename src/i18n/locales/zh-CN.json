@@ -103,7 +103,7 @@
     },
     "activeJobs": "{{n}} 进行中",
     "deleteTitle": "删除 demo 文件？",
-    "deleteBody": "将从磁盘删除 <path/>，无法恢复。已输出的视频保留。",
+    "deleteBody": "将删除 <path/>、此 demo 的解析数据，以及所有已导出的视频与导出记录，无法恢复。如需保留视频，请先备份再继续。",
     "deleteConfirm": "删除文件"
   },
   "players": {

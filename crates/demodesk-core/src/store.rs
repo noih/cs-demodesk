@@ -345,7 +345,7 @@ impl Store {
         let s: ParsedSummaryFile = serde_json::from_str(&text).ok()?;
         let fresh = s.schema_version == PARSED_SCHEMA_VERSION && s.demo_bytes == demo_bytes && (s.demo_mtime_ms - demo_mtime_ms).abs() < 1.0 && self.parsed_path(id).is_file();
         if !fresh {
-            self.delete_parsed(id);
+            let _ = self.delete_parsed(id);
             return None;
         }
         Some(s)
@@ -353,10 +353,15 @@ impl Store {
     pub fn read_parsed(&self, id: &str) -> Option<ParsedDemo> {
         fs::read_to_string(self.parsed_path(id)).ok().and_then(|t| serde_json::from_str(&t).ok())
     }
-    pub fn delete_parsed(&self, id: &str) {
-        let _ = fs::remove_file(self.summary_path(id));
-        let _ = fs::remove_file(self.parsed_path(id));
-        let _ = fs::remove_file(self.replay_path(id));
+    pub fn delete_parsed(&self, id: &str) -> Result<()> {
+        for path in [self.summary_path(id), self.parsed_path(id), self.replay_path(id)] {
+            match fs::remove_file(path) {
+                Ok(()) => {},
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {},
+                Err(e) => return Err(e.into()),
+            }
+        }
+        Ok(())
     }
     /// Delete every stored parse result. Returns the number of bytes freed.
     pub fn clear_all_parsed(&self) -> u64 {
@@ -436,6 +441,7 @@ impl Store {
     pub fn get_job(&self, id: &str) -> Option<RenderJob> {
         let dir = self.job_dir(id);
         let mut job: RenderJob = serde_json::from_str(&fs::read_to_string(dir.join("job.json")).ok()?).ok()?;
+        if job.id != id { return None; }
         for output in &mut job.outputs {
             let path = PathBuf::from(output.file.replace('\\', "/"));
             let relative = if safe_relative(&path) {
@@ -459,8 +465,10 @@ impl Store {
         jobs
     }
     pub fn delete_job(&self, id: &str) -> Result<()> {
+        anyhow::ensure!(!id.is_empty() && Path::new(id).components().count() == 1 && matches!(Path::new(id).components().next(), Some(Component::Normal(_))), "invalid job id");
         let dir = self.job_dir(id);
         if dir.exists() {
+            anyhow::ensure!(dir.canonicalize()?.parent() == Some(self.clips_dir().canonicalize()?.as_path()), "job directory is outside clips");
             fs::remove_dir_all(dir)?;
         }
         Ok(())

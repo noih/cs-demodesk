@@ -103,7 +103,7 @@
     },
     "activeJobs": "{{n}} 進行中",
     "deleteTitle": "刪除 demo 檔？",
-    "deleteBody": "會從磁碟刪除 <path/>，無法復原。已輸出的影片保留。",
+    "deleteBody": "會刪除 <path/>、此 demo 的解析資料，以及所有已輸出的影片與輸出紀錄，無法復原。若想保留影片，請先備份再繼續。",
     "deleteConfirm": "刪除檔案"
   },
   "players": {

@@ -106,7 +106,7 @@
     },
     "activeJobs": "{{n}} running",
     "deleteTitle": "Delete the demo file?",
-    "deleteBody": "Deletes <path/> from disk. This cannot be undone. Exported videos are kept.",
+    "deleteBody": "Deletes <path/>, its analysis data, and all exported videos and export records. This cannot be undone. Back up any videos you want to keep before continuing.",
     "deleteConfirm": "Delete file"
   },
   "players": {

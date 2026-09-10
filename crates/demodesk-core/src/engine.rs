@@ -327,7 +327,7 @@ impl Engine {
             let parsing = self.parsing.lock().unwrap();
             demos.retain(|id, _| keep.contains(id) || parsing.contains(id));
             for id in &stale {
-                self.store.delete_parsed(id);
+                let _ = self.store.delete_parsed(id);
             }
             let mut list: Vec<DemoMeta> = demos.values().map(|e| e.meta.clone()).collect();
             list.sort_by(|a, b| b.date_ms().total_cmp(&a.date_ms()).then_with(|| a.id.cmp(&b.id)));
@@ -361,7 +361,7 @@ impl Engine {
             }
             None => {
                 // Stored result unreadable: fall back to "not parsed".
-                self.store.delete_parsed(id);
+                let _ = self.store.delete_parsed(id);
                 self.update_meta(id, |e| { if e.meta.status != DemoStatus::Error { e.reset(); } }).map(|m| (m, None))
             }
         }
@@ -463,7 +463,7 @@ impl Engine {
             entry.meta.error = None;
             entry.meta.clone()
         };
-        self.store.delete_parsed(id);
+        let _ = self.store.delete_parsed(id);
         // Also covers app termination during parsing: retry then requires an explicit click.
         if let Err(error) = self.store.write_parse_error(id, "Parsing was interrupted; parse manually to retry.") {
             self.finish_parse_error(id, format!("Cannot save parse state: {error:#}"));
@@ -562,7 +562,7 @@ impl Engine {
     pub fn clear_analysis(&self, id: &str) -> Result<()> {
         let _replay_guard = self.replay_lock.lock().unwrap();
         self.ensure_idle(id)?;
-        self.store.delete_parsed(id);
+        self.store.delete_parsed(id)?;
         let meta = self.update_meta(id, DemoEntry::reset).ok_or_else(|| anyhow!("demo not found"))?;
         self.notify.notify(Event::DemoChanged { demo: meta });
         Ok(())
@@ -591,16 +591,21 @@ impl Engine {
         Ok(freed)
     }
 
-    /// Delete the .dem file from disk. Rendered videos are kept.
+    /// Delete the demo, its analysis and all of its render jobs; shared radar maps remain.
     pub fn remove_demo(&self, id: &str) -> Result<()> {
+        let _guard = self.replay_lock.lock().unwrap();
         self.ensure_idle(id)?;
         let (meta, _) = self.get_demo(id).ok_or_else(|| anyhow!("demo not found"))?;
-        let path = Path::new(&meta.path);
-        if path.exists() {
-            std::fs::remove_file(path).map_err(|e| anyhow!("cannot delete {}: {e}", meta.path))?;
-        }
-        self.store.delete_parsed(id);
+        let jobs: HashSet<_> = self.store.list_jobs().into_iter().filter(|job| job.demo_id == id).map(|job| job.id).collect();
+        for job in &jobs { self.store.delete_job(job)?; }
+        self.render_queue.lock().unwrap().retain(|job| !jobs.contains(job));
+        self.store.delete_parsed(id)?;
         self.store.clear_parse_error(id)?;
+        match std::fs::remove_file(&meta.path) {
+            Ok(()) => {},
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {},
+            Err(e) => return Err(anyhow!("cannot delete {}: {e}", meta.path)),
+        }
         {
             let mut registered = self.registered_demos.lock().unwrap();
             let updated: Vec<_> = registered.iter().filter(|p| Self::demo_id(p) != id).cloned().collect();
@@ -663,6 +668,7 @@ impl Engine {
 
     // ---- render queue ----
     pub fn enqueue_render(self: &Arc<Self>, demo_id: &str, highlight_ids: Vec<String>, options: RenderOptions) -> Result<RenderJob> {
+        let _guard = self.replay_lock.lock().unwrap();
         let (meta, parsed) = self.get_demo(demo_id).ok_or_else(|| anyhow!("demo not found"))?;
         if meta.status != DemoStatus::Parsed || parsed.is_none() {
             return Err(anyhow!("demo not parsed"));
@@ -701,6 +707,7 @@ impl Engine {
     }
 
     pub fn delete_job(&self, id: &str) -> Result<()> {
+        let _guard = self.replay_lock.lock().unwrap();
         if self.active_job_id().as_deref() == Some(id) {
             return Err(anyhow!("job is running"));
         }
@@ -710,6 +717,7 @@ impl Engine {
 
     /// Delete every render job and its videos. Refused while a render is running or queued.
     pub fn clear_all_clips(&self) -> Result<u64> {
+        let _guard = self.replay_lock.lock().unwrap();
         if self.active_job_id().is_some() || !self.render_queue.lock().unwrap().is_empty() {
             return Err(anyhow!("a render is running"));
         }
@@ -754,8 +762,12 @@ impl Engine {
     }
 
     fn run_job(self: &Arc<Self>, mut job: RenderJob) {
+        // Serialize claiming a queued job with demo removal, including already-dequeued jobs.
+        let guard = self.replay_lock.lock().unwrap();
+        if !self.store.get_job(&job.id).is_some_and(|j| j.status == JobStatus::Queued) { return; }
         let cancel = Arc::new(AtomicBool::new(false));
         *self.active_job.lock().unwrap() = Some((job.id.clone(), cancel.clone()));
+        drop(guard);
         job.status = JobStatus::Running;
         job.started_at = Some(now());
         job.stage = Some("starting".into());
@@ -805,7 +817,7 @@ impl Engine {
         job.log = latest.log;
         job.progress = latest.progress;
 
-        *self.active_job.lock().unwrap() = None;
+        let _guard = self.replay_lock.lock().unwrap();
         job.finished_at = Some(now());
         job.stage = None;
         match outcome {
@@ -824,6 +836,7 @@ impl Engine {
             }
         }
         self.persist(&job);
+        *self.active_job.lock().unwrap() = None;
     }
 }
 
@@ -964,6 +977,97 @@ mod tests {
         let original = std::fs::read(&record).unwrap();
         assert!(engine.list_jobs().unwrap_err().to_string().contains("Cannot check video"));
         assert_eq!(std::fs::read(record).unwrap(), original);
+    }
+
+    #[test]
+    fn completing_job_keeps_deletion_locked_until_result_is_persisted() {
+        struct ObserveCompletion(Mutex<Option<std::sync::Weak<Engine>>>);
+        impl Notify for ObserveCompletion {
+            fn notify(&self, event: Event) {
+                if let Event::JobChanged { job } = event {
+                    if job.status == JobStatus::Error {
+                        let engine = self.0.lock().unwrap().as_ref().unwrap().upgrade().unwrap();
+                        assert_eq!(engine.active_job_id(), Some(job.id.clone()));
+                        assert!(engine.replay_lock.try_lock().is_err());
+                        assert_eq!(engine.store.get_job(&job.id).unwrap().status, JobStatus::Error);
+                    }
+                }
+            }
+        }
+        let temp = tempfile::tempdir().unwrap();
+        let notify = Arc::new(ObserveCompletion(Mutex::new(None)));
+        let engine = Engine::new(temp.path().join("data"), notify.clone()).unwrap();
+        *notify.0.lock().unwrap() = Some(Arc::downgrade(&engine));
+        let job = engine.store.new_job("missing-demo", vec![], RenderOptions::default()).unwrap();
+        engine.run_job(job.clone());
+        assert!(engine.active_job_id().is_none());
+        engine.delete_job(&job.id).unwrap();
+        assert!(engine.store.get_job(&job.id).is_none());
+    }
+
+    #[test]
+    fn removing_demo_cleans_owned_data_and_queued_jobs_but_preserves_shared_files() {
+        let temp = tempfile::tempdir().unwrap();
+        let data = temp.path().join("data");
+        let store = Store::open(data.clone()).unwrap();
+        store.save_settings(&Settings { scan_game_replays: false, ..Settings::default() }).unwrap();
+        let source = temp.path().join("remove.dem");
+        std::fs::write(&source, b"demo").unwrap();
+        let id = Engine::demo_id(&source);
+        store.write_parse_error(&id, "manual retry").unwrap();
+        let (send, _receive) = mpsc::channel();
+        let engine = Engine::new(data.clone(), Arc::new(Events(send))).unwrap();
+        engine.add_demo(&source).unwrap();
+        let queued = store.new_job(&id, vec!["queued".into()], RenderOptions::default()).unwrap();
+        let mut done = store.new_job(&id, vec!["done".into()], RenderOptions::default()).unwrap();
+        done.status = JobStatus::Done;
+        store.save_job(&done).unwrap();
+        let other = store.new_job("another-demo", vec![], RenderOptions::default()).unwrap();
+        for job in [&queued, &done, &other] {
+            std::fs::write(store.job_dir(&job.id).join("video.mp4"), b"video").unwrap();
+        }
+        for suffix in ["json", "summary.json", "replay.json"] {
+            std::fs::write(data.join("parsed").join(format!("{id}.{suffix}")), b"analysis").unwrap();
+        }
+        let radar = store.radar_dir().join("shared.png");
+        std::fs::create_dir_all(store.radar_dir()).unwrap();
+        std::fs::write(&radar, b"radar").unwrap();
+        engine.render_queue.lock().unwrap().extend([queued.id.clone(), other.id.clone()]);
+        engine.parsing.lock().unwrap().insert(id.clone());
+        assert!(engine.remove_demo(&id).is_err());
+        engine.parsing.lock().unwrap().clear();
+        *engine.active_job.lock().unwrap() = Some((queued.id.clone(), Arc::new(AtomicBool::new(false))));
+        assert!(engine.remove_demo(&id).is_err());
+        assert!(source.exists() && store.job_dir(&done.id).exists());
+        *engine.active_job.lock().unwrap() = None;
+        #[cfg(windows)]
+        {
+            use std::os::windows::fs::OpenOptionsExt;
+            let handles: Vec<_> = [&queued, &done].iter().map(|job| {
+                std::fs::OpenOptions::new().read(true).share_mode(1)
+                    .open(store.job_dir(&job.id).join("job.json")).unwrap()
+            }).collect();
+            let failed = engine.remove_demo(&id);
+            drop(handles);
+            assert!(failed.is_err());
+            assert!(source.exists());
+            assert!(engine.render_queue.lock().unwrap().contains(&queued.id));
+            assert_eq!(store.get_job(&queued.id).unwrap().status, JobStatus::Queued);
+        }
+        engine.remove_demo(&id).unwrap();
+        assert!(!source.exists());
+        assert!(engine.get_demo(&id).is_none());
+        assert!(store.registered_demos().unwrap().is_empty());
+        assert!(!store.job_dir(&done.id).exists());
+        assert!(!store.job_dir(&queued.id).exists());
+        assert!(store.job_dir(&other.id).join("video.mp4").exists());
+        assert_eq!(engine.render_queue.lock().unwrap().iter().collect::<Vec<_>>(), vec![&other.id]);
+        assert!(!std::fs::read_dir(data.join("parsed")).unwrap().any(|e| e.unwrap().file_name().to_string_lossy().starts_with(&id)));
+        assert_eq!(std::fs::read(radar).unwrap(), b"radar");
+        engine.run_job(queued.clone()); // A worker may have dequeued it before removal.
+        assert!(!store.job_dir(&queued.id).exists());
+        assert!(store.delete_job("..").is_err());
+        assert!(source.parent().unwrap().exists());
     }
 
     #[test]
