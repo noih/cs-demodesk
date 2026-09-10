@@ -64,7 +64,9 @@ uses -insecure and that third-party tools are downloaded on demand.
 
 Run npm run app:release to build both artifacts locally from one x64 compilation.
 scripts/release.ps1 keeps the existing version/tag/push flow; the release workflow
-runs app:release and uploads the EXE, unsigned MSIX, and shared SHA256SUMS.
+runs app:release and publishes the EXE and its SHA256SUMS to GitHub Releases.
+The unsigned MSIX and its own SHA256SUMS are stored in the workflow run as
+store-msix-<tag> for 90 days. Download it from Actions, then extract the ZIP.
 Both binaries receive GitHub build-provenance attestations. This does not submit
 to Partner Center: upload the MSIX there separately after installed-app testing.
 

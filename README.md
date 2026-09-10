@@ -64,7 +64,7 @@ npm run test:core    # Rust unit tests
 
 ## Releases
 
-Releases are built by [GitHub Actions](.github/workflows/release.yml) and include the portable EXE, an unsigned MSIX for Store submission, SHA256 checksums, and build-provenance attestations for both artifacts. To verify that a download was built from this repository:
+Releases are built by [GitHub Actions](.github/workflows/release.yml) and include the portable EXE and its SHA256 checksum. The unsigned MSIX and its checksum are available in the workflow run as the `store-msix-<tag>` artifact, retained for 90 days for manual Microsoft Store submission. Both binaries receive build-provenance attestations. To verify that a download was built from this repository:
 
 ```powershell
 gh attestation verify CS-DemoDesk-<version>.exe --owner noih

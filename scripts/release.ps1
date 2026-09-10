@@ -1,6 +1,7 @@
 # Cuts a release: bumps the version everywhere, runs the checks, makes a signed
 # commit and tag, and pushes. GitHub Actions (.github/workflows/release.yml)
-# then runs npm run app:release, attests both EXE/MSIX and publishes them.
+# then runs npm run app:release, attests both EXE/MSIX, publishes the EXE,
+# and saves the MSIX as an Actions artifact for Store submission.
 #
 #   .\scripts\release.ps1 1.0.0
 #
