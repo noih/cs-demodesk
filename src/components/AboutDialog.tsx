@@ -65,18 +65,15 @@ export function AboutDialog() {
         )}
         <Flex align="center" gap="2" mt="5" wrap="wrap">
           <Text size="2">{t('about.author')}</Text>
-          <Text size="2" color="gray" className="mono">
-            github.com/noih/cs-demodesk
-          </Text>
-          <LinkIcon url="https://github.com/noih/cs-demodesk" label={t('about.openGithub')} />
-          <Text size="2" color="gray">
-            · AGPL-3.0
-          </Text>
+          <Text size="2" color="gray">· AGPL-3.0</Text>
         </Flex>
-
-        <Flex align="center" gap="2" mt="3">
-          <Text size="2">Microsoft Store</Text>
-          <LinkIcon url="https://apps.microsoft.com/detail/9N5G4VXSDGS5" label={t('about.openSite', { name: 'Microsoft Store' })} />
+        <Flex align="center" gap="4" mt="3" wrap="wrap">
+          <Button size="2" variant="soft" color="gray" onClick={() => void api.openUrl('https://github.com/noih/cs-demodesk')}>
+            GitHub <i aria-hidden="true" className="bi bi-box-arrow-up-right app-icon" />
+          </Button>
+          <Button size="2" variant="soft" color="gray" onClick={() => void api.openUrl('https://apps.microsoft.com/detail/9N5G4VXSDGS5')}>
+            Microsoft Store <i aria-hidden="true" className="bi bi-box-arrow-up-right app-icon" />
+          </Button>
         </Flex>
         <Text as="div" size="2" weight="medium" mt="5" mb="2">
           {t('about.thirdParty')}

@@ -26,24 +26,25 @@ pub struct Settings {
     pub language: Option<String>,
     /// CS2 install folder ("…\steamapps\common\Counter-Strike Global Offensive")
     pub cs2_dir: Option<String>,
+    pub steam_dir: Option<String>,
     /// Extra folders to scan for .dem files
     pub replay_folders: Vec<String>,
     /// Scan <cs2Dir>/game/csgo/replays automatically
     pub scan_game_replays: bool,
     pub hlae_exe: Option<String>,
     pub ffmpeg_exe: Option<String>,
-    pub tools_dir: Option<String>,
+    pub vrf_exe: Option<String>,
 }
 
 impl Default for Settings {
     fn default() -> Self {
-        Self { language: None, cs2_dir: None, replay_folders: vec![], scan_game_replays: true, hlae_exe: None, ffmpeg_exe: None, tools_dir: None }
+        Self { language: None, cs2_dir: None, steam_dir: None, replay_folders: vec![], scan_game_replays: true, hlae_exe: None, ffmpeg_exe: None, vrf_exe: None }
     }
 }
 
 impl Settings {
     fn map_paths(&mut self, mut map: impl FnMut(String) -> String) {
-        for field in [&mut self.cs2_dir, &mut self.hlae_exe, &mut self.ffmpeg_exe, &mut self.tools_dir] {
+        for field in [&mut self.steam_dir, &mut self.cs2_dir, &mut self.hlae_exe, &mut self.ffmpeg_exe, &mut self.vrf_exe] {
             if let Some(value) = field.take() { *field = Some(map(value)); }
         }
         for folder in &mut self.replay_folders { *folder = map(std::mem::take(folder)); }
@@ -60,9 +61,10 @@ impl Settings {
         };
         trim(&mut self.language);
         trim(&mut self.cs2_dir);
+        trim(&mut self.steam_dir);
         trim(&mut self.hlae_exe);
         trim(&mut self.ffmpeg_exe);
-        trim(&mut self.tools_dir);
+        trim(&mut self.vrf_exe);
         self.replay_folders = self.replay_folders.iter().map(|f| f.trim().to_string()).filter(|f| !f.is_empty()).collect();
         self
     }
@@ -553,9 +555,9 @@ mod tests {
         let store = Store::open(root.clone()).unwrap();
         let game = temp.path().join("Steam/CS2");
         let settings = Settings {
-            tools_dir: Some(root.join("tools").to_string_lossy().into_owned()),
             hlae_exe: Some(root.join("tools/hlae/HLAE.exe").to_string_lossy().into_owned()),
             ffmpeg_exe: Some(root.join("tools/ffmpeg/ffmpeg.exe").to_string_lossy().into_owned()),
+            vrf_exe: Some(root.join("tools/vrf/Source2Viewer-CLI.exe").to_string_lossy().into_owned()),
             replay_folders: vec![root.join("demos").to_string_lossy().into_owned(), temp.path().join("external-demos").to_string_lossy().into_owned()],
             cs2_dir: Some(game.to_string_lossy().into_owned()),
             ..Settings::default()
@@ -565,9 +567,9 @@ mod tests {
         fs::create_dir_all(next.parent().unwrap()).unwrap();
         fs::rename(&root, &next).unwrap();
         let loaded = Store::open(next.clone()).unwrap().settings();
-        assert_eq!(Path::new(loaded.tools_dir.as_ref().unwrap()), next.join("tools"));
         assert_eq!(Path::new(loaded.hlae_exe.as_ref().unwrap()), next.join("tools/hlae/HLAE.exe"));
         assert_eq!(Path::new(loaded.ffmpeg_exe.as_ref().unwrap()), next.join("tools/ffmpeg/ffmpeg.exe"));
+        assert_eq!(Path::new(loaded.vrf_exe.as_ref().unwrap()), next.join("tools/vrf/Source2Viewer-CLI.exe"));
         assert_eq!(Path::new(&loaded.replay_folders[0]), next.join("demos"));
         assert_eq!(loaded.replay_folders[1], settings.replay_folders[1]);
         assert_eq!(loaded.cs2_dir, settings.cs2_dir);

@@ -1,11 +1,12 @@
 import { demoDate, compareDemoDates } from '../demoDate.ts';
+import { useNotify, Toast } from './Notifications.tsx';
 import { useAppTheme } from '../AppTheme.tsx';
 import { Spinner } from './Spinner.tsx';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { format } from 'date-fns';
 import { useTranslation } from 'react-i18next';
-import { Badge, Box, Callout, Flex, IconButton, Popover, Text, TextField, Tooltip } from '@radix-ui/themes';
+import { Badge, Box, Flex, IconButton, Popover, Text, TextField, Tooltip } from '@radix-ui/themes';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { open } from '@tauri-apps/plugin-dialog';
 import { api, errorText, type DemoMeta, type RenderJob } from '../api.ts';
@@ -36,17 +37,13 @@ export function DemoList({
   onRefresh: () => Promise<boolean>;
 }) {
   const { t } = useTranslation();
+  const notify = useNotify();
   const { typography } = useAppTheme();
   const rowHeight = 40 + typography[2]! * 3 + typography[3]! * 2;
   const [busy, setBusy] = useState(false);
   const [refreshStatus, setRefreshStatus] = useState<'refreshing' | 'refreshed' | 'refreshFailed'>();
   const refreshRequest = useRef(0);
   useEffect(() => () => { refreshRequest.current++; }, []);
-  useEffect(() => {
-    if (!refreshStatus || refreshStatus === 'refreshing' || refreshStatus === 'refreshFailed') return;
-    const timer = setTimeout(() => setRefreshStatus(undefined), 3000);
-    return () => clearTimeout(timer);
-  }, [refreshStatus]);
   const handleRefresh = async () => {
     if (refreshStatus === 'refreshing') return;
     const request = ++refreshRequest.current;
@@ -110,7 +107,7 @@ export function DemoList({
       await onChanged();
       if (metas[0]) onSelect(metas[0].id);
     } catch (e) {
-      alert(errorText(e));
+      notify(errorText(e));
     } finally {
       setBusy(false);
     }
@@ -134,14 +131,8 @@ export function DemoList({
 
   return (
     <Flex direction="column" style={{ flex: 1, minHeight: 0 }}>
-      <div role="status" aria-live="polite" aria-atomic="true" className="refresh-notice">
-        {refreshStatus && (
-          <Callout.Root size="1" color={refreshStatus === 'refreshFailed' ? 'red' : 'green'} variant="surface">
-            <Callout.Text>{t(`demoList.${refreshStatus}`)}</Callout.Text>
-            <IconButton size="2" variant="ghost" aria-label={t('common.close')} onClick={() => setRefreshStatus(undefined)}><i aria-hidden="true" className="bi bi-x-lg app-icon"  /></IconButton>
-          </Callout.Root>
-        )}
-      </div>
+      {refreshStatus && <Toast message={t(`demoList.${refreshStatus}`)} color={refreshStatus === 'refreshFailed' ? 'red' : 'green'}
+        duration={refreshStatus === 'refreshed' ? 3000 : 0} onDismiss={() => setRefreshStatus(undefined)} />}
       {toolbar && createPortal(<Flex align="center" gap="2">
         <Flex align="center" gap="2">
           <Tooltip delayDuration={150} content={t('demoList.addTooltip')}>

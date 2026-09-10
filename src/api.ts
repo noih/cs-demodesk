@@ -286,7 +286,6 @@ export interface RenderJob {
 }
 
 export interface ToolPaths {
-  toolsDir: string;
   steamDir?: string;
   cs2Dir?: string;
   cs2Exe?: string;
@@ -305,11 +304,12 @@ export interface Settings {
   /** UI language code, or null = follow the system language */
   language: string | null;
   cs2Dir: string | null;
+  steamDir: string | null;
   replayFolders: string[];
   scanGameReplays: boolean;
   hlaeExe: string | null;
   ffmpegExe: string | null;
-  toolsDir: string | null;
+  vrfExe: string | null;
 }
 export interface SettingsResponse {
   dataDirOverride: string | null;
@@ -326,6 +326,7 @@ export interface SettingsResponse {
 }
 export interface Status {
   ok: boolean;
+  missingRenderTools: ('Steam' | 'CS2' | 'HLAE' | 'ffmpeg')[];
   problems: string[];
   dataDir: string;
   activeRender: string | null;
@@ -343,13 +344,14 @@ export type AppEvent =
 export type UpdateStatus = { status: 'packaged' | 'current' } | { status: 'available'; version: string };
 
 export const api = {
+  browseDirectory: (path: string | null) => invoke<string>('browse_directory', { path }),
   checkForUpdates: () => invoke<UpdateStatus>('check_for_updates'),
   startupError: () => invoke<string | null>('get_startup_error'),
   recoverDataDirectory: (path: string | null) => invoke<void>('recover_data_directory', { path }),
   status: () => invoke<Status>('get_status'),
   settings: () => invoke<SettingsResponse>('get_settings'),
   saveSettings: (settings: Settings, dataDirOverride: string | null) => invoke<SettingsResponse>('save_settings', { settings, dataDirOverride }),
-  runSetup: (force = false) => invoke<boolean>('run_setup', { force }),
+  runSetup: (tool: 'hlae' | 'ffmpeg' | 'vrf', force = false) => invoke<boolean>('run_setup', { tool, force }),
   demos: () => invoke<DemoMeta[]>('list_demos'),
   registerDemo: (path: string) => invoke<DemoMeta>('register_demo', { path }),
   parse: (id: string) => invoke<void>('parse_demo', { id }),

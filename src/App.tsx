@@ -1,6 +1,7 @@
+import { NotificationProvider, Toast } from './components/Notifications.tsx';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Button, Callout, Flex, IconButton, Popover, Text, Tooltip } from '@radix-ui/themes';
+import { Button, Flex, IconButton, Popover, Text, Tooltip } from '@radix-ui/themes';
 import { api, errorText, type DemoMeta, type RenderJob, type Status } from './api.ts';
 import { createAppSync } from './appSync.ts';
 import { applyLanguage } from './i18n/index.ts';
@@ -14,7 +15,7 @@ import { AboutDialog } from './components/AboutDialog.tsx';
 import { QueueDialog } from './components/QueueDialog.tsx';
 
 export function App() {
-  return <StartupGate><ReadyApp /></StartupGate>;
+  return <NotificationProvider><StartupGate><ReadyApp /></StartupGate></NotificationProvider>;
 }
 
 function ReadyApp() {
@@ -30,7 +31,8 @@ function ReadyApp() {
   const [selectedId, setSelectedId] = useState<string>();
   const [showSettings, setShowSettings] = useState(false);
   const [toolsRequest, setToolsRequest] = useState(0);
-  const showTools = () => { setShowSettings(true); setToolsRequest(n => n + 1); };
+  const [toolsTarget, setToolsTarget] = useState<'render' | 'replay'>('render');
+  const showTools = (target: 'render' | 'replay') => { setToolsTarget(target); setShowSettings(true); setToolsRequest(n => n + 1); };
   const [error, setError] = useState<string>();
 
   const syncRef = useRef<ReturnType<typeof createAppSync> | undefined>(undefined);
@@ -100,12 +102,11 @@ function ReadyApp() {
         />
 
       </aside>
-      {error && <div className="app-notice">
-        <Callout.Root color="red" size="1"><Callout.Text>{t('app.backendError', { error })}</Callout.Text><Button size="1" variant="soft" onClick={() => setShowSettings(true)}>{t('common.settings')}</Button></Callout.Root>
-      </div>}
+      {error && <Toast message={t('app.backendError', { error })} color="red" onDismiss={() => setError(undefined)}
+        action={<Button size="1" variant="soft" onClick={() => setShowSettings(true)}>{t('common.settings')}</Button>} />}
       <main className="main">
         {showSettings ? (
-          <SettingsView onChanged={refresh} toolsRequest={toolsRequest} />
+          <SettingsView onChanged={refresh} toolsRequest={toolsRequest} toolsTarget={toolsTarget} />
         ) : selected ? (
           <DemoView onSetup={showTools} requestedTab={requestedTab} selectionRequest={selectionRequest} key={selected.id} meta={selected} jobs={jobs.filter((j) => j.demoId === selected.id)} status={status} onChanged={refresh} onRemoved={() => setSelectedId(undefined)} />
         ) : (

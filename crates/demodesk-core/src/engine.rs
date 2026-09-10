@@ -7,7 +7,7 @@ use crate::parser::DemoParser;
 use crate::render::paths::{find_cs2_dir, find_steam_dir, replays_dir, resolve_tool_paths, PathOverrides, ToolPaths};
 use crate::radar::{ensure_map_assets, MapAssets};
 use crate::replay::build_replay;
-use crate::render::{clean_leftovers, doctor, render_highlights, run_setup, DoctorReport, RenderJobInput, RenderOptions};
+use crate::render::{clean_leftovers, doctor, render_highlights, run_setup, SetupTool, DoctorReport, RenderJobInput, RenderOptions};
 use crate::stats::build_parsed_demo;
 use crate::stats::ParsedDemo;
 use crate::store::{now, DemoMeta, DemoStatus, DemoSummary, JobOutput, JobStatus, RenderJob, Settings, Store};
@@ -160,25 +160,25 @@ impl Engine {
         }
         Ok(jobs)
     }
-    pub fn default_tools_dir(&self) -> PathBuf {
+    pub fn tools_dir(&self) -> PathBuf {
         self.data_dir.join("tools")
     }
     pub fn overrides(&self, s: &Settings) -> PathOverrides {
         let p = |v: &Option<String>| v.as_ref().map(PathBuf::from);
-        PathOverrides { tools_dir: p(&s.tools_dir), cs2_dir: p(&s.cs2_dir), hlae_exe: p(&s.hlae_exe), ffmpeg_exe: p(&s.ffmpeg_exe) }
+        PathOverrides { steam_dir: p(&s.steam_dir), cs2_dir: p(&s.cs2_dir), hlae_exe: p(&s.hlae_exe), ffmpeg_exe: p(&s.ffmpeg_exe), vrf_exe: p(&s.vrf_exe) }
     }
     pub fn tool_paths(&self) -> ToolPaths {
-        resolve_tool_paths(&self.default_tools_dir(), &self.overrides(&self.store.settings()))
+        resolve_tool_paths(&self.tools_dir(), &self.overrides(&self.store.settings()))
     }
     pub fn doctor(&self) -> DoctorReport {
-        doctor(&self.default_tools_dir(), &self.overrides(&self.store.settings()))
+        doctor(&self.tools_dir(), &self.overrides(&self.store.settings()))
     }
     /// Undo an interrupted run's plugin install — skipped while a render is active.
     pub fn clean_leftovers(&self) -> bool {
         if self.active_job_id().is_some() {
             return false;
         }
-        clean_leftovers(&self.default_tools_dir(), &self.overrides(&self.store.settings()))
+        clean_leftovers(&self.tools_dir(), &self.overrides(&self.store.settings()))
     }
     pub fn detected(&self) -> Detected {
         let steam_dir = find_steam_dir();
@@ -189,7 +189,7 @@ impl Engine {
         let s = self.store.settings();
         let mut folders: Vec<PathBuf> = vec![];
         if s.scan_game_replays {
-            let cs2 = self.overrides(&s).cs2_dir.or_else(|| self.detected().cs2_dir);
+            let cs2 = resolve_tool_paths(&self.tools_dir(), &self.overrides(&s)).cs2_dir;
             if let Some(cs2) = cs2 {
                 folders.push(replays_dir(&cs2));
             }
@@ -202,6 +202,11 @@ impl Engine {
     pub fn validate_settings(&self, s: &Settings) -> Vec<String> {
         let mut problems = vec![];
         let o = self.overrides(s);
+        if let Some(steam) = &o.steam_dir {
+            if !steam.join("steam.exe").is_file() {
+                problems.push(format!("steam.exe not found under {}", steam.display()));
+            }
+        }
         if let Some(cs2) = &o.cs2_dir {
             if !crate::render::paths::cs2_exe_in(cs2).is_file() {
                 problems.push(format!("game\\bin\\win64\\cs2.exe not found under {}", cs2.display()));
@@ -215,6 +220,11 @@ impl Engine {
         if let Some(p) = &o.ffmpeg_exe {
             if !p.is_file() {
                 problems.push(format!("FFmpeg not found: {}", p.display()));
+            }
+        }
+        if let Some(p) = &o.vrf_exe {
+            if !p.is_file() {
+                problems.push(format!("Source 2 Viewer CLI not found: {}", p.display()));
             }
         }
         for f in &s.replay_folders {
@@ -613,7 +623,7 @@ impl Engine {
     pub fn setup_state(&self) -> SetupState {
         SetupState { running: self.setup_running.load(Ordering::Relaxed), log: self.setup_log.lock().unwrap().clone() }
     }
-    pub fn start_setup(self: &Arc<Self>, force: bool) -> bool {
+    pub fn start_setup(self: &Arc<Self>, tool: SetupTool, force: bool) -> bool {
         if self.setup_running.swap(true, Ordering::SeqCst) {
             return false;
         }
@@ -626,7 +636,7 @@ impl Engine {
                 engine.setup_log.lock().unwrap().push(line.clone());
                 engine.notify.notify(Event::SetupLog { line });
             };
-            let result = run_setup(&engine.default_tools_dir(), &overrides, force, &mut log);
+            let result = run_setup(&engine.tools_dir(), &overrides, tool, force, &mut log);
             engine.setup_running.store(false, Ordering::SeqCst);
             match result {
                 Ok(_) => engine.notify.notify(Event::SetupFinished { ok: true, error: None }),

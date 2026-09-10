@@ -47,8 +47,8 @@ pub struct DoctorReport {
 
 /// Environment check. Pure: it never touches the game folder, so it is safe to
 /// call while a recording is running (the UI polls it).
-pub fn doctor(default_tools_dir: &Path, o: &PathOverrides) -> DoctorReport {
-    let paths = resolve_tool_paths(default_tools_dir, o);
+pub fn doctor(tools_dir: &Path, o: &PathOverrides) -> DoctorReport {
+    let paths = resolve_tool_paths(tools_dir, o);
     let mut problems = vec![];
     if !IS_WINDOWS {
         problems.push("rendering only runs on Windows (HLAE is Windows-only)".to_string());
@@ -72,23 +72,26 @@ pub fn doctor(default_tools_dir: &Path, o: &PathOverrides) -> DoctorReport {
 
 /// Remove what an old version left in the game folder (see leftovers.rs).
 /// Must NOT run while a recording is in progress.
-pub fn clean_leftovers(default_tools_dir: &Path, o: &PathOverrides) -> bool {
-    let paths = resolve_tool_paths(default_tools_dir, o);
+pub fn clean_leftovers(tools_dir: &Path, o: &PathOverrides) -> bool {
+    let paths = resolve_tool_paths(tools_dir, o);
     match &paths.cs2_dir {
         Some(cs2) if has_leftovers(cs2) => remove_leftovers(cs2).is_ok(),
         _ => false,
     }
 }
 
-pub fn run_setup(default_tools_dir: &Path, o: &PathOverrides, force: bool, log: &mut dyn FnMut(String)) -> Result<DoctorReport> {
-    let paths = resolve_tool_paths(default_tools_dir, o);
-    std::fs::create_dir_all(&paths.tools_dir)?;
-    setup::install_hlae(&paths.tools_dir, force, log)?;
-    if o.ffmpeg_exe.is_none() && (force || paths.ffmpeg_exe.is_none() || paths.ffmpeg_exe.as_ref().is_some_and(|exe| !encode::ffprobe_exe(exe).is_file())) {
-        setup::install_ffmpeg(&paths.tools_dir, force, log)?;
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SetupTool { Hlae, Ffmpeg, Vrf }
+
+pub fn run_setup(tools_dir: &Path, o: &PathOverrides, tool: SetupTool, force: bool, log: &mut dyn FnMut(String)) -> Result<DoctorReport> {
+    std::fs::create_dir_all(tools_dir)?;
+    match tool {
+        SetupTool::Hlae => { setup::install_hlae(tools_dir, force, log)?; }
+        SetupTool::Ffmpeg => { setup::install_ffmpeg(tools_dir, force, log)?; }
+        SetupTool::Vrf => { setup::install_vrf(tools_dir, force, log)?; }
     }
-    setup::install_vrf(&paths.tools_dir, force, log)?;
-    Ok(doctor(default_tools_dir, o))
+    Ok(doctor(tools_dir, o))
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -330,6 +333,25 @@ pub fn render_highlights(input: RenderJobInput) -> Result<RenderResult> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn setup_only_selected_tool() {
+        let dir = tempfile::tempdir().unwrap();
+        for file in ["hlae/HLAE.exe", "hlae/x64/AfxHookSource2.dll", "ffmpeg/ffmpeg.exe", "ffmpeg/ffprobe.exe"] {
+            let path = dir.path().join(file);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, []).unwrap();
+        }
+        let vrf = dir.path().join("vrf").join(super::setup::vrf_exe_name());
+        std::fs::create_dir_all(vrf.parent().unwrap()).unwrap();
+        std::fs::write(vrf, []).unwrap();
+        for (tool, name) in [(super::SetupTool::Hlae, "HLAE"), (super::SetupTool::Ffmpeg, "FFmpeg"), (super::SetupTool::Vrf, "Source 2 Viewer CLI")] {
+            let mut log = Vec::new();
+            super::run_setup(dir.path(), &Default::default(), tool, false, &mut |line| log.push(line)).unwrap();
+            assert_eq!(log, vec![format!("{name} already installed")]);
+        }
+        assert!(serde_json::from_str::<super::SetupTool>("\"unknown\"").is_err());
+    }
+
     use super::RenderOptions;
 
     #[test]

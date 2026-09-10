@@ -1,6 +1,7 @@
+import { useNotify, ConfirmDialog } from './Notifications.tsx';
 import { Spinner } from './Spinner.tsx';
 import { useEffect, useRef, useState } from 'react';
-import { AlertDialog, Badge, Box, Button, Callout, DropdownMenu, Flex, Heading, IconButton, Tabs, Text, Tooltip } from '@radix-ui/themes';
+import { Badge, Box, Button, Callout, DropdownMenu, Flex, Heading, IconButton, Tabs, Text, Tooltip } from '@radix-ui/themes';
 import { Trans, useTranslation } from 'react-i18next';
 import { api, errorText, mb, type DemoMeta, type ParsedDemo, type RenderJob, type Status } from '../api.ts';
 import { fmtDate } from '../i18n/index.ts';
@@ -10,8 +11,9 @@ import { RendersTab } from './RendersTab.tsx';
 import { ChartsTab } from './ChartsTab.tsx';
 import { ReplayTab } from './ReplayTab.tsx';
 
-export function DemoView({ meta, jobs, status, onChanged, onRemoved, requestedTab, selectionRequest, onSetup }: { onSetup: () => void; requestedTab: string; selectionRequest: number; meta: DemoMeta; jobs: RenderJob[]; status?: Status; onChanged: () => Promise<void>; onRemoved: () => void }) {
+export function DemoView({ meta, jobs, status, onChanged, onRemoved, requestedTab, selectionRequest, onSetup }: { onSetup: (target: 'render' | 'replay') => void; requestedTab: string; selectionRequest: number; meta: DemoMeta; jobs: RenderJob[]; status?: Status; onChanged: () => Promise<void>; onRemoved: () => void }) {
   const { t } = useTranslation();
+  const notify = useNotify();
   const [parsed, setParsed] = useState<ParsedDemo>();
   const [loading, setLoading] = useState(true);
   const [parseRequested, setParseRequested] = useState(false);
@@ -39,7 +41,7 @@ export function DemoView({ meta, jobs, status, onChanged, onRemoved, requestedTa
   const run = (fn: () => Promise<unknown>) => () =>
     void fn()
       .then(onChanged)
-      .catch((e) => alert(errorText(e)));
+      .catch((e) => notify(errorText(e)));
   const reparse = async () => {
     if (parsing) return;
     setParseRequested(true);
@@ -47,7 +49,7 @@ export function DemoView({ meta, jobs, status, onChanged, onRemoved, requestedTa
       await api.parse(meta.id);
       await onChanged();
     } catch (e) {
-      alert(errorText(e));
+      notify(errorText(e));
     } finally {
       setParseRequested(false);
     }
@@ -58,7 +60,7 @@ export function DemoView({ meta, jobs, status, onChanged, onRemoved, requestedTa
       onRemoved();
       await onChanged();
     } catch (e) {
-      alert(errorText(e));
+      notify(errorText(e));
     } finally {
       setConfirmRemove(false);
     }
@@ -178,7 +180,7 @@ export function DemoView({ meta, jobs, status, onChanged, onRemoved, requestedTa
           </Tabs.List>
           <Box ref={tabScrollRef} className="tab-body">
             <Tabs.Content value="highlights">
-              <HighlightsTab onSetup={onSetup} meta={meta} parsed={parsed} status={status} onRendered={() => setTab('renders')} />
+              <HighlightsTab onSetup={() => onSetup('render')} meta={meta} parsed={parsed} status={status} onRendered={() => setTab('renders')} />
             </Tabs.Content>
             <Tabs.Content value="players">
               <PlayersTab parsed={parsed} />
@@ -190,32 +192,15 @@ export function DemoView({ meta, jobs, status, onChanged, onRemoved, requestedTa
               <RendersTab jobs={jobs} parsed={parsed} onChanged={onChanged} scrollRef={tabScrollRef} />
             </Tabs.Content>
             <Tabs.Content value="2d" style={{ height: '100%' }}>
-              <ReplayTab onSetup={onSetup} meta={meta} parsed={parsed} />
+              <ReplayTab onSetup={() => onSetup('replay')} meta={meta} parsed={parsed} />
             </Tabs.Content>
           </Box>
         </Tabs.Root>
       )}
 
-      <AlertDialog.Root open={confirmRemove} onOpenChange={setConfirmRemove}>
-        <AlertDialog.Content maxWidth="480px">
-          <AlertDialog.Title>{t('demoView.deleteTitle')}</AlertDialog.Title>
-          <AlertDialog.Description size="2">
-            <Trans i18nKey="demoView.deleteBody" components={{ path: <span className="mono selectable">{meta.path}</span> }} />
-          </AlertDialog.Description>
-          <Flex gap="3" mt="4" justify="end">
-            <AlertDialog.Cancel>
-              <Button variant="soft" color="gray">
-                {t('common.cancel')}
-              </Button>
-            </AlertDialog.Cancel>
-            <AlertDialog.Action>
-              <Button color="red" onClick={() => void doRemove()}>
-                {t('demoView.deleteConfirm')}
-              </Button>
-            </AlertDialog.Action>
-          </Flex>
-        </AlertDialog.Content>
-      </AlertDialog.Root>
+      <ConfirmDialog open={confirmRemove} onOpenChange={setConfirmRemove} title={t('demoView.deleteTitle')}
+        description={<Trans i18nKey="demoView.deleteBody" components={{ path: <span className="mono selectable">{meta.path}</span> }} />}
+        confirmLabel={t('demoView.deleteConfirm')} onConfirm={() => void doRemove()} />
     </Flex>
   );
 }

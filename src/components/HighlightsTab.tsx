@@ -1,3 +1,4 @@
+import { useNotify } from './Notifications.tsx';
 import { displayPlayerName } from '../playerName.ts';
 import { useMemo, useState } from 'react';
 import { Badge, Box, Button, Checkbox, DataList, Dialog, Flex, Grid, SegmentedControl, Select, Slider, Switch, Table, Text } from '@radix-ui/themes';
@@ -19,6 +20,7 @@ function summaryOf(h: Highlight): string {
 
 export function HighlightsTab({ meta, parsed, status, onRendered, onSetup }: { meta: DemoMeta; parsed: ParsedDemo; status?: Status; onRendered: () => void; onSetup: () => void }) {
   const { t } = useTranslation();
+  const notify = useNotify();
   const [playerFilter, setPlayerFilter] = useState<string>('all');
   const [minScore, setMinScore] = useState(3);
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -47,7 +49,7 @@ export function HighlightsTab({ meta, parsed, status, onRendered, onSetup }: { m
       setSelected(new Set());
       onRendered();
     } catch (e) {
-      alert(errorText(e));
+      notify(errorText(e));
     } finally {
       setSubmitting(false);
     }
@@ -273,7 +275,7 @@ export function HighlightsTab({ meta, parsed, status, onRendered, onSetup }: { m
           </Grid>
           {status && !status.ok && (
             <Button className="environment-notice" variant="soft" color="red" mt="4" onClick={() => { setDialog(false); onSetup(); }}>
-              <i aria-hidden="true" className="bi bi-exclamation-triangle app-icon" />{t('highlights.notReady')}<i aria-hidden="true" className="bi bi-arrow-right app-icon" />
+              <i aria-hidden="true" className="bi bi-exclamation-triangle app-icon" />{status.missingRenderTools.length ? t('common.missingTools', { tools: status.missingRenderTools.join(', ') }) : t('highlights.notReady')}<i aria-hidden="true" className="bi bi-arrow-right app-icon" />
             </Button>
           )}
           <Flex direction="column" mt="4" gap="4">

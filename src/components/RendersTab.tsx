@@ -1,7 +1,8 @@
+import { useNotify, ConfirmDialog } from './Notifications.tsx';
 import { Spinner } from './Spinner.tsx';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { AlertDialog, Badge, Box, Button, Callout, Card, DataList, Dialog, DropdownMenu, Flex, Heading, IconButton, Link, Progress, Text } from '@radix-ui/themes';
+import { Badge, Box, Button, Callout, Card, DataList, Dialog, DropdownMenu, Flex, Heading, IconButton, Link, Progress, Text } from '@radix-ui/themes';
 import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
 import { api, errorText, mb, type ParsedDemo, type RenderJob } from '../api.ts';
@@ -33,10 +34,11 @@ function duration(job: RenderJob, t: TFunction, now: number): string | undefined
 
 function JobCard({ job, parsed, onChanged }: { job: RenderJob; parsed: ParsedDemo; onChanged: () => Promise<void> }) {
   const { t } = useTranslation();
+  const notify = useNotify();
   const [logOpen, setLogOpen] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const titleOf = (id?: string) => parsed.highlights.find((h) => h.id === id)?.title;
-  const act = (fn: () => Promise<unknown>) => () => void fn().then(onChanged).catch((e) => alert(errorText(e)));
+  const act = (fn: () => Promise<unknown>) => () => void fn().then(onChanged).catch((e) => notify(errorText(e)));
   const active = job.status === 'queued' || job.status === 'running';
   const [now, setNow] = useState(Date.now);
   useEffect(() => {
@@ -205,24 +207,9 @@ function JobCard({ job, parsed, onChanged }: { job: RenderJob; parsed: ParsedDem
         </Dialog.Content>
       </Dialog.Root>
 
-      <AlertDialog.Root open={confirmDelete} onOpenChange={setConfirmDelete}>
-        <AlertDialog.Content maxWidth="440px">
-          <AlertDialog.Title>{t('renders.deleteTitle')}</AlertDialog.Title>
-          <AlertDialog.Description size="2">{t('renders.deleteBody', { n: job.outputs.length })}</AlertDialog.Description>
-          <Flex gap="3" mt="4" justify="end">
-            <AlertDialog.Cancel>
-              <Button variant="soft" color="gray">
-                {t('common.cancel')}
-              </Button>
-            </AlertDialog.Cancel>
-            <AlertDialog.Action>
-              <Button color="red" onClick={act(() => api.deleteJob(job.id))}>
-                {t('common.delete')}
-              </Button>
-            </AlertDialog.Action>
-          </Flex>
-        </AlertDialog.Content>
-      </AlertDialog.Root>
+      <ConfirmDialog open={confirmDelete} onOpenChange={setConfirmDelete} title={t('renders.deleteTitle')}
+        description={t('renders.deleteBody', { n: job.outputs.length })}
+        confirmLabel={t('common.delete')} onConfirm={act(() => api.deleteJob(job.id))} />
     </Card>
   );
 }

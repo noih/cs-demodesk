@@ -23,7 +23,7 @@ try {
     const jobs = Array.from({ length: 100 }, (_, i) => ({ id: 'job-' + i, demoId: i === 1 ? 'demo-999' : 'demo-0', highlightIds: ['highlight-1'], options, status: i === 0 ? 'running' : i === 1 ? 'queued' : 'done', stage: i === 0 ? 'recording 1/2' : '', createdAt: '2026-09-08T17:30:00Z', startedAt: '2026-09-08T17:30:00Z', finishedAt: i > 1 ? '2026-09-08T17:32:18Z' : undefined, outputs: i < 2 ? [] : Array.from({length:i===2?3:1},(_,j)=>({ file: 'E:/clips/' + i + '-' + j + '.mp4', bytes: 18400000, title: 'Round 08', highlightId: 'highlight-1', isFinal: j===2 })), log: ['recording'] }));
     const player = {steamid:'1',name:'Player',team:'A',kills:20,deaths:10,assists:3,openingKills:4,openingDeaths:2,flashAssists:1,roundsPlayed:22,roundsSurvived:12,kast:77.3,tradeKills:2,tradedDeaths:1,heDamage:20,fireDamage:10,opponents:{'2':3},aim:{all:{shots:100,hits:25,headHits:5,headEligibleHits:20,firstShots:10,firstHits:4,sprayShots:30,sprayHits:9}},activity:{shots:100,flashes:2,smokes:3,hes:2,fires:1,enemiesFlashed:3,teammatesFlashed:1,enemyBlindSeconds:7},clutches:[{round:8,side:'CT',versus:2,kills:2,outcome:'won'}],headshots:10,headshotPct:50,kd:2,multiKills:{'2k':2,'3k':1,'4k':0,'5k':0},clutchesWon:1,damage:2000,utilityDamage:30,friendlyDamage:0,adr:90,highlights:1,bestScore:8};
     player.recoil = {ak47:[{x:0,y:0,samples:2},{x:-1,y:-2,samples:2},{x:1,y:-4,samples:2},{x:2,y:-5,samples:1}]};
-    const status = { ok:true,problems:[],dataDir:'E:/data',activeRender:'job-0',version:'test' };
+    const status = { missingRenderTools:[],ok:true,problems:[],dataDir:'E:/data',activeRender:'job-0',version:'test' };
     window.testCalls = [];
     window.__TAURI_INTERNALS__ = { transformCallback: () => 1, unregisterCallback: () => {}, convertFileSrc: () => 'data:video/mp4;base64,', invoke: async (cmd, args) => {
       window.testCalls.push({cmd,args});
@@ -32,10 +32,13 @@ try {
       if(cmd==='get_replay' || cmd==='get_map_assets')return new Promise(()=>{});
       if(cmd==='get_kills')return [];
       if(cmd==='parse_demo')return new Promise(resolve=>window.releaseParse=resolve);
+      if(cmd==='browse_directory')return args.path ? 'E:/tools' : 'E:/Desktop';
+      if(cmd==='plugin:dialog|open')return null;
+      if(cmd==='run_setup')return true;
       if(cmd==='check_for_updates')return {status:'available',version:'1.0.10'};
       if(cmd==='open_url'){window.openedUrl=args.url;return;}
-      if(cmd==='get_status')return window.missingTools ? {...status,ok:false} : status;
-      if(cmd==='get_settings')return { settings:{language:'en',replayFolders:[],scanGameReplays:true},doctor:{ok:true,problems:[],paths:{}},detected:{},setup:{running:false,log:[]},dataDir:'E:/data',defaultDataDir:'E:/data',parsedBytes:0,clipsBytes:0,radarBytes:0 };
+      if(cmd==='get_status')return window.missingTools ? {...status,ok:false,missingRenderTools:window.missingRenderTools ?? ['HLAE','ffmpeg']} : status;
+      if(cmd==='get_settings')return { settings:{language:'en',replayFolders:[],scanGameReplays:true},doctor:{ok:true,problems:[],paths:window.toolPaths || {}},detected:{},setup:{running:false,log:[]},dataDir:'E:/data',defaultDataDir:'E:/data',parsedBytes:0,clipsBytes:0,radarBytes:0 };
       if(cmd==='list_demos'){if(window.holdRefresh)await new Promise(resolve=>window.releaseRefresh=resolve);return demos;}
       if(cmd==='list_jobs')return window.queueJobs ?? jobs;
       if(cmd==='get_demo' && window.emptyParsed)return {meta:demos.find(d=>d.id===args.id)};
@@ -138,6 +141,15 @@ try {
   assert.ok(settingsBounds.x + settingsBounds.width + 7 <= aboutBounds.x, 'About and Settings hit areas stay separated');
   await about.click();
   await page.getByRole('dialog').waitFor();
+  const storeLink = page.getByRole('dialog').getByRole('button', {name:'Microsoft Store',exact:true});
+  const sourceBoxes = await page.getByRole('dialog').evaluate(el => {
+    const rect = name => { const r = [...el.querySelectorAll('button')].find(b => b.textContent.trim() === name).getBoundingClientRect(); return { y:r.y, height:r.height }; };
+    return {github:rect('GitHub'),store:rect('Microsoft Store')};
+  });
+  assert.equal(sourceBoxes.github.y, sourceBoxes.store.y, 'Distribution links share a row');
+  assert.equal(sourceBoxes.github.height, sourceBoxes.store.height, 'Distribution links have equal prominence');
+  await storeLink.click();
+  assert.equal(await page.evaluate(() => window.openedUrl), 'https://apps.microsoft.com/detail/9N5G4VXSDGS5');
   const updateNotice = page.getByText('Version 1.0.10 available', { exact: true });
   await updateNotice.waitFor();
   await updateNotice.locator('..').getByRole('button').click();
@@ -380,8 +392,69 @@ try {
   await page.getByRole('button',{name:'Settings',exact:true}).click();
   await page.getByText('Language',{exact:true}).waitFor();
   const settingsPage = page.locator('.settings-page');
+  const directoryInput = settingsPage.getByLabel('Data directory', {exact:true});
+  const originalDark = (await page.locator('.radix-themes').first().getAttribute('class')).split(' ').includes('dark');
+  for (const mode of ['light','dark']) {
+    if (!(await page.locator('.radix-themes').first().getAttribute('class')).split(' ').includes(mode)) {
+      await page.getByRole('button', {name:mode === 'dark' ? 'Switch to dark mode' : 'Switch to light mode'}).click();
+    }
+    await directoryInput.fill('E:/custom-data');
+    const colors = await directoryInput.evaluate(el => ({text:getComputedStyle(el).color,placeholder:getComputedStyle(el,'::placeholder').color}));
+    assert.notEqual(colors.text, colors.placeholder, 'Custom and default paths have distinct colors in ' + mode);
+    await directoryInput.fill('');
+  }
+  if (!originalDark) await page.getByRole('button', {name:'Switch to light mode'}).click();
+
+  assert.equal(await settingsPage.getByRole('heading', {name:'Check results',exact:true}).count(), 0, 'Tool checks are merged into the path fields');
+  assert.equal(await settingsPage.getByLabel('Steam install folder', {exact:true}).count(), 1);
+  assert.equal(await settingsPage.getByLabel('CS2 install folder', {exact:true}).count(), 1);
+  assert.equal(await settingsPage.getByRole('button', {name:'Download: Steam',exact:true}).count(), 0);
+  assert.equal(await settingsPage.getByRole('button', {name:'Download: CS2',exact:true}).count(), 0);
+
+  const toolPositions = await settingsPage.evaluate(el => {
+    const buttons = [...el.querySelectorAll('button')];
+    return ['HLAE','FFmpeg','Source 2 Viewer CLI'].map(name => buttons.find(b => b.getAttribute('aria-label') === 'Download: ' + name).getBoundingClientRect().x);
+  });
+  assert.ok(toolPositions.every(x => x === toolPositions[0]), 'Download buttons align across tools');
+
+  for (const label of ['HLAE.exe', 'ffmpeg.exe', 'Source 2 Viewer CLI']) {
+    assert.equal(await settingsPage.getByRole('button', {name:'Download source: ' + label,exact:true}).count(), 1);
+  }
+
+  assert.equal(await page.getByLabel('HLAE.exe', {exact:true}).getAttribute('placeholder'), 'Not detected');
+  assert.equal(await page.getByLabel('ffmpeg.exe', {exact:true}).getAttribute('placeholder'), 'Not detected');
+  assert.equal(await page.getByLabel('Source 2 Viewer CLI', {exact:true}).count(), 1);
+  await page.getByText('Tools are not fully installed. Some features will be limited.', {exact:true}).waitFor();
+  const warningAlignment = await page.getByText('Tools are not fully installed. Some features will be limited.', {exact:true}).locator('..').evaluate(el => {
+    const icon = el.querySelector('.rt-CalloutIcon').getBoundingClientRect();
+    const text = el.querySelector('.rt-CalloutText').getBoundingClientRect();
+    return Math.abs(icon.y + icon.height / 2 - text.y - text.height / 2);
+  });
+  assert.ok(warningAlignment < 1, 'Callout icon and text are vertically centered');
+  const toolLayout = await settingsPage.evaluate(el => {
+    const recheck = [...el.querySelectorAll('button')].find(b=>b.textContent.trim()==='Check again');
+    const card = recheck.closest('.rt-Card').getBoundingClientRect();
+    const button = recheck.getBoundingClientRect();
+    const warning = recheck.closest('.rt-Card').querySelector('.rt-CalloutRoot').getBoundingClientRect();
+    const firstTool = recheck.closest('.rt-Card').querySelector('.tool-field').getBoundingClientRect();
+    return {center:Math.abs(button.x+button.width/2-card.x-card.width/2),warningBottom:warning.bottom,toolTop:firstTool.top};
+  });
+  assert.ok(toolLayout.center < 1 && toolLayout.warningBottom <= toolLayout.toolTop, 'Warning is above tools and recheck is centered');
+
+
+
   assert.equal(await settingsPage.locator('.rt-Badge').count(), 0, 'Settings statuses are plain text');
-  assert.equal(await settingsPage.locator('.rt-variant-ghost, .rt-variant-soft').count(), 0, 'Settings actions use clear outlined or solid controls');
+  assert.equal(await settingsPage.locator('button.rt-variant-ghost, button.rt-variant-soft').count(), 0, 'Settings actions use clear outlined or solid controls');
+  const toolWarning = settingsPage.getByText('Tools are not fully installed. Some features will be limited.', {exact:true});
+  for (const missing of ['hlaeExe', 'hlaeDll', 'ffmpegExe', 'vrfExe', null]) {
+    await page.evaluate(missing => {
+      window.toolPaths = {hlaeExe:'E:/tools/HLAE.exe',hlaeDll:'E:/tools/AfxHookSource2.dll',ffmpegExe:'E:/tools/ffmpeg.exe',vrfExe:'E:/tools/Source2Viewer-CLI.exe'};
+      if (missing) delete window.toolPaths[missing];
+    }, missing);
+    await settingsPage.getByRole('button', {name:'Check again',exact:true}).click();
+    await toolWarning.waitFor({state:missing ? 'visible' : 'hidden'});
+    await page.locator('.notification-viewport .app-toast').getByRole('button', {name:'Close',exact:true}).click();
+  }
   const actionHeights = await settingsPage.locator('.rt-Button, .rt-IconButton').evaluateAll(buttons => buttons.map(b => b.getBoundingClientRect().height));
   assert.ok(actionHeights.every(height => height >= 32), 'Settings action controls accommodate the selected text size');
   if (process.env.UI_SCREENSHOT_DIR) await page.screenshot({path:process.env.UI_SCREENSHOT_DIR+'/settings-redesign.png'});
@@ -445,7 +518,7 @@ try {
     await checkPanel(page.locator('.rt-DialogContent'));
     await page.keyboard.press('Escape');
     await page.locator('.header-tools .bi-arrow-clockwise').locator('..').click();
-    const notice = page.locator('.refresh-notice .rt-CalloutRoot');
+    const notice = page.locator('.notification-viewport .app-toast');
     await notice.getByText('Updated',{exact:true}).waitFor();
     const feedback = await notice.evaluate(el=>{
       const text=el.querySelector('.rt-CalloutText').getBoundingClientRect();
@@ -483,16 +556,17 @@ try {
   await page.evaluate(()=>{window.holdRefresh=false;window.releaseRefresh()});
   await spinner.waitFor({state:'detached'});
   await page.emulateMedia({reducedMotion:'no-preference'});
-  await page.evaluate(()=>window.missingTools=true);
+  await page.evaluate(()=>{window.missingTools=true;window.toolPaths={steamDir:'E:/Steam',cs2Exe:'E:/CS2/game/bin/win64/cs2.exe',cs2Dir:'E:/CS2'};});
   await page.locator('.header-tools .bi-arrow-clockwise').locator('..').click();
   await page.locator('.header-tools [aria-busy="true"]').waitFor();
   await page.locator('.header-tools [aria-busy="true"]').waitFor({state:'detached'});
-  assert.equal(await page.locator('.app-notice').count(),0,'Missing tools do not show a global notice');
+  assert.equal(await page.locator('.notification-viewport [role="alert"]').count(),0,'Missing tools do not show a global notice');
   await page.getByRole('tab').filter({hasText:'Players'}).click();
   await page.getByRole('tab').filter({hasText:'2D'}).click();
-  await page.getByRole('button',{name:'Source 2 Viewer is missing. Open Settings to download tools.'}).click();
-  const download = page.locator('.tools-highlight');
+  await page.getByRole('button',{name:'Missing Source 2 Viewer. Go to Settings to download.'}).click();
+  const download = page.getByRole('button', {name:'Download: Source 2 Viewer CLI',exact:true});
   await download.waitFor();
+  assert.deepEqual(await page.locator('.tools-highlight').evaluateAll(els => els.map(el => el.getAttribute('aria-label'))), ['Download: Source 2 Viewer CLI']);
   assert.equal(await download.evaluate(el=>getComputedStyle(el).animationName),'tools-highlight-pulse');
   assert.equal(await download.evaluate(el=>getComputedStyle(el).animationDuration),'0.5s');
   const outline = await download.evaluate(el=>getComputedStyle(el).backgroundColor);
@@ -501,6 +575,7 @@ try {
   assert.equal(await download.evaluate(el=>getComputedStyle(el).animationDuration),'0.5s');
   await page.emulateMedia({reducedMotion:'no-preference'});
   assert.ok(await download.evaluate(el => document.activeElement === el), 'Missing tools guidance focuses download action');
+  assert.equal(await page.getByRole('tooltip').count(), 0, 'Automatic guidance focus does not open a tooltip');
   assert.ok(await download.evaluate(el => {
     const r = el.getBoundingClientRect();
     return r.top >= 0 && r.bottom <= innerHeight;
@@ -520,11 +595,24 @@ try {
   await hideGame.click();
   assert.ok(await exportDialog.getByRole('button',{name:'Export',exact:true}).isDisabled());
   assert.notEqual(await exportDialog.getByRole('button',{name:'Export',exact:true}).evaluate(el=>getComputedStyle(el).cursor),'pointer','Disabled actions do not advertise clickability');
+  for (const tools of [['Steam','CS2'], ['HLAE'], ['ffmpeg'], ['HLAE','ffmpeg']]) {
+    await page.evaluate(tools => { window.missingRenderTools = tools; }, tools);
+    await page.locator('.header-tools .bi-arrow-clockwise').locator('..').evaluate(el => el.click());
+    await exportDialog.getByText('Missing ' + tools.join(', ') + '. Go to Settings to download.', {exact:true}).waitFor();
+  }
   await exportDialog.locator('.environment-notice').click();
   await exportDialog.waitFor({state:'detached'});
-  await download.waitFor();
-  assert.ok(await download.evaluate(el=>document.activeElement===el),'Export guidance focuses the download action');
+  const renderDownload = page.getByRole('button', {name:'Download: HLAE',exact:true});
+  await renderDownload.waitFor();
+  assert.deepEqual(await page.locator('.tools-highlight').evaluateAll(els => els.map(el => el.getAttribute('aria-label'))), ['Download: HLAE', 'Download: FFmpeg']);
+  assert.ok(await renderDownload.evaluate(el=>document.activeElement===el),'Export guidance focuses the download action');
   assert.equal(await page.evaluate(()=>window.testCalls.filter(c=>c.cmd==='run_setup').length),0,'Export guidance does not start downloads');
+  assert.equal(await page.getByRole('tooltip').count(), 0, 'Export guidance does not open a tooltip');
+  await page.evaluate(() => { window.toolPaths = {steamDir:'E:/Steam',cs2Exe:'E:/CS2/game/bin/win64/cs2.exe',hlaeExe:'E:/tools/HLAE.exe',hlaeDll:'E:/tools/AfxHookSource2.dll'}; });
+  await page.getByRole('button', {name:'Check again',exact:true}).click();
+  await page.locator('.tool-field').filter({has:page.getByLabel('HLAE.exe', {exact:true})}).getByText('Ready', {exact:true}).waitFor();
+  assert.deepEqual(await page.locator('.tools-highlight').evaluateAll(els => els.map(el => el.getAttribute('aria-label'))), ['Download: FFmpeg'], 'Ready HLAE stops highlighting immediately');
+
 
   const refreshList = async () => {
     await page.locator('.header-tools .bi-arrow-clockwise').locator('..').click();
@@ -578,6 +666,21 @@ try {
   await page.locator('.queue-trigger').click();
   await page.locator('.queue-clips').first().getByText('Player — 3 kills · R8').waitFor();
   await closeQueue();
+  if (!await page.locator('.settings-page').count()) await page.getByRole('button', {name:'Settings',exact:true}).click();
+  for (const [tool, label] of [['hlae','HLAE'],['ffmpeg','FFmpeg'],['vrf','Source 2 Viewer CLI']]) {
+    await page.getByRole('button', {name:'Download: ' + label,exact:true}).click();
+    const dialog = page.getByRole('dialog');
+    await dialog.waitFor();
+    assert.deepEqual(await page.evaluate(() => window.testCalls.filter(c => c.cmd === 'run_setup').at(-1).args), {tool,force:true});
+    await dialog.getByRole('button', {name:'Close',exact:true}).click();
+  }
+  const hlaeField = page.locator('.tool-field').filter({has:page.getByLabel('HLAE.exe',{exact:true})});
+  await hlaeField.getByRole('button',{name:'Browse...',exact:true}).click();
+  assert.equal(await page.evaluate(() => window.testCalls.filter(c=>c.cmd==='browse_directory').at(-1).args.path), 'E:/tools/HLAE.exe');
+  assert.equal(await page.evaluate(() => window.testCalls.filter(c=>c.cmd==='plugin:dialog|open').at(-1).args.options.defaultPath), 'E:/tools');
+  await page.getByLabel('HLAE.exe',{exact:true}).fill('E:/custom/HLAE.exe');
+  await hlaeField.getByRole('button',{name:'Browse...',exact:true}).click();
+  assert.equal(await page.evaluate(() => window.testCalls.filter(c=>c.cmd==='browse_directory').at(-1).args.path), 'E:/custom/HLAE.exe');
   assert.deepEqual(errors,[]);
   console.log('UI checks passed: virtual lists, lazy demo reads, equal tabs, themes, charts, filters, queue jump, settings.');
 } finally { await browser.close(); await new Promise(resolve => server.httpServer.close(resolve)); }

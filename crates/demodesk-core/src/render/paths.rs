@@ -23,10 +23,11 @@ pub struct ToolPaths {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PathOverrides {
-    pub tools_dir: Option<PathBuf>,
+    pub steam_dir: Option<PathBuf>,
     pub cs2_dir: Option<PathBuf>,
     pub hlae_exe: Option<PathBuf>,
     pub ffmpeg_exe: Option<PathBuf>,
+    pub vrf_exe: Option<PathBuf>,
 }
 
 pub const IS_WINDOWS: bool = cfg!(windows);
@@ -52,7 +53,7 @@ pub fn find_steam_dir() -> Option<PathBuf> {
     }
     candidates.push(PathBuf::from("C:/Program Files (x86)/Steam"));
     candidates.push(PathBuf::from("C:/Program Files/Steam"));
-    candidates.into_iter().find(|c| c.join("steamapps").is_dir())
+    candidates.into_iter().find(|c| c.join("steam.exe").is_file())
 }
 
 /// Every Steam library root listed in libraryfolders.vdf (plus the main one).
@@ -120,9 +121,9 @@ fn find_on_path(exe: &str) -> Option<PathBuf> {
     std::env::split_paths(&path).map(|p| p.join(exe)).find(|p| p.is_file())
 }
 
-pub fn resolve_tool_paths(default_tools_dir: &Path, o: &PathOverrides) -> ToolPaths {
-    let tools_dir = o.tools_dir.clone().unwrap_or_else(|| default_tools_dir.to_path_buf());
-    let steam_dir = find_steam_dir();
+pub fn resolve_tool_paths(tools_dir: &Path, o: &PathOverrides) -> ToolPaths {
+    let tools_dir = tools_dir.to_path_buf();
+    let steam_dir = o.steam_dir.clone().or_else(find_steam_dir).filter(|dir| dir.join("steam.exe").is_file());
     let cs2_dir = o.cs2_dir.clone().or_else(|| find_cs2_dir(steam_dir.as_deref()));
     let cs2_exe = cs2_dir.as_ref().map(|d| cs2_exe_in(d)).filter(|p| p.is_file());
     let hlae_exe = o.hlae_exe.clone().or_else(|| find_file(&tools_dir.join("hlae"), "HLAE.exe", 2)).filter(|p| p.is_file());
@@ -134,7 +135,7 @@ pub fn resolve_tool_paths(default_tools_dir: &Path, o: &PathOverrides) -> ToolPa
         .or_else(|| find_file(&tools_dir.join("ffmpeg"), ffmpeg_name, 4))
         .or_else(|| find_on_path(ffmpeg_name))
         .filter(|p| p.is_file());
-    let vrf_exe = Some(tools_dir.join("vrf").join(super::setup::vrf_exe_name())).filter(|p| p.is_file());
+    let vrf_exe = Some(o.vrf_exe.clone().unwrap_or_else(|| tools_dir.join("vrf").join(super::setup::vrf_exe_name()))).filter(|p| p.is_file());
     ToolPaths {
         tools_dir,
         steam_dir,
@@ -150,4 +151,43 @@ pub fn resolve_tool_paths(default_tools_dir: &Path, o: &PathOverrides) -> ToolPa
 
 pub fn to_forward_slashes(p: &Path) -> String {
     p.to_string_lossy().replace('\\', "/")
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn custom_steam_detects_cs2_and_rejects_missing_executables() {
+        let dir = tempfile::tempdir().unwrap();
+        let steam = dir.path().join("Steam");
+        let cs2 = steam.join("steamapps/common/Counter-Strike Global Offensive");
+        let exe = super::cs2_exe_in(&cs2);
+        std::fs::create_dir_all(exe.parent().unwrap()).unwrap();
+        std::fs::write(&exe, []).unwrap();
+        std::fs::write(steam.join("steam.exe"), []).unwrap();
+        let options = super::PathOverrides { steam_dir: Some(steam.clone()), ..Default::default() };
+        let paths = super::resolve_tool_paths(dir.path(), &options);
+        assert_eq!(paths.steam_dir, Some(steam.clone()));
+        assert_eq!(paths.cs2_exe, Some(exe));
+        std::fs::remove_file(steam.join("steam.exe")).unwrap();
+        let paths = super::resolve_tool_paths(dir.path(), &options);
+        assert!(paths.steam_dir.is_none());
+        assert!(paths.cs2_exe.is_none());
+    }
+
+    use super::*;
+
+    #[test]
+    fn vrf_override_and_default() {
+        let dir = tempfile::tempdir().unwrap();
+        let custom = dir.path().join("custom.exe");
+        std::fs::write(&custom, []).unwrap();
+        let options = PathOverrides { vrf_exe: Some(custom.clone()), ..Default::default() };
+        assert_eq!(resolve_tool_paths(dir.path(), &options).vrf_exe, Some(custom.clone()));
+        std::fs::remove_file(&custom).unwrap();
+        assert_eq!(resolve_tool_paths(dir.path(), &options).vrf_exe, None);
+        let default = dir.path().join("vrf").join(super::super::setup::vrf_exe_name());
+        std::fs::create_dir_all(default.parent().unwrap()).unwrap();
+        std::fs::write(&default, []).unwrap();
+        assert_eq!(resolve_tool_paths(dir.path(), &PathOverrides::default()).vrf_exe, Some(default));
+    }
 }

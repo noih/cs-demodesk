@@ -3,7 +3,7 @@
 
 use demodesk_core::engine::{Detected, Engine, Event, Notify, SetupState};
 use demodesk_core::radar::MapAssets;
-use demodesk_core::render::{DoctorReport, RenderOptions};
+use demodesk_core::render::{DoctorReport, RenderOptions, SetupTool};
 use demodesk_core::store::{DemoMeta, RenderJob, Settings};
 use demodesk_core::KillEvent;
 use serde::Serialize;
@@ -37,6 +37,7 @@ fn err<E: std::fmt::Display>(e: E) -> String {
 #[serde(rename_all = "camelCase")]
 struct Status {
     ok: bool,
+    missing_render_tools: Vec<&'static str>,
     problems: Vec<String>,
     data_dir: PathBuf,
     active_render: Option<String>,
@@ -91,11 +92,43 @@ async fn check_for_updates() -> CmdResult<demodesk_core::updates::Update> {
         CHECK.get_or_init(|| demodesk_core::updates::check().map_err(err)).clone()
     }).await.map_err(err)?
 }
+fn existing_browse_directory(path: &Path) -> Option<PathBuf> {
+    if !path.is_absolute() { return None; }
+    if path.is_dir() { return Some(path.to_path_buf()); }
+    path.parent().filter(|parent| parent.is_dir()).map(Path::to_path_buf)
+}
+
+#[tauri::command]
+fn browse_directory(app: AppHandle, path: Option<String>) -> CmdResult<PathBuf> {
+    if let Some(directory) = path.as_deref().and_then(|value| existing_browse_directory(Path::new(value.trim()))) {
+        return Ok(directory);
+    }
+    app.path().desktop_dir().map_err(err)
+}
+
+#[cfg(test)]
+mod browse_tests {
+    #[test]
+    fn existing_file_directory_and_missing_path() {
+        let exe = std::env::current_exe().unwrap();
+        let parent = exe.parent().unwrap();
+        assert_eq!(super::existing_browse_directory(&exe), Some(parent.to_path_buf()));
+        assert_eq!(super::existing_browse_directory(parent), Some(parent.to_path_buf()));
+        assert_eq!(super::existing_browse_directory(&parent.join("missing-browse-test-dir").join("tool.exe")), None);
+        assert_eq!(super::existing_browse_directory(std::path::Path::new("relative.exe")), None);
+    }
+}
+
 #[tauri::command]
 async fn get_status(engine: State<'_, Eng>) -> CmdResult<Status> {
     blocking(&engine, |e| {
         let d = e.doctor();
-        Ok(Status { ok: d.ok, problems: d.problems, data_dir: e.data_dir().to_path_buf(), active_render: e.active_job_id(), version: env!("CARGO_PKG_VERSION").into() })
+        let mut missing_render_tools = Vec::new();
+        if d.paths.steam_dir.is_none() { missing_render_tools.push("Steam"); }
+        if d.paths.cs2_exe.is_none() { missing_render_tools.push("CS2"); }
+        if d.paths.hlae_exe.is_none() || d.paths.hlae_dll.is_none() { missing_render_tools.push("HLAE"); }
+        if d.paths.ffmpeg_exe.is_none() { missing_render_tools.push("ffmpeg"); }
+        Ok(Status { missing_render_tools, ok: d.ok, problems: d.problems, data_dir: e.data_dir().to_path_buf(), active_render: e.active_job_id(), version: env!("CARGO_PKG_VERSION").into() })
     })
     .await
 }
@@ -119,8 +152,8 @@ async fn save_settings(engine: State<'_, Eng>, directory: State<'_, Directory>, 
 }
 
 #[tauri::command]
-async fn run_setup(engine: State<'_, Eng>, force: bool) -> CmdResult<bool> {
-    blocking(&engine, move |e| Ok(e.start_setup(force))).await
+async fn run_setup(engine: State<'_, Eng>, tool: SetupTool, force: bool) -> CmdResult<bool> {
+    blocking(&engine, move |e| Ok(e.start_setup(tool, force))).await
 }
 
 #[tauri::command]
@@ -294,6 +327,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            browse_directory,
             check_for_updates,
             get_startup_error,
             recover_data_directory,

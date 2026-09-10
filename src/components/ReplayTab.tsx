@@ -63,7 +63,7 @@ export function ReplayTab({ meta, parsed, onSetup }: { meta: DemoMeta; parsed: P
       <Flex direction="column" gap="3" align="start">
         {needsTools ? (
           <Button className="environment-notice" variant="soft" color="red" onClick={onSetup}>
-            <i aria-hidden="true" className="bi bi-exclamation-triangle app-icon" />{t('replay.toolsMissing')}<i aria-hidden="true" className="bi bi-arrow-right app-icon" />
+            <i aria-hidden="true" className="bi bi-exclamation-triangle app-icon" />{t('common.missingTools', { tools: 'Source 2 Viewer' })}<i aria-hidden="true" className="bi bi-arrow-right app-icon" />
           </Button>
         ) : (
           <>
