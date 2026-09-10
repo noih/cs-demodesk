@@ -379,6 +379,19 @@ try {
   await page.setViewportSize({width:1360,height:940});
   await page.getByRole('button',{name:'Switch to dark mode'}).click();
   await page.getByRole('button',{name:'Filter demos'}).click();
+  const dateOverflow = await page.getByRole('button', {name:'From',exact:true}).evaluate(button => {
+    button.style.maxWidth = '95px';
+    const text = button.querySelector('[title]');
+    text.textContent = '起始日期';
+    const before = button.getBoundingClientRect();
+    const style = getComputedStyle(text);
+    const fits = text.getBoundingClientRect().bottom <= before.bottom && text.getBoundingClientRect().right <= before.right;
+    const result = {fits, whiteSpace:style.whiteSpace, overflow:style.overflow, ellipsis:style.textOverflow};
+    text.textContent = 'From';
+    button.style.maxWidth = '';
+    return result;
+  });
+  assert.deepEqual(dateOverflow, {fits:true,whiteSpace:'nowrap',overflow:'hidden',ellipsis:'ellipsis'}, 'Narrow date labels stay on one line inside the button');
   await page.getByRole('textbox').fill('   ');
   assert.equal(await page.locator('.filter-trigger').getAttribute('data-filtered'), 'false');
   await page.getByRole('textbox').fill('no matches');

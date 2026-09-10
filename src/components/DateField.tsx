@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Button, Popover } from '@radix-ui/themes';
+import { Button, Popover, Text } from '@radix-ui/themes';
 import { DayPicker } from 'react-day-picker';
 import { enUS, ja, ko, ru, zhCN, zhTW } from 'date-fns/locale';
 import { useTranslation } from 'react-i18next';
@@ -19,13 +19,14 @@ export function DateField({ value, onChange, label, min, max }: { value: string;
   const { i18n } = useTranslation();
   const [open, setOpen] = useState(false);
   const selected = value ? localMidnight(value) : undefined;
+  const text = selected ? fmtDate(selected.getTime()) : label;
   const disabled = [...(min ? [{ before: localMidnight(min) }] : []), ...(max ? [{ after: localMidnight(max) }] : [])];
   return (
     <Popover.Root open={open} onOpenChange={setOpen}>
       <Popover.Trigger>
         <Button size="2" variant="surface" color="gray" aria-label={label} style={{ flex: 1, minWidth: 0 }}>
-          <i aria-hidden="true" className="bi bi-calendar3 app-icon"  />
-          {selected ? fmtDate(selected.getTime()) : label}
+          <i aria-hidden="true" className="bi bi-calendar3 app-icon" style={{ flexShrink: 0 }} />
+          <Text truncate title={text}>{text}</Text>
         </Button>
       </Popover.Trigger>
       <Popover.Content size="1">
