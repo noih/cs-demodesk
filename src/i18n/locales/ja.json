@@ -370,6 +370,8 @@
     "manual": "手動指定",
     "autoDetected": "自動検出",
     "notSet": "未設定",
+    "renderToolsReason": "動画の書き出しには、これらのツールが必要です。",
+    "replayToolReason": "2Dリプレイ用のマップ素材を抽出するには、このツールが必要です。",
     "downloadTool": "ダウンロード",
     "hlaePurpose": "動画出力のためにデモの再生を制御します。",
     "ffmpegPurpose": "動画のエンコード、音声の結合、クリップの圧縮に使用します。",

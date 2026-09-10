@@ -370,6 +370,8 @@
     "manual": "수동",
     "autoDetected": "자동 감지",
     "notSet": "미설정",
+    "renderToolsReason": "영상을 내보내려면 이 도구들이 필요합니다.",
+    "replayToolReason": "2D 리플레이용 맵 리소스를 추출하려면 이 도구가 필요합니다.",
     "downloadTool": "다운로드",
     "hlaePurpose": "영상 내보내기를 위해 데모 재생을 제어합니다.",
     "ffmpegPurpose": "영상 인코딩, 오디오 병합 및 클립 압축에 사용합니다.",

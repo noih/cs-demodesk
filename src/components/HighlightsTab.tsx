@@ -273,24 +273,26 @@ export function HighlightsTab({ meta, parsed, status, onRendered, onSetup }: { m
               </Box>
             </Box>
           </Grid>
-          {status && !status.ok && (
-            <Button className="environment-notice" variant="soft" color="red" mt="4" onClick={() => { setDialog(false); onSetup(); }}>
-              <i aria-hidden="true" className="bi bi-exclamation-triangle app-icon" />{status.missingRenderTools.length ? t('common.missingTools', { tools: status.missingRenderTools.join(', ') }) : t('highlights.notReady')}<i aria-hidden="true" className="bi bi-arrow-right app-icon" />
-            </Button>
-          )}
           <Flex direction="column" mt="4" gap="4">
             <Text size="1" color="gray">
               {t(opts.showGame ? 'highlights.visibleGame' : 'highlights.hiddenGame')}
             </Text>
-            <Flex gap="3" justify="end">
-              <Dialog.Close>
-                <Button variant="soft" color="gray">
-                  {t('common.cancel')}
+            <Flex gap="3" justify="end" align="center" wrap="wrap">
+              {status && !status.ok && (
+                <Button className="environment-notice" variant="soft" color="red" style={{ marginRight: 'auto' }} onClick={() => { setDialog(false); onSetup(); }}>
+                  <i aria-hidden="true" className="bi bi-exclamation-triangle app-icon" />{status.missingRenderTools.length ? t('common.missingTools', { tools: status.missingRenderTools.join(', ') }) : t('highlights.notReady')}<i aria-hidden="true" className="bi bi-arrow-right app-icon" />
                 </Button>
-              </Dialog.Close>
-              <Button disabled={submitting || !status?.ok} onClick={() => void render()}>
-                {submitting ? t('highlights.submitting') : t('highlights.export')}
-              </Button>
+              )}
+              <Flex gap="3" style={{ marginLeft: 'auto' }}>
+                <Dialog.Close>
+                  <Button variant="soft" color="gray">
+                    {t('common.cancel')}
+                  </Button>
+                </Dialog.Close>
+                <Button disabled={submitting || !status?.ok} onClick={() => void render()}>
+                  {submitting ? t('highlights.submitting') : t('highlights.export')}
+                </Button>
+              </Flex>
             </Flex>
           </Flex>
         </Dialog.Content>

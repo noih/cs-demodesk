@@ -26,7 +26,12 @@ try {
     player.recoil = {ak47:[{x:0,y:0,samples:2},{x:-1,y:-2,samples:2},{x:1,y:-4,samples:2},{x:2,y:-5,samples:1}]};
     const status = { missingRenderTools:[],ok:true,problems:[],dataDir:'E:/data',activeRender:'job-0',version:'test' };
     window.testCalls = [];
-    window.__TAURI_INTERNALS__ = { transformCallback: () => 1, unregisterCallback: () => {}, convertFileSrc: () => 'data:video/mp4;base64,', invoke: async (cmd, args) => {
+    const callbacks = new Map();
+    const listeners = new Map();
+    let callbackId = 0;
+    window.testListenerCount = () => listeners.size;
+    window.emitTestEvent = payload => { for (const [id, handler] of listeners) callbacks.get(handler)?.({event:'demodesk://event',id,payload}); };
+    window.__TAURI_INTERNALS__ = { transformCallback: fn => { callbacks.set(++callbackId, fn); return callbackId; }, unregisterCallback: id => callbacks.delete(id), convertFileSrc: () => 'data:video/mp4;base64,', invoke: async (cmd, args) => {
       window.testCalls.push({cmd,args});
       if(cmd==='get_startup_error')return null;
       if(cmd==='get_map_assets' && window.missingTools)throw new Error('Source 2 Viewer CLI not installed');
@@ -46,7 +51,8 @@ try {
       if(cmd==='get_demo' && window.failDemo)throw Error('Cannot read demo');
       if(cmd==='get_demo' && window.holdDemo)await new Promise(resolve=>window.releaseDemo=resolve);
       if(cmd==='get_demo')return { meta:demos.find(d=>d.id===args.id),parsed:{recoilReference:{ak47:[{x:0,y:0,samples:4},{x:-1,y:-1,samples:4},{x:-2,y:-3,samples:4},{x:-2,y:-4,samples:2}]},info:{mapName:demos.find(d=>d.id===args.id).mapName,tickRate:64,players:[]},parsedAt:'2026-09-08',score:{A:13,B:9},rounds:[],roundSummaries:[{round:1,winner:'A',killsA:5,killsB:2,players:{'1':{kills:5,deaths:2,damage:450,awp:1,flashed:2,cash:800},'2':{kills:2,deaths:5,damage:220,awp:0,flashed:0,cash:300}}}],stats:[player,{...player,steamid:'2',name:'Player',team:'B',recoil:{},opponents:{'1':1}}],highlights:[{id:'highlight-1',player:{steamid:'1',name:'Player'},round:8,startTick:640,endTick:1280,score:8,tags:['3k'],title:'Player — 3 kills · R8',kills:[],breakdown:{}}]}};
-      if(cmd.startsWith('plugin:event|'))return 1;
+      if(cmd==='plugin:event|listen') { if(window.holdListener)await new Promise(resolve => window.releaseListener = resolve); await new Promise(resolve => setTimeout(resolve, 10)); listeners.set(args.handler, args.handler); return args.handler; }
+      if(cmd==='plugin:event|unlisten') { listeners.delete(args.eventId); return; }
       throw Error('Unexpected command '+cmd);
     }};
     window.__TAURI_EVENT_PLUGIN_INTERNALS__ = { unregisterListener:()=>{} };
@@ -307,8 +313,9 @@ try {
   const playShots = recoil.getByRole('button', { name: 'Play AK-47', exact: true });
   assert.ok(await recoil.getByRole('button', { name: 'Play M4A4', exact: true }).isDisabled());
   assert.ok(await recoil.getByRole('button', { name: 'Play M4A1-S', exact: true }).isDisabled());
-  await page.clock.install();
-  await page.clock.pauseAt(new Date());
+  const clockStart = new Date();
+  await page.clock.install({time: clockStart});
+  await page.clock.pauseAt(new Date(clockStart.getTime() + 1000));
   await page.evaluate(() => {
     const start = window.setInterval.bind(window), clear = window.clearInterval.bind(window);
     window.shotIntervals = new Set();
@@ -629,29 +636,61 @@ try {
   assert.equal(await page.locator('.notification-viewport [role="alert"]').count(),0,'Missing tools do not show a global notice');
   await page.getByRole('tab').filter({hasText:'Players'}).click();
   await page.getByRole('tab').filter({hasText:'2D'}).click();
+  await page.setViewportSize({width:1360,height:600});
   await page.getByRole('button',{name:'Missing Source 2 Viewer. Go to Settings to download.'}).click();
   const download = page.getByRole('button', {name:'Download: Source 2 Viewer CLI',exact:true});
   await download.waitFor();
-  assert.deepEqual(await page.locator('.tools-highlight').evaluateAll(els => els.map(el => el.getAttribute('aria-label'))), ['Download: Source 2 Viewer CLI']);
-  assert.equal(await download.evaluate(el=>getComputedStyle(el).animationName),'tools-highlight-pulse');
-  assert.equal(await download.evaluate(el=>getComputedStyle(el).animationDuration),'0.5s');
-  const outline = await download.evaluate(el=>getComputedStyle(el).backgroundColor);
-  await page.waitForFunction(original=>getComputedStyle(document.querySelector('.tools-highlight')).backgroundColor!==original,outline);
-  await page.emulateMedia({reducedMotion:'reduce'});
-  assert.equal(await download.evaluate(el=>getComputedStyle(el).animationDuration),'0.5s');
+  await page.locator('.driver-popover').waitFor();
+  assert.equal(await page.locator('.driver-active-element.tool-field').count(), 1, 'Single-tool guidance highlights the entire tool field');
+  assert.equal(await page.locator('.driver-active-element').getByRole('button', {name:'Download: Source 2 Viewer CLI',exact:true}).count(), 1);
+  assert.equal(await page.locator('.driver-popover-title').innerText(), 'Download: Source 2 Viewer CLI');
+  assert.deepEqual(await download.evaluate(el => [getComputedStyle(el).animationName, getComputedStyle(el).animationIterationCount]), ['tools-highlight-pulse', 'infinite']);
+  for (const reducedMotion of ['no-preference', 'reduce']) {
+    await page.emulateMedia({reducedMotion});
+    const initialColor = await download.evaluate(el => getComputedStyle(el).backgroundColor);
+    await page.waitForFunction(initial => {
+      const button = document.querySelector('.driver-active-element [data-guide-missing="true"]');
+      return button && getComputedStyle(button).backgroundColor !== initial;
+    }, initialColor);
+    assert.equal(await download.evaluate(el => getComputedStyle(el).animationIterationCount), 'infinite');
+  }
   await page.emulateMedia({reducedMotion:'no-preference'});
-  assert.ok(await download.evaluate(el => document.activeElement === el), 'Missing tools guidance focuses download action');
-  assert.equal(await page.getByRole('tooltip').count(), 0, 'Automatic guidance focus does not open a tooltip');
+  const arrowPosition = await page.locator('.driver-popover').evaluate(popover => {
+    const arrow = popover.querySelector('.driver-popover-arrow');
+    const target = document.querySelector('.driver-active-element').getBoundingClientRect();
+    const tip = arrow.getBoundingClientRect();
+    return { side: arrow.className, target: {x:target.x,y:target.y}, tip: {x:tip.x,y:tip.y}, aligned: tip.top <= target.bottom && tip.bottom >= target.top };
+  });
+  assert.ok(arrowPosition.aligned, JSON.stringify(arrowPosition));
+  assert.ok(arrowPosition.side.includes('driver-popover-arrow-side-left'), 'Arrow points right toward the download button');
+  const arrowStyle = await page.locator('.driver-popover-arrow').evaluate(el => {
+    const style = getComputedStyle(el);
+    return [style.borderTopColor, style.borderRightColor, style.borderBottomColor, style.borderLeftColor];
+  });
+  assert.deepEqual(arrowStyle, ['rgba(0, 0, 0, 0)', 'rgba(0, 0, 0, 0)', 'rgba(0, 0, 0, 0)', 'rgb(255, 255, 255)'], 'Arrow triangle faces right, not down');
+  await page.locator('.driver-popover').getByRole('button', {name:'Close',exact:true}).click();
+  await page.locator('.driver-popover').waitFor({state:'detached'});
+  await page.setViewportSize({width:1360,height:940});
   assert.ok(await download.evaluate(el => {
     const r = el.getBoundingClientRect();
     return r.top >= 0 && r.bottom <= innerHeight;
   }), 'Download action is scrolled into view');
   assert.equal(await page.evaluate(()=>window.testCalls.filter(c=>c.cmd==='run_setup').length), 0, 'Guidance does not start downloads');
   await page.getByRole('button',{name:'Settings',exact:true}).click();
+  await page.waitForFunction(() => window.testListenerCount() === 1);
+  await page.evaluate(() => { window.holdListener = true; });
+  await page.getByRole('button',{name:'Settings',exact:true}).click();
+  await page.getByRole('button', {name:'Download: Source 2 Viewer CLI',exact:true}).waitFor();
+  assert.equal(await page.locator('.driver-popover').count(), 0, 'Ordinary settings navigation does not replay guidance');
+  assert.equal(await page.locator('.demo-item.active, .demo-item[aria-pressed="true"]').count(), 0, 'Settings does not mark a demo as active');
+  await page.getByRole('button',{name:'Settings',exact:true}).click();
+  await page.evaluate(() => { window.holdListener = false; window.releaseListener(); });
+  await page.waitForFunction(() => window.testCalls.filter(c => c.cmd === 'plugin:event|unlisten').length === window.testCalls.filter(c => c.cmd === 'plugin:event|listen').length - 1);
+  assert.equal(await page.evaluate(() => window.testListenerCount()), 1, 'A listener resolved after settings unmount is removed');
   await page.getByRole('tab').filter({hasText:'Highlights'}).click();
   await page.getByRole('button',{name:'Select all',exact:true}).click();
   await page.getByRole('button',{name:/^Export/}).click();
-  const exportDialog = page.getByRole('dialog');
+  const exportDialog = page.getByRole('dialog').filter({has:page.getByRole('button',{name:'Export',exact:true})});
   await exportDialog.waitFor();
   const hideGame = exportDialog.getByRole('switch',{name:'Hide game in background'});
   await hideGame.waitFor();
@@ -670,14 +709,39 @@ try {
   await exportDialog.waitFor({state:'detached'});
   const renderDownload = page.getByRole('button', {name:'Download: HLAE',exact:true});
   await renderDownload.waitFor();
-  assert.deepEqual(await page.locator('.tools-highlight').evaluateAll(els => els.map(el => el.getAttribute('aria-label'))), ['Download: HLAE', 'Download: FFmpeg']);
-  assert.ok(await renderDownload.evaluate(el=>document.activeElement===el),'Export guidance focuses the download action');
-  assert.equal(await page.evaluate(()=>window.testCalls.filter(c=>c.cmd==='run_setup').length),0,'Export guidance does not start downloads');
-  assert.equal(await page.getByRole('tooltip').count(), 0, 'Export guidance does not open a tooltip');
+  await page.locator('.driver-popover').waitFor();
+  const group = page.locator('.driver-active-element');
+  assert.equal(await group.getByRole('button',{name:'Download: HLAE',exact:true}).count(),1);
+  assert.equal(await group.getByRole('button',{name:'Download: FFmpeg',exact:true}).count(),1);
+  assert.equal(await group.getByRole('button',{name:'Download: Source 2 Viewer CLI',exact:true}).count(),0, 'Export guidance excludes the replay tool');
+  assert.equal(await group.getByRole('button',{name:'Check again',exact:true}).count(),0, 'Export guidance excludes unrelated settings actions');
+  assert.equal(await page.locator('.driver-popover-title').innerText(), 'Download: HLAE, FFmpeg');
+  const groupArrow = await page.locator('.driver-popover-arrow').evaluate(arrow => {
+    // Simulate a downward arrow while the popover is positioned on the left.
+    arrow.className = 'driver-popover-arrow driver-popover-arrow-side-top';
+    arrow.style.left = '200px';
+    const box = arrow.parentElement.getBoundingClientRect();
+    const tip = arrow.getBoundingClientRect();
+    const style = getComputedStyle(arrow);
+    return { rightEdge: Math.abs(tip.left - box.right) < 1, centered: Math.abs((tip.top + tip.bottom - box.top - box.bottom) / 2) < 1, colors: [style.borderTopColor, style.borderRightColor, style.borderBottomColor, style.borderLeftColor] };
+  });
+  assert.deepEqual(groupArrow, {rightEdge:true, centered:true, colors:['rgba(0, 0, 0, 0)', 'rgba(0, 0, 0, 0)', 'rgba(0, 0, 0, 0)', 'rgb(255, 255, 255)']}, 'Group arrow remains on the right despite an incorrect arrow side');
+  assert.deepEqual(await group.locator('[data-guide-missing="true"]').evaluateAll(els => els.map(el => getComputedStyle(el).animationIterationCount)), ['infinite', 'infinite']);
+  assert.equal(await page.locator('.driver-popover-description').innerText(), 'These tools are required to export videos.');
+  assert.equal(await page.evaluate(()=>window.testCalls.filter(c=>c.cmd==='run_setup').length),0,'Guidance does not start downloads');
+  await renderDownload.click();
+  await page.locator('.driver-popover').waitFor({state:'detached'});
+  await page.setViewportSize({width:1360,height:940});
+  assert.equal(await page.evaluate(()=>window.testCalls.filter(c=>c.cmd==='run_setup').length),1,'Highlighted download remains clickable');
+  await page.evaluate(() => window.emitTestEvent({type:'setup-log',line:'10% of 185.4 MB'}));
+  await page.getByRole('dialog').getByText('10% of 185.4 MB',{exact:true}).waitFor();
+  assert.equal(await page.getByRole('dialog').getByText('10% of 185.4 MB',{exact:true}).count(), 1, 'One backend progress event produces one log line');
+  assert.equal(await page.getByRole('button', {name:'Download: HLAE',exact:true,includeHidden:true}).evaluate(el => getComputedStyle(el).animationName), 'none', 'Downloading closes guidance and stops pulsing');
+  await page.keyboard.press('Escape');
   await page.evaluate(() => { window.toolPaths = {steamDir:'E:/Steam',cs2Exe:'E:/CS2/game/bin/win64/cs2.exe',hlaeExe:'E:/tools/HLAE.exe',hlaeDll:'E:/tools/AfxHookSource2.dll'}; });
   await page.getByRole('button', {name:'Check again',exact:true}).click();
   await page.locator('.tool-field').filter({has:page.getByLabel('HLAE.exe', {exact:true})}).getByText('Ready', {exact:true}).waitFor();
-  assert.deepEqual(await page.locator('.tools-highlight').evaluateAll(els => els.map(el => el.getAttribute('aria-label'))), ['Download: FFmpeg'], 'Ready HLAE stops highlighting immediately');
+  assert.equal(await page.locator('.driver-popover').count(), 0, 'Tool updates do not restart guidance');
 
 
   const refreshList = async () => {

@@ -82,14 +82,14 @@ function ReadyApp() {
           </div>
             </Popover.Content>
           </Popover.Root>
-          <Tooltip delayDuration={150} content={t('common.settings')}><IconButton variant="ghost" aria-label={t('common.settings')} aria-pressed={showSettings} color="gray" onClick={() => setShowSettings(v => !v)}><i aria-hidden="true" className="bi bi-gear app-icon" /></IconButton></Tooltip><AboutDialog />
+          <Tooltip delayDuration={150} content={t('common.settings')}><IconButton variant="ghost" aria-label={t('common.settings')} aria-pressed={showSettings} color="gray" onClick={() => { setToolsRequest(0); setShowSettings(v => !v); }}><i aria-hidden="true" className="bi bi-gear app-icon" /></IconButton></Tooltip><AboutDialog />
         </Flex>
       </header>
       <aside className="sidebar">
         <DemoList
           demos={demos}
           jobs={jobs}
-          selectedId={selectedId}
+          selectedId={showSettings ? undefined : selectedId}
           toolbar={toolbar}
           selectionRequest={selectionRequest}
           onSelect={(id) => {
@@ -103,7 +103,7 @@ function ReadyApp() {
 
       </aside>
       {error && <Toast message={t('app.backendError', { error })} color="red" onDismiss={() => setError(undefined)}
-        action={<Button size="1" variant="soft" onClick={() => setShowSettings(true)}>{t('common.settings')}</Button>} />}
+        action={<Button size="1" variant="soft" onClick={() => { setToolsRequest(0); setShowSettings(true); }}>{t('common.settings')}</Button>} />}
       <main className="main">
         {showSettings ? (
           <SettingsView onChanged={refresh} toolsRequest={toolsRequest} toolsTarget={toolsTarget} />

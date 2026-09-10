@@ -374,6 +374,8 @@
     "manual": "Manual",
     "autoDetected": "Auto-detected",
     "notSet": "Not set",
+    "renderToolsReason": "These tools are required to export videos.",
+    "replayToolReason": "This tool is required to extract map assets for 2D replay.",
     "downloadTool": "Download",
     "hlaePurpose": "Controls demo playback for video export.",
     "ffmpegPurpose": "Encodes video, merges audio and compresses exported clips.",

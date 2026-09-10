@@ -1,6 +1,8 @@
 import { ConfirmDialog, Toast, useNotify } from './Notifications.tsx';
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { Box, Button, Callout, Card, Dialog, Flex, Grid, Heading, IconButton, Select, Switch, Text, TextField, Tooltip } from '@radix-ui/themes';
+import { driver } from 'driver.js';
+import 'driver.js/dist/driver.css';
 import { open } from '@tauri-apps/plugin-dialog';
 import { useTranslation } from 'react-i18next';
 import { api, errorText, mb, type Settings, type ToolPaths, type SettingsResponse } from '../api.ts';
@@ -95,21 +97,34 @@ const SOURCES = {
 export function SettingsView({ onChanged, toolsRequest = 0, toolsTarget = 'render' }: { onChanged: () => Promise<void>; toolsRequest?: number; toolsTarget?: 'render' | 'replay' }) {
   const { t } = useTranslation();
   const [data, setData] = useState<SettingsResponse>();
-  const downloadRef = useRef<HTMLButtonElement>(null);
-  const guidingFocus = useRef(false);
-  const [highlightTools, setHighlightTools] = useState(false);
+  const toolsRef = useRef<HTMLDivElement>(null);
+  const toolGuide = useRef<ReturnType<typeof driver> | null>(null);
+  const dismissedRequest = useRef(0);
   const loaded = data !== undefined;
   useEffect(() => {
-    if (!toolsRequest || !loaded) return;
-    const button = downloadRef.current;
-    button?.scrollIntoView({ block: 'center', behavior: 'instant' });
-    guidingFocus.current = true;
-    button?.focus({ preventScroll: true });
-    guidingFocus.current = false;
-    setHighlightTools(true);
-    const timer = setTimeout(() => setHighlightTools(false), 5000);
-    return () => clearTimeout(timer);
-  }, [toolsRequest, toolsTarget, loaded]);
+    if (!toolsRequest || toolsRequest === dismissedRequest.current || !loaded || !toolsRef.current) return;
+    const buttons = [...toolsRef.current.querySelectorAll<HTMLButtonElement>('[data-guide-missing="true"]')];
+    const first = buttons[0];
+    if (!first || buttons.some(button => button.disabled)) return;
+    let target: HTMLElement = first.closest<HTMLElement>('.tool-field') ?? first;
+    while (target.parentElement && !buttons.every(button => target.contains(button))) target = target.parentElement;
+    target.scrollIntoView({ block: 'center', behavior: 'instant' });
+    const guide = driver({
+      animate: false,
+      overlayOpacity: 0.65,
+      popoverClass: 'tools-guide',
+      onDestroyed: () => { dismissedRequest.current = toolsRequest; buttons.forEach(button => button.classList.remove('tools-highlight')); },
+      onPopoverRender: popover => popover.closeButton.setAttribute('aria-label', t('common.close')),
+    });
+    toolGuide.current = guide;
+    guide.highlight({
+      element: target,
+      popover: { showButtons: ['close'], title: buttons.length === 1 ? first.getAttribute('aria-label') ?? '' : t('settings.downloadTool') + ': ' + buttons.map(button => button.dataset.toolLabel).join(', '), description: t(toolsTarget === 'render' ? 'settings.renderToolsReason' : 'settings.replayToolReason'), side: 'left', align: 'center' },
+    });
+    buttons.forEach(button => button.classList.add('tools-highlight'));
+    const frame = requestAnimationFrame(() => guide.refresh());
+    return () => { cancelAnimationFrame(frame); guide.destroy(); toolGuide.current = null; };
+  }, [toolsRequest, toolsTarget, loaded, t]);
   const [form, setForm] = useState<Settings>({ language: null, cs2Dir: null, steamDir: null, replayFolders: [], scanGameReplays: true, hlaeExe: null, ffmpegExe: null, vrfExe: null });
   const [dataDirOverride, setDataDirOverride] = useState('');
   const [saving, setSaving] = useState(false);
@@ -128,9 +143,11 @@ export function SettingsView({ onChanged, toolsRequest = 0, toolsTarget = 'rende
     load()
       .then((r) => { setForm(r.settings); setDataDirOverride(r.dataDirOverride ?? ''); })
       .catch((e) => setMessage({ ok: false, text: errorText(e) }));
+    let disposed = false;
     let unlisten: (() => void) | undefined;
     void api
       .onEvent((ev) => {
+        if (disposed) return;
         if (ev.type === 'setup-log') setSetupLog((l) => [...l, ev.line].slice(-300));
         if (ev.type === 'setup-finished') {
           void load().then(r => {
@@ -142,8 +159,9 @@ export function SettingsView({ onChanged, toolsRequest = 0, toolsTarget = 'rende
           setMessage(ev.ok ? { ok: true, text: i18n.t('settings.downloadDone') } : { ok: false, text: i18n.t('settings.downloadFailed', { error: ev.error ?? i18n.t('settings.unknownError') }) });
         }
       })
-      .then((u) => (unlisten = u));
-    return () => unlisten?.();
+      .then((stop) => { if (disposed) stop(); else unlisten = stop; })
+      .catch(e => { if (!disposed) setMessage({ ok: false, text: errorText(e) }); });
+    return () => { disposed = true; unlisten?.(); };
   }, [load]);
 
   const save = async () => {
@@ -210,11 +228,9 @@ export function SettingsView({ onChanged, toolsRequest = 0, toolsTarget = 'rende
   const guidedTools = (toolsTarget === 'render' ? ['steam', 'cs2', 'hlae', 'ffmpeg'] as const : ['vrf'] as const).filter(tool => !ready[tool]);
   const toolButton = (tool: 'steam' | 'cs2' | 'hlae' | 'ffmpeg' | 'vrf', label: string) => (
     <Tooltip delayDuration={150} content={tool === 'steam' ? t('settings.officialSource', { name: label }) : tool === 'cs2' ? t('settings.steamStoreSource', { name: label }) : t('settings.downloadTool') + ': ' + label}>
-      <IconButton ref={tool === guidedTools[0] ? downloadRef : undefined}
-        className={highlightTools && guidedTools.includes(tool) ? 'tools-highlight' : undefined}
+      <IconButton data-guide-missing={guidedTools.includes(tool)} data-tool-label={label}
         size="2" variant="outline" color="gray" aria-label={t(tool === 'steam' || tool === 'cs2' ? 'settings.sourceLabel' : 'settings.downloadTool') + ': ' + label}
-        onFocus={event => { if (guidingFocus.current) event.preventDefault(); }}
-        disabled={startingSetup || data.setup.running} onClick={() => void (tool === 'steam' || tool === 'cs2' ? api.openUrl(SOURCES[tool].url).catch(error => setMessage({ ok: false, text: errorText(error) })) : runSetup(tool))}>
+        disabled={startingSetup || data.setup.running} onClick={() => { toolGuide.current?.destroy(); void (tool === 'steam' || tool === 'cs2' ? api.openUrl(SOURCES[tool].url).catch(error => setMessage({ ok: false, text: errorText(error) })) : runSetup(tool)); }}>
         <i aria-hidden="true" className={tool === 'steam' || tool === 'cs2' ? 'bi bi-box-arrow-up-right app-icon' : 'bi bi-download app-icon'} />
       </IconButton>
     </Tooltip>
@@ -350,7 +366,7 @@ export function SettingsView({ onChanged, toolsRequest = 0, toolsTarget = 'rende
         </Flex>
 
         {/* ---- right column: game environment & render tools ---- */}
-        <Flex direction="column" gap="4">
+        <Flex ref={toolsRef} direction="column" gap="4">
           <Card>
             <Heading data-text-role="subtitle" size="3" mb="3">
               {t('settings.gameSection')}
@@ -373,8 +389,10 @@ export function SettingsView({ onChanged, toolsRequest = 0, toolsTarget = 'rende
               </Callout.Root>
             )}
             <Flex direction="column" gap="3">
-              <PathField description={t('settings.hlaePurpose')} action={toolButton('hlae', 'HLAE')} source={SOURCES.hlae} checked={(form.hlaeExe ?? '') === (data.settings.hlaeExe ?? '') ? Boolean(d.paths.hlaeExe && d.paths.hlaeDll) : undefined} label="HLAE.exe" value={form.hlaeExe ?? ''} placeholder={d.paths.hlaeExe} onChange={(v) => set({ hlaeExe: v || null })} pick={{ filters: [{ name: 'HLAE', extensions: ['exe'] }] }} />
-              <PathField description={t('settings.ffmpegPurpose')} action={toolButton('ffmpeg', 'FFmpeg')} source={SOURCES.ffmpeg} checked={(form.ffmpegExe ?? '') === (data.settings.ffmpegExe ?? '') ? Boolean(d.paths.ffmpegExe) : undefined} label="ffmpeg.exe" value={form.ffmpegExe ?? ''} placeholder={d.paths.ffmpegExe} onChange={(v) => set({ ffmpegExe: v || null })} pick={{ filters: [{ name: 'ffmpeg', extensions: ['exe'] }] }} />
+              <Flex direction="column" gap="3">
+                <PathField description={t('settings.hlaePurpose')} action={toolButton('hlae', 'HLAE')} source={SOURCES.hlae} checked={(form.hlaeExe ?? '') === (data.settings.hlaeExe ?? '') ? Boolean(d.paths.hlaeExe && d.paths.hlaeDll) : undefined} label="HLAE.exe" value={form.hlaeExe ?? ''} placeholder={d.paths.hlaeExe} onChange={(v) => set({ hlaeExe: v || null })} pick={{ filters: [{ name: 'HLAE', extensions: ['exe'] }] }} />
+                <PathField description={t('settings.ffmpegPurpose')} action={toolButton('ffmpeg', 'FFmpeg')} source={SOURCES.ffmpeg} checked={(form.ffmpegExe ?? '') === (data.settings.ffmpegExe ?? '') ? Boolean(d.paths.ffmpegExe) : undefined} label="ffmpeg.exe" value={form.ffmpegExe ?? ''} placeholder={d.paths.ffmpegExe} onChange={(v) => set({ ffmpegExe: v || null })} pick={{ filters: [{ name: 'ffmpeg', extensions: ['exe'] }] }} />
+              </Flex>
               <PathField description={t('settings.vrfPurpose')} action={toolButton('vrf', 'Source 2 Viewer CLI')} source={SOURCES.vrf} checked={(form.vrfExe ?? '') === (data.settings.vrfExe ?? '') ? Boolean(d.paths.vrfExe) : undefined} label="Source 2 Viewer CLI" value={form.vrfExe ?? ''} placeholder={d.paths.vrfExe} onChange={(v) => set({ vrfExe: v || null })} pick={{ filters: [{ name: 'Source 2 Viewer CLI', extensions: ['exe'] }] }} />
               <Flex gap="2" wrap="wrap" align="center" justify="center">
                 {data.setup.running && <Button size="2" variant="outline" color="gray" onClick={() => setLogOpen(true)}>{t('settings.downloading')}</Button>}

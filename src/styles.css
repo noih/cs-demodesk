@@ -554,9 +554,6 @@ video {
 .queue-stage { margin:8px 0 0; overflow-wrap:anywhere; }
 .queue-actions { margin-top:12px; }
 .queue-clips { overflow-wrap:anywhere; }.environment-notice { max-width:min(480px,90vw); height:auto; min-height:32px; padding:10px 12px; white-space:normal; text-align:left; }
-.tools-highlight { background:var(--app-accentSoft); animation:tools-highlight-pulse .5s ease-in-out 10; scroll-margin:24px; }
-@keyframes tools-highlight-pulse { 0%,100% { background-color:color-mix(in srgb,var(--app-accent) 18%,var(--app-panel)); } 50% { background-color:color-mix(in srgb,var(--app-accent) 45%,var(--app-panel)); } }
-@media (prefers-reduced-motion:reduce) { .tools-highlight { animation:tools-highlight-pulse .5s ease-in-out 10!important; } }
 
 /* Four semantic text levels, shared by page content and portaled dialogs. */
 .radix-themes {
@@ -665,3 +662,16 @@ video {
 
 .path-input .rt-TextFieldInput { color: var(--app-text); }
 .path-input .rt-TextFieldInput::placeholder { color: var(--app-muted); opacity: 1; }
+
+.tools-highlight { background:var(--app-accentSoft); animation:tools-highlight-pulse .5s ease-in-out infinite; scroll-margin:24px; }
+@keyframes tools-highlight-pulse { 0%,100% { background-color:color-mix(in srgb,var(--app-accent) 18%,var(--app-panel)); } 50% { background-color:color-mix(in srgb,var(--app-accent) 45%,var(--app-panel)); } }
+@media (prefers-reduced-motion:reduce) { .tools-highlight { animation:tools-highlight-pulse .5s ease-in-out infinite!important; } }
+
+.tools-guide.driver-popover-side-left .driver-popover-arrow {
+  top: 50% !important;
+  right: auto !important;
+  bottom: auto !important;
+  left: 100% !important;
+  transform: translateY(-50%);
+  border-color: transparent transparent transparent #fff;
+}

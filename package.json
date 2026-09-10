@@ -30,6 +30,7 @@
     "@tauri-apps/plugin-dialog": "^2.7.3",
     "bootstrap-icons": "^1.13.1",
     "date-fns": "^4.4.0",
+    "driver.js": "^1.8.0",
     "echarts": "^6.1.0",
     "i18next": "^26.4.2",
     "react": "^19.2.8",

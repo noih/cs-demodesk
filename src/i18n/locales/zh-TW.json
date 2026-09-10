@@ -370,6 +370,8 @@
     "manual": "手動指定",
     "autoDetected": "自動偵測",
     "notSet": "未設定",
+    "renderToolsReason": "輸出影片需要這些工具。",
+    "replayToolReason": "讀取地圖素材以顯示 2D 回放需要此工具。",
     "downloadTool": "下載",
     "hlaePurpose": "用於影片輸出，控制 Demo 回放。",
     "ffmpegPurpose": "用於影片編碼、音訊合併與壓縮。",
