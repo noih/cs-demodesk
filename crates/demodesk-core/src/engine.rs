@@ -25,7 +25,7 @@ pub enum Event {
     DemoChanged { demo: DemoMeta },
     JobChanged { job: RenderJob },
     SetupLog { line: String },
-    SetupFinished { ok: bool, error: Option<String> },
+    SetupFinished { tool: SetupTool, ok: bool, error: Option<String> },
 }
 
 pub trait Notify: Send + Sync + 'static {
@@ -84,6 +84,7 @@ pub struct Engine {
     render_worker_running: AtomicBool,
     setup_running: AtomicBool,
     setup_log: Mutex<Vec<String>>,
+    settings_lock: Mutex<()>,
 }
 
 impl Engine {
@@ -114,6 +115,7 @@ impl Engine {
             render_worker_running: AtomicBool::new(false),
             setup_running: AtomicBool::new(false),
             setup_log: Mutex::new(vec![]),
+            settings_lock: Mutex::new(()),
         });
         // Nothing can be recording yet, so an old plugin install is a leftover.
         engine.clean_leftovers();
@@ -129,6 +131,7 @@ impl Engine {
     }
     /// Validate, then write. Returns the problems instead of writing when there are any.
     pub fn save_settings(&self, settings: Settings) -> Result<(), Vec<String>> {
+        let _guard = self.settings_lock.lock().unwrap();
         let clean = settings.normalized();
         let problems = self.validate_settings(&clean);
         if !problems.is_empty() {
@@ -636,13 +639,22 @@ impl Engine {
                 engine.setup_log.lock().unwrap().push(line.clone());
                 engine.notify.notify(Event::SetupLog { line });
             };
-            let result = run_setup(&engine.tools_dir(), &overrides, tool, force, &mut log);
+            let result = run_setup(&engine.tools_dir(), &overrides, tool, force, &mut log).and_then(|_| {
+                let _guard = engine.settings_lock.lock().unwrap();
+                let mut settings = engine.store.settings();
+                match tool {
+                    SetupTool::Hlae => settings.hlae_exe = None,
+                    SetupTool::Ffmpeg => settings.ffmpeg_exe = None,
+                    SetupTool::Vrf => settings.vrf_exe = None,
+                }
+                engine.store.save_settings(&settings)
+            });
             engine.setup_running.store(false, Ordering::SeqCst);
             match result {
-                Ok(_) => engine.notify.notify(Event::SetupFinished { ok: true, error: None }),
+                Ok(_) => engine.notify.notify(Event::SetupFinished { tool, ok: true, error: None }),
                 Err(e) => {
                     engine.setup_log.lock().unwrap().push(format!("error: {e:#}"));
-                    engine.notify.notify(Event::SetupFinished { ok: false, error: Some(format!("{e:#}")) })
+                    engine.notify.notify(Event::SetupFinished { tool, ok: false, error: Some(format!("{e:#}")) })
                 }
             }
         });
@@ -834,6 +846,44 @@ mod tests {
     struct Events(mpsc::Sender<Event>);
     impl Notify for Events {
         fn notify(&self, event: Event) { let _ = self.0.send(event); }
+    }
+
+    #[test]
+    fn setup_switches_only_the_installed_tool_to_managed_path() {
+        let temp = tempfile::tempdir().unwrap();
+        let (send, receive) = mpsc::channel();
+        let engine = Engine::new(temp.path().join("data"), Arc::new(Events(send))).unwrap();
+        for file in ["hlae/HLAE.exe", "hlae/x64/AfxHookSource2.dll", "ffmpeg/ffmpeg.exe", "ffmpeg/ffprobe.exe"] {
+            let path = engine.tools_dir().join(file);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, []).unwrap();
+        }
+        let vrf = engine.tools_dir().join("vrf").join(crate::render::setup::vrf_exe_name());
+        std::fs::create_dir_all(vrf.parent().unwrap()).unwrap();
+        std::fs::write(&vrf, []).unwrap();
+        for tool in [SetupTool::Hlae, SetupTool::Ffmpeg, SetupTool::Vrf] {
+            let mut expected = Settings {
+                language: Some("ja".into()), hlae_exe: Some("missing-hlae.exe".into()),
+                ffmpeg_exe: Some("missing-ffmpeg.exe".into()), vrf_exe: Some("missing-vrf.exe".into()),
+                ..Settings::default()
+            };
+            engine.store.save_settings(&expected).unwrap();
+            expected = engine.settings();
+            assert!(engine.start_setup(tool, false));
+            loop {
+                if let Event::SetupFinished { ok, error, .. } = receive.recv_timeout(Duration::from_secs(5)).unwrap() {
+                    assert!(ok, "{error:?}");
+                    break;
+                }
+            }
+            let paths = engine.tool_paths();
+            match tool {
+                SetupTool::Hlae => { expected.hlae_exe = None; assert!(paths.hlae_exe.unwrap().starts_with(engine.tools_dir())); }
+                SetupTool::Ffmpeg => { expected.ffmpeg_exe = None; assert!(paths.ffmpeg_exe.unwrap().starts_with(engine.tools_dir())); }
+                SetupTool::Vrf => { expected.vrf_exe = None; assert_eq!(paths.vrf_exe, Some(vrf.clone())); }
+            }
+            assert_eq!(serde_json::to_value(engine.settings()).unwrap(), serde_json::to_value(expected).unwrap());
+        }
     }
 
     fn terminal_events(receiver: &mpsc::Receiver<Event>, count: usize) -> Vec<DemoMeta> {

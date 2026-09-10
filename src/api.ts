@@ -337,7 +337,7 @@ export type AppEvent =
   | { type: 'demo-changed'; demo: DemoMeta }
   | { type: 'job-changed'; job: RenderJob }
   | { type: 'setup-log'; line: string }
-  | { type: 'setup-finished'; ok: boolean; error: string | null };
+  | { type: 'setup-finished'; tool: 'hlae' | 'ffmpeg' | 'vrf'; ok: boolean; error: string | null };
 
 // ---- commands ----
 

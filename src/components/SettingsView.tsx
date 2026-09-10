@@ -133,7 +133,12 @@ export function SettingsView({ onChanged, toolsRequest = 0, toolsTarget = 'rende
       .onEvent((ev) => {
         if (ev.type === 'setup-log') setSetupLog((l) => [...l, ev.line].slice(-300));
         if (ev.type === 'setup-finished') {
-          void load();
+          void load().then(r => {
+            if (ev.ok) {
+              const field = ({ hlae: 'hlaeExe', ffmpeg: 'ffmpegExe', vrf: 'vrfExe' } as const)[ev.tool];
+              setForm(current => ({ ...current, [field]: r.settings[field] }));
+            }
+          }).catch(e => setMessage({ ok: false, text: errorText(e) }));
           setMessage(ev.ok ? { ok: true, text: i18n.t('settings.downloadDone') } : { ok: false, text: i18n.t('settings.downloadFailed', { error: ev.error ?? i18n.t('settings.unknownError') }) });
         }
       })
