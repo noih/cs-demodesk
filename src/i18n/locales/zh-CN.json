@@ -1,7 +1,7 @@
 {
   "startup": {
     "title": "无法使用数据目录",
-    "hint": "请选择其他数据目录，或恢复 App 旁的 demodesk-data。程序将重新启动，现有数据会保留在原处。",
+    "hint": "请选择其他数据目录，或恢复 默认数据目录。程序将重新启动，现有数据会保留在原处。",
     "choose": "选择目录",
     "default": "恢复默认目录"
   },
@@ -50,6 +50,8 @@
     "goToSettings": "前往设置"
   },
   "about": {
+    "updateAvailable": "有新版本 {{version}}",
+    "updateFailed": "无法检查更新，将于下次启动时重试。",
     "button": "关于",
     "tagline": "分析对局数据，回放关键时刻，导出精彩片段。",
     "author": "作者 NOIH",
@@ -408,7 +410,7 @@
     "setupFinished": "已结束",
     "setupLogEmpty": "（等待输出…）",
     "dataDir": "数据目录",
-    "dataDirHint": "选择数据目录本身。清除后使用应用旁的 demodesk-data。更改在重启后生效，不会移动现有文件。",
+    "dataDirHint": "选择数据目录本身。清除后使用默认数据目录。更改在重启后生效，不会移动现有文件。",
     "restartRequired": "请重启应用以使用所选数据目录。下方存储空间操作仍使用当前目录。",
     "autoParseHint": "新 demo 会依次自动解析；解析失败后，只有手动点击解析才会重试。"
   },

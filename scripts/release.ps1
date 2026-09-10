@@ -1,6 +1,6 @@
 # Cuts a release: bumps the version everywhere, runs the checks, makes a signed
 # commit and tag, and pushes. GitHub Actions (.github/workflows/release.yml)
-# then builds the portable exe, attests it and publishes the release.
+# then runs npm run app:release, attests both EXE/MSIX and publishes them.
 #
 #   .\scripts\release.ps1 1.0.0
 #
@@ -25,6 +25,7 @@ function Run($cmd) {
 # UTF-8 without BOM regardless of the PowerShell version
 function Set-Text($path, $text) { [IO.File]::WriteAllText((Resolve-Path $path), $text, [Text.UTF8Encoding]::new($false)) }
 
+& "$PSScriptRoot/validate-store-version.ps1" $Version
 $tag = "v$Version"
 
 Step 'Checking the working tree'
@@ -43,8 +44,10 @@ Run "npm version $Version --no-git-tag-version --allow-same-version"
 Set-Text src-tauri/tauri.conf.json ((Get-Content src-tauri/tauri.conf.json -Raw) -replace '"version": "[^"]+"', "`"version`": `"$Version`"")
 
 Step 'Running checks'
+& "/test-store-version.ps1"
 Run 'cargo test -p demodesk-core'
 Run 'npm run build'
+Run 'cargo test -p demodesk --lib data_directory::tests'
 
 Step 'Committing and tagging (signed)'
 Run 'git add Cargo.toml Cargo.lock package.json package-lock.json src-tauri/tauri.conf.json'

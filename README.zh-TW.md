@@ -48,7 +48,7 @@ Counter-Strike 2 demo 的 Windows 桌面工具（單一可攜 `.exe`）：從一
 
 ## 設計
 
-不使用資料庫。設定、輸出工作與分析快取以檔案儲存，預設位於執行檔旁的 `demodesk-data/`，可在設定中變更資料目錄。demo 保留在原始位置，可逐一加入，也可透過掃描資料夾載入。
+不使用資料庫。設定、輸出工作與分析快取以檔案儲存，預設位於使用者本機 App 資料目錄 `%LOCALAPPDATA%\dev.noih.demodesk\demodesk-data`，可在設定中變更資料目錄。demo 保留在原始位置，可逐一加入，也可透過掃描資料夾載入。
 
 ## 建置
 

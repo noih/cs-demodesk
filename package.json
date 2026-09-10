@@ -14,6 +14,8 @@
     "preview": "vite preview",
     "tauri": "tauri",
     "app:dev": "tauri dev",
+    "app:release": "npm run app:msix && node scripts/portable.mjs target/x86_64-pc-windows-msvc/release/demodesk.exe",
+    "app:msix": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/msix.ps1",
     "app:build": "tauri build --no-bundle && node scripts/portable.mjs",
     "test:privacy": "node scripts/check-repo-privacy.mjs",
     "test:core": "cargo test -p demodesk-core",

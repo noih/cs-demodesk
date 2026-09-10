@@ -338,7 +338,10 @@ export type AppEvent =
 
 // ---- commands ----
 
+export type UpdateStatus = { status: 'packaged' | 'current' } | { status: 'available'; version: string };
+
 export const api = {
+  checkForUpdates: () => invoke<UpdateStatus>('check_for_updates'),
   startupError: () => invoke<string | null>('get_startup_error'),
   recoverDataDirectory: (path: string | null) => invoke<void>('recover_data_directory', { path }),
   status: () => invoke<Status>('get_status'),

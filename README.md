@@ -48,7 +48,7 @@ Nothing is written into the game folder: no plugin, script, or cfg, and no game 
 
 ## Design
 
-No database is required. Settings, export jobs and analysis caches are stored as files in `demodesk-data/` beside the executable by default; the data folder can be changed in Settings. Demos stay at their original paths and can be added individually or discovered through scan folders.
+No database is required. Settings, export jobs and analysis caches are stored as files in the per-user local app data directory (`%LOCALAPPDATA%\dev.noih.demodesk\demodesk-data`) by default; the data folder can be changed in Settings. Clearing that setting restores the default on restart. Existing files are not moved; to reuse an older portable data folder, select it in Settings. Demos stay at their original paths and can be added individually or discovered through scan folders.
 
 ## Build
 
@@ -58,12 +58,13 @@ Requires [Rust](https://rustup.rs) (stable) with Visual Studio Build Tools (Desk
 npm install
 npm run app:dev      # development: Vite + Tauri window
 npm run app:build    # dist-portable\CS-DemoDesk-<version>.exe
+npm run app:release  # portable EXE + unsigned Store MSIX (Windows SDK required)
 npm run test:core    # Rust unit tests
 ```
 
 ## Releases
 
-Releases are built by [GitHub Actions](.github/workflows/release.yml) and carry a build-provenance attestation. To verify that a download was built from this repository:
+Releases are built by [GitHub Actions](.github/workflows/release.yml) and include the portable EXE, an unsigned MSIX for Store submission, SHA256 checksums, and build-provenance attestations for both artifacts. To verify that a download was built from this repository:
 
 ```powershell
 gh attestation verify CS-DemoDesk-<version>.exe --owner noih

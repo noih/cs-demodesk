@@ -1,7 +1,7 @@
 {
   "startup": {
     "title": "Data directory unavailable",
-    "hint": "Choose another data directory or restore demodesk-data beside the app. The app will restart; existing data stays in place.",
+    "hint": "Choose another data directory or restore the default data directory. The app will restart; existing data stays in place.",
     "choose": "Choose directory",
     "default": "Use default directory"
   },
@@ -50,6 +50,8 @@
     "goToSettings": "Go to Settings"
   },
   "about": {
+    "updateAvailable": "Version {{version}} available",
+    "updateFailed": "Unable to check for updates. Try again next time you start the app.",
     "button": "About",
     "tagline": "Analyze match stats, replay key moments, and export highlights.",
     "author": "Author NOIH",
@@ -412,7 +414,7 @@
     "setupFinished": "Finished",
     "setupLogEmpty": "(waiting for output...)",
     "dataDir": "Data directory",
-    "dataDirHint": "Select the data folder itself. Clear to use demodesk-data beside the app. Changes apply after restarting; existing files are not moved.",
+    "dataDirHint": "Select the data folder itself. Clear to use the default data directory. Changes apply after restarting; existing files are not moved.",
     "restartRequired": "Restart the app to use the selected data directory. Storage actions below still use the current directory.",
     "autoParseHint": "New demos are parsed automatically, one at a time. Failed demos are retried only when you click Parse."
   },

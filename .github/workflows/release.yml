@@ -1,4 +1,4 @@
-# Builds the portable Windows executable for a version tag, attaches a
+# Builds portable EXE and unsigned Store MSIX for a version tag, attaches a
 # build-provenance attestation (Sigstore, via GitHub) and publishes a release.
 # Verify a download with: gh attestation verify CS-DemoDesk-<version>.exe --owner noih
 name: release
@@ -30,22 +30,30 @@ jobs:
       - uses: Swatinem/rust-cache@v2
 
       - run: npm ci
-      - run: npm run app:build
+      - run: npm run app:release
 
       - name: Checksum
         shell: pwsh
         run: |
-          $exe = Get-Item dist-portable/*.exe
-          $hash = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLower()
-          "$hash  $($exe.Name)" | Out-File -Encoding ascii dist-portable/SHA256SUMS
+          Get-Item dist-portable/*.exe, out/msix/*.msix | ForEach-Object {
+            $hash = (Get-FileHash $_ -Algorithm SHA256).Hash.ToLower()
+            "$hash  $($_.Name)"
+          } | Out-File -Encoding ascii dist-portable/SHA256SUMS
 
       - uses: actions/attest-build-provenance@v2
         with:
-          subject-path: dist-portable/*.exe
+          subject-path: |
+            dist-portable/*.exe
+            out/msix/*.msix
 
       - uses: softprops/action-gh-release@v2
         with:
           files: |
             dist-portable/*.exe
+            out/msix/*.msix
             dist-portable/SHA256SUMS
           generate_release_notes: true
+          fail_on_unmatched_files: true
+          body: |
+            The .exe is the standalone download.
+            The unsigned .msix is for Microsoft Store submission; it cannot be installed directly until signed.

@@ -12,6 +12,8 @@ use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager, State};
 
 mod data_directory;
+#[cfg(windows)]
+mod webview_runtime;
 use data_directory::DataDirectory;
 type Directory = Arc<DataDirectory>;
 
@@ -82,6 +84,13 @@ async fn blocking<T: Send + 'static>(engine: &Eng, f: impl FnOnce(&Eng) -> CmdRe
     tauri::async_runtime::spawn_blocking(move || f(&engine)).await.map_err(err)?
 }
 
+#[tauri::command]
+async fn check_for_updates() -> CmdResult<demodesk_core::updates::Update> {
+    static CHECK: std::sync::OnceLock<CmdResult<demodesk_core::updates::Update>> = std::sync::OnceLock::new();
+    tauri::async_runtime::spawn_blocking(|| {
+        CHECK.get_or_init(|| demodesk_core::updates::check().map_err(err)).clone()
+    }).await.map_err(err)?
+}
 #[tauri::command]
 async fn get_status(engine: State<'_, Eng>) -> CmdResult<Status> {
     blocking(&engine, |e| {
@@ -249,6 +258,8 @@ fn recover_data_directory(app: AppHandle, directory: State<'_, Directory>, state
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    #[cfg(windows)]
+    if !webview_runtime::ready() { return; }
     let builder = tauri::Builder::default();
     // Register first: duplicate launches must exit before opening the data store.
     #[cfg(desktop)]
@@ -265,7 +276,8 @@ pub fn run() {
         .setup(|app| {
             let handle = app.handle().clone();
             let config = app.path().app_config_dir()?.join("data-directory.json");
-            let directory = Arc::new(DataDirectory::load(config, &std::env::current_exe()?).map_err(std::io::Error::other)?);
+            let default = app.path().app_local_data_dir()?.join("demodesk-data");
+            let directory = Arc::new(DataDirectory::load(config, &default).map_err(std::io::Error::other)?);
             let data_dir = directory.active.clone();
             let startup = directory.prepare().and_then(|_| Engine::new(data_dir.clone(), Arc::new(TauriNotify(handle.clone()))).map_err(err));
             let error = match startup {
@@ -282,6 +294,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            check_for_updates,
             get_startup_error,
             recover_data_directory,
             get_status,

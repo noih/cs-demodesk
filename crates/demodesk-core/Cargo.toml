@@ -9,6 +9,7 @@ description = "CS DemoDesk core — CS2 demo parsing, highlight detection, stati
 parser = { path = "../../vendor/demoparser/parser" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+semver = "1"
 anyhow = "1"
 ahash = "0.8"
 sha1_smol = "1"
@@ -20,7 +21,7 @@ tempfile = "3"
 [target.'cfg(windows)'.dependencies]
 winreg = "0.56"
 windows = { version = "0.61", features = ["Win32_Media_Audio", "Win32_System_Com", "Win32_System_Com_StructuredStorage", "Win32_System_Variant"] }
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging", "Win32_UI_Accessibility", "Win32_System_Threading", "Win32_System_Diagnostics_ToolHelp", "Win32_System_JobObjects", "Win32_Security"] }
+windows-sys = { version = "0.61", features = ["Win32_Storage_Packaging_Appx", "Win32_Foundation", "Win32_UI_WindowsAndMessaging", "Win32_UI_Accessibility", "Win32_System_Threading", "Win32_System_Diagnostics_ToolHelp", "Win32_System_JobObjects", "Win32_Security"] }
 
 
 [build-dependencies]

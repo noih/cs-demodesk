@@ -32,6 +32,8 @@ try {
       if(cmd==='get_replay' || cmd==='get_map_assets')return new Promise(()=>{});
       if(cmd==='get_kills')return [];
       if(cmd==='parse_demo')return new Promise(resolve=>window.releaseParse=resolve);
+      if(cmd==='check_for_updates')return {status:'available',version:'1.0.10'};
+      if(cmd==='open_url'){window.openedUrl=args.url;return;}
       if(cmd==='get_status')return window.missingTools ? {...status,ok:false} : status;
       if(cmd==='get_settings')return { settings:{language:'en',replayFolders:[],scanGameReplays:true},doctor:{ok:true,problems:[],paths:{}},detected:{},setup:{running:false,log:[]},dataDir:'E:/data',defaultDataDir:'E:/data',parsedBytes:0,clipsBytes:0,radarBytes:0 };
       if(cmd==='list_demos'){if(window.holdRefresh)await new Promise(resolve=>window.releaseRefresh=resolve);return demos;}
@@ -129,13 +131,17 @@ try {
   assert.match(await page.locator('.radix-themes').first().getAttribute('class'),/light/);
   assert.equal(await page.evaluate(()=>localStorage.getItem('demodesk.appearance')), 'light');
   if (process.env.UI_SCREENSHOT_DIR) await page.screenshot({path:process.env.UI_SCREENSHOT_DIR+'/ui-light.png'});
-  const about = page.getByRole('button', { name: 'About', exact: true });
+  const about = page.getByRole('button', { name: 'About: Version 1.0.10 available', exact: true });
   assert.equal(await about.innerText(), '', 'About is an icon-only button');
   const aboutBounds = await about.boundingBox();
   const settingsBounds = await page.getByRole('button', { name: 'Settings', exact: true }).boundingBox();
   assert.ok(settingsBounds.x + settingsBounds.width + 7 <= aboutBounds.x, 'About and Settings hit areas stay separated');
   await about.click();
   await page.getByRole('dialog').waitFor();
+  const updateNotice = page.getByText('Version 1.0.10 available', { exact: true });
+  await updateNotice.waitFor();
+  await updateNotice.locator('..').getByRole('button').click();
+  assert.equal(await page.evaluate(() => window.openedUrl), 'https://github.com/noih/cs-demodesk/releases/latest');
   await page.getByRole('button', { name: 'Close', exact: true }).click();
   await page.getByRole('tab').filter({hasText:'Players'}).click();
   const tables = page.getByRole('table');
