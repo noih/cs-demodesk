@@ -20,7 +20,8 @@ try {
     localStorage.setItem('demodesk.appearance', 'dark');
     const demos = Array.from({ length: 1000 }, (_, i) => ({ id: 'demo-' + i, name: 'match_' + i + '.dem', path: 'E:/replays/' + i + '.dem', bytes: 214800000, createdMs: new Date(2026, 8, 8, 17, 0).getTime() - i * 60000, mtimeMs: new Date(2026, 8, 8, 17, i % 60).getTime(), status: 'parsed', mapName: i % 2 ? 'Inferno' : 'Mirage', summary: { rounds: 22, kills: 100, highlights: 1, scoreA: 13, scoreB: 9, players: ['Player'] } }));
     const options = { width: 1920, height: 1080, fps: 60, codec: 'h264', hud: true, crosshair: true, radar: true, killFeed: true, viewmodel: true, tracers: true, maxSizeMb: 20, trueView: true };
-    const jobs = Array.from({ length: 100 }, (_, i) => ({ id: 'job-' + i, demoId: i === 1 ? 'demo-999' : 'demo-0', highlightIds: ['highlight-1'], options, status: i === 0 ? 'running' : i === 1 ? 'queued' : 'done', stage: i === 0 ? 'recording 1/2' : '', createdAt: '2026-09-08T17:30:00Z', startedAt: '2026-09-08T17:30:00Z', finishedAt: i > 1 ? '2026-09-08T17:32:18Z' : undefined, outputs: i < 2 ? [] : Array.from({length:i===2?3:1},(_,j)=>({ file: 'E:/clips/' + i + '-' + j + '.mp4', bytes: 18400000, title: 'Round 08', highlightId: 'highlight-1', isFinal: j===2 })), log: ['recording'] }));
+    const jobTime = Date.now();
+    const jobs = Array.from({ length: 100 }, (_, i) => ({ id: 'job-' + i, demoId: i === 1 ? 'demo-999' : 'demo-0', highlightIds: ['highlight-1'], options, status: i === 0 ? 'running' : i === 1 ? 'queued' : 'done', stage: i === 0 ? 'recording 1/2' : '', createdAt: new Date(jobTime - 45000).toISOString(), startedAt: i === 1 ? undefined : new Date(jobTime - 40000).toISOString(), finishedAt: i > 1 ? new Date(jobTime - 10000).toISOString() : undefined, outputs: i < 2 ? [] : Array.from({length:i===2?3:1},(_,j)=>({ file: 'E:/clips/' + i + '-' + j + '.mp4', bytes: 18400000, title: 'Round 08', highlightId: 'highlight-1', isFinal: j===2 })), log: ['recording'] }));
     const player = {steamid:'1',name:'Player',team:'A',kills:20,deaths:10,assists:3,openingKills:4,openingDeaths:2,flashAssists:1,roundsPlayed:22,roundsSurvived:12,kast:77.3,tradeKills:2,tradedDeaths:1,heDamage:20,fireDamage:10,opponents:{'2':3},aim:{all:{shots:100,hits:25,headHits:5,headEligibleHits:20,firstShots:10,firstHits:4,sprayShots:30,sprayHits:9}},activity:{shots:100,flashes:2,smokes:3,hes:2,fires:1,enemiesFlashed:3,teammatesFlashed:1,enemyBlindSeconds:7},clutches:[{round:8,side:'CT',versus:2,kills:2,outcome:'won'}],headshots:10,headshotPct:50,kd:2,multiKills:{'2k':2,'3k':1,'4k':0,'5k':0},clutchesWon:1,damage:2000,utilityDamage:30,friendlyDamage:0,adr:90,highlights:1,bestScore:8};
     player.recoil = {ak47:[{x:0,y:0,samples:2},{x:-1,y:-2,samples:2},{x:1,y:-4,samples:2},{x:2,y:-5,samples:1}]};
     const status = { missingRenderTools:[],ok:true,problems:[],dataDir:'E:/data',activeRender:'job-0',version:'test' };
@@ -40,7 +41,7 @@ try {
       if(cmd==='get_status')return window.missingTools ? {...status,ok:false,missingRenderTools:window.missingRenderTools ?? ['HLAE','ffmpeg']} : status;
       if(cmd==='get_settings')return { settings:{language:'en',replayFolders:[],scanGameReplays:true},doctor:{ok:true,problems:[],paths:window.toolPaths || {}},detected:{},setup:{running:false,log:[]},dataDir:'E:/data',defaultDataDir:'E:/data',parsedBytes:0,clipsBytes:0,radarBytes:0 };
       if(cmd==='list_demos'){if(window.holdRefresh)await new Promise(resolve=>window.releaseRefresh=resolve);return demos;}
-      if(cmd==='list_jobs')return window.queueJobs ?? jobs;
+      if(cmd==='list_jobs')return window.queueJobs ?? (window.showQueuedOnCurrentDemo ? jobs.map(j=>j.status==='queued'?{...j,demoId:'demo-0'}:j) : jobs);
       if(cmd==='get_demo' && window.emptyParsed)return {meta:demos.find(d=>d.id===args.id)};
       if(cmd==='get_demo' && window.failDemo)throw Error('Cannot read demo');
       if(cmd==='get_demo' && window.holdDemo)await new Promise(resolve=>window.releaseDemo=resolve);
@@ -96,6 +97,29 @@ try {
   assert.equal(await page.getByRole('tab').first().getAttribute('data-state'),'active','Opening a demo selects player statistics');
   assert.equal(await page.locator('.main [aria-busy="true"]').count(), 0, 'Loading ends after demo data arrives');
   await page.getByRole('tab').filter({hasText:'Videos'}).click();
+  const videoTab = page.getByRole('tab').filter({hasText:'Videos'});
+  assert.equal(await videoTab.locator('.rt-TabsTriggerInner .app-spinner').count(), 1);
+  assert.doesNotMatch(await videoTab.innerText(), /running/);
+  assert.ok(await videoTab.evaluate(el => {
+    const outer = el.getBoundingClientRect();
+    return [...el.querySelector('.rt-TabsTriggerInner').children].every(child => {
+      const rect = child.getBoundingClientRect();
+      return rect.left >= outer.left && rect.right <= outer.right;
+    });
+  }), 'Video count and activity indicator stay inside the tab');
+  await page.evaluate(()=>{window.showQueuedOnCurrentDemo=true;});
+  await page.locator('.header-tools .bi-arrow-clockwise').locator('..').click();
+  await videoTab.locator('.rt-TabsTriggerInner .bi-hourglass-split').waitFor();
+  assert.equal(await videoTab.locator('.rt-TabsTriggerInner .app-spinner').count(),1);
+  const viewport=page.viewportSize();
+  await page.setViewportSize({width:900,height:940});
+  await videoTab.scrollIntoViewIfNeeded();
+  assert.ok(await videoTab.evaluate(el=>{const outer=el.getBoundingClientRect();return [...el.querySelector('.rt-TabsTriggerInner').children].every(child=>{const r=child.getBoundingClientRect();return r.left>=outer.left && r.right<=outer.right;});}), 'Queued and running badges fit together at narrow widths');
+  await page.setViewportSize(viewport);
+  await page.evaluate(()=>{window.showQueuedOnCurrentDemo=false;});
+  await page.locator('.header-tools .bi-arrow-clockwise').locator('..').click();
+  await videoTab.locator('.rt-TabsTriggerInner .bi-hourglass-split').waitFor({state:'detached'});
+  await page.locator('.notification-viewport').getByRole('button',{name:'Close',exact:true}).click();
   await page.locator('.job-card').first().waitFor();
   assert.ok(await page.locator('.job-card').count()<15,'Job DOM bounded by viewport');
   const reparseButton = page.locator('.demo-heading button').filter({ has: page.locator('.bi-arrow-clockwise') });
@@ -122,8 +146,10 @@ try {
     assert.ok(await page.locator('.demo-item').first().evaluate(el=>el.scrollHeight<=el.clientHeight),'Demo row accommodates text');
   }
   await page.keyboard.press('Escape');
-  const widths = await page.getByRole('tab').evaluateAll(t=>t.map(e=>e.getBoundingClientRect().width));
-  assert.ok(Math.max(...widths)-Math.min(...widths)<2,'Tabs are equal width');
+  assert.ok(await page.getByRole('tab').evaluateAll(tabs=>tabs.every(tab=>{
+    const style=getComputedStyle(tab);
+    return style.flexGrow==='1' && style.flexBasis==='auto' && style.minWidth==='max-content';
+  })), 'Tabs fit their contents and share extra space');
   const plainCursors = await page.locator('button:not(:disabled):not([data-disabled]):not([aria-disabled="true"])').evaluateAll(buttons => buttons
     .filter(button => getComputedStyle(button).cursor !== 'pointer')
     .map(button => button.getAttribute('aria-label') || button.textContent.trim()));
@@ -133,6 +159,10 @@ try {
   await page.getByRole('button',{name:'Switch to light mode'}).click();
   assert.match(await page.locator('.radix-themes').first().getAttribute('class'),/light/);
   assert.equal(await page.evaluate(()=>localStorage.getItem('demodesk.appearance')), 'light');
+  await videoTab.click();
+  assert.equal(await videoTab.locator('.rt-TabsTriggerInner .app-spinner').count(), 1);
+  await page.waitForTimeout(200);
+  assert.equal(await videoTab.evaluate(el=>getComputedStyle(el).backgroundColor), 'rgb(236, 239, 240)', 'Running videos retain the light active tab background');
   if (process.env.UI_SCREENSHOT_DIR) await page.screenshot({path:process.env.UI_SCREENSHOT_DIR+'/ui-light.png'});
   const about = page.getByRole('button', { name: 'About: Version 1.0.10 available', exact: true });
   assert.equal(await about.innerText(), '', 'About is an icon-only button');
@@ -707,5 +737,5 @@ try {
   await hlaeField.getByRole('button',{name:'Browse...',exact:true}).click();
   assert.equal(await page.evaluate(() => window.testCalls.filter(c=>c.cmd==='browse_directory').at(-1).args.path), 'E:/custom/HLAE.exe');
   assert.deepEqual(errors,[]);
-  console.log('UI checks passed: virtual lists, lazy demo reads, equal tabs, themes, charts, filters, queue jump, settings.');
+  console.log('UI checks passed: virtual lists, lazy demo reads, content-sized tabs, themes, charts, filters, queue jump, settings.');
 } finally { await browser.close(); await new Promise(resolve => server.httpServer.close(resolve)); }

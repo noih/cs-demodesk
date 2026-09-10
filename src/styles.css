@@ -580,7 +580,7 @@ video {
 .demo-name { flex-wrap:wrap; gap:4px 8px; }
 .demo-score { margin-left:auto; }
 .demo-states { grid-template-columns:auto minmax(0,1fr); }
-.demo-tabs .rt-TabsTrigger { min-width:10em; padding-inline:12px; flex-basis:0; }
+.demo-tabs .rt-TabsTrigger { min-width:max-content; padding-inline:12px; flex-basis:auto; }
 .player-health .health-value { width:3ch; }
 .player-row { grid-template-columns:minmax(0,1fr); }
 .job-outputs { grid-template-columns:repeat(auto-fit,minmax(min(100%,360px),1fr)); }

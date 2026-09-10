@@ -66,7 +66,8 @@ export function DemoView({ meta, jobs, status, onChanged, onRemoved, requestedTa
     }
   };
   const videoCount = jobs.reduce((count, job) => count + job.outputs.length, 0);
-  const activeJobs = jobs.filter((j) => j.status === 'running' || j.status === 'queued').length;
+  const runningJobs = jobs.filter((j) => j.status === 'running').length;
+  const queuedJobs = jobs.filter((j) => j.status === 'queued').length;
 
   if (loading && !parsed) {
     return (
@@ -170,10 +171,19 @@ export function DemoView({ meta, jobs, status, onChanged, onRemoved, requestedTa
               <Badge ml="2" variant="soft" color="gray">
                 {videoCount}
               </Badge>
-              {activeJobs > 0 && (
-                <Badge ml="2" variant="soft" color="amber">
-                  {t('demoView.activeJobs', { n: activeJobs })}
-                </Badge>
+              {queuedJobs > 0 && (
+                <Tooltip content={`${t('renders.status.queued')}: ${queuedJobs}`}>
+                  <Badge ml="2" variant="soft" color="gray" aria-label={`${t('renders.status.queued')}: ${queuedJobs}`}>
+                    <i aria-hidden="true" className="bi bi-hourglass-split" />{queuedJobs}
+                  </Badge>
+                </Tooltip>
+              )}
+              {runningJobs > 0 && (
+                <Tooltip content={`${t('renders.status.running')}: ${runningJobs}`}>
+                  <Badge ml="2" variant="soft" color="amber" aria-label={`${t('renders.status.running')}: ${runningJobs}`}>
+                    <span aria-hidden="true"><Spinner size="1" /></span>{runningJobs}
+                  </Badge>
+                </Tooltip>
               )}
             </Tabs.Trigger>
             <Tabs.Trigger value="2d"><i aria-hidden="true" className="bi bi-map app-icon" />{t('demoView.tabs.replay')}</Tabs.Trigger>
