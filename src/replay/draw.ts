@@ -289,16 +289,14 @@ export function draw(ctx: CanvasRenderingContext2D, width: number, height: numbe
     if (!p.alive) continue;
     const [x, y] = place(m, lay, p.x, p.y, p.z);
     const color = p.pid === focus ? '#b995ff' : teamColor(p.team);
-    // disc: filled from the bottom up to the health left, the rest at 20% (so the
-    // outline still reads as a full circle)
+    // Fill health from the bottom over a dark backing that contrasts with the map.
     ctx.save();
     ctx.beginPath();
     ctx.arc(x, y, r, 0, Math.PI * 2);
     ctx.clip();
-    ctx.fillStyle = color;
-    ctx.globalAlpha = 0.2;
+    ctx.fillStyle = 'rgba(0,0,0,0.55)';
     ctx.fillRect(x - r, y - r, r * 2, r * 2);
-    ctx.globalAlpha = 1;
+    ctx.fillStyle = color;
     const fill = tg.hp ? Math.max(0, Math.min(100, p.hp)) / 100 : 1;
     ctx.fillRect(x - r, y + r - r * 2 * fill, r * 2, r * 2 * fill);
     ctx.restore();

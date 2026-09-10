@@ -492,11 +492,11 @@ video {
 /* Replay roster: compact horizontal health bars, with the entire row as follow control. */
 .team-panel { border:1px solid var(--app-border); border-top-width:1px; border-radius:8px; background:var(--app-panel); }
 .team-head { display:flex; justify-content:space-between; align-items:center; padding:10px 12px; background:var(--app-raised); border-bottom:1px solid var(--app-border); }
-.team-title { border-left:3px solid var(--team-color); padding-left:10px; min-width:0; }
-.team-title strong { display:block; font-size:var(--app-font-body); font-weight:600; }
-.team-title small { display:block; margin-top:2px; font:var(--app-font-caption) var(--code-font-family); letter-spacing:.12em; color:var(--app-subtle); text-transform:uppercase; }
-.team-score { font:700 var(--app-font-title) var(--code-font-family); color:var(--team-color); }
-.player-row { width:100%; grid-template-columns:minmax(0,1fr) auto; gap:8px; padding:9px 12px; border:0; border-bottom:1px solid var(--app-border); border-radius:0; background:transparent; color:var(--app-text); text-align:left; font:inherit; }
+.team-title { display:flex; align-items:baseline; gap:6px; white-space:nowrap; border-left:3px solid var(--team-color); padding-left:10px; min-width:0; }
+.team-title strong { min-width:0; overflow:hidden; text-overflow:ellipsis; display:block; font-size:var(--app-font-body); font-weight:600; }
+.team-title small { flex-shrink:0; font:var(--app-font-caption) var(--code-font-family); letter-spacing:.12em; color:var(--app-subtle); text-transform:uppercase; }
+.team-score { flex-shrink:0; margin-left:8px; font:700 var(--app-font-title) var(--code-font-family); color:var(--team-color); }
+.player-row { width:100%; grid-template-columns:minmax(0,1fr) auto; gap:8px; padding:5px 10px; border:0; border-bottom:1px solid var(--app-border); border-radius:0; background:transparent; color:var(--app-text); text-align:left; font:inherit; }
 .player-row:hover { background:var(--app-raised); }
 .player-row:focus-visible { outline:2px solid var(--app-accent); outline-offset:-2px; }
 .player-row.focused { background:var(--app-accentSoft); }
@@ -632,13 +632,13 @@ video {
 
 .player-meta { display:flex; align-items:baseline; justify-content:space-between; gap:12px; min-width:0; }
 .player-meta .player-equipment { min-width:0; flex:1; }
-.player-meta .player-kda { display:block; flex:none; font:500 var(--app-font-caption) var(--code-font-family); line-height:1.5; white-space:nowrap; }
+.player-meta .player-kda { display:block; flex:none; font:500 var(--app-font-caption) var(--code-font-family); line-height:1.3; white-space:nowrap; }
 .player-name strong { min-width:0; }
 
 .team-panel .player-row { background-image:linear-gradient(to right,color-mix(in srgb,var(--team-color) 24%,var(--app-panel)) 0 var(--health),var(--app-panel) var(--health) 100%); }
 .team-panel .player-row.focused { box-shadow:inset 3px 0 var(--team-color); }
 .player-hp { margin-left:auto; flex:none; font:var(--app-font-caption) var(--code-font-family); font-variant-numeric:tabular-nums; color:var(--app-muted); }
-.player-main { gap:4px; }
+.player-main { gap:1px; line-height:1.3; }
 
 .replay-transport .rt-IconButton,.replay-transport .rt-SelectTrigger { height:calc(var(--app-font-body) * 1.5 + 10px); min-height:calc(var(--app-font-body) * 1.5 + 10px); box-sizing:border-box; flex-shrink:0; }
 .replay-transport .rt-IconButton { width:calc(var(--app-font-body) * 1.5 + 10px); }

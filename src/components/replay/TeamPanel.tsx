@@ -11,7 +11,7 @@ export function TeamPanel({ side, label, score, players, focus, onFocus }: { sid
   return (
     <section className="team-panel" style={style} aria-label={label}>
       <div className="team-head">
-        <div className="team-title"><strong>{label}</strong><small>{side === 'CT' ? t('common.ct') : t('common.t')}</small></div>
+        <div className="team-title"><strong>{label}</strong><small title={side === 'CT' ? t('common.ct') : t('common.t')}>({side === 'CT' ? 'CT' : 'T'})</small></div>
         <strong className="team-score">{score}</strong>
       </div>
       {players.map(p => {

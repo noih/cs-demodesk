@@ -91,7 +91,10 @@ test('player labels stay above every marker and focus is painted last', () => {
   const firstLabel = calls.findIndex(call => call.key === 'fillText');
   assert.ok(firstLabel > calls.findLastIndex(call => call.key === 'arc'));
   assert.deepEqual(calls.filter(call => call.key === 'fillText').map(call => call.args[0]), ['Other', 'Focused']);
-  assert.equal(calls.filter(call => call.key === 'fillRect')[2].color, '#b995ff');
+  const discs = calls.filter(call => call.key === 'fillRect');
+  assert.equal(discs[0].color, 'rgba(0,0,0,0.55)');
+  assert.equal(discs[2].color, 'rgba(0,0,0,0.55)', 'Focused and team markers share a dark health backing');
+  assert.equal(discs[3].color, '#b995ff');
   assert.deepEqual(players.map(p => p.pid), [1, 2], 'Drawing must not reorder replay state');
 });
 
