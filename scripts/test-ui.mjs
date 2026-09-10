@@ -22,7 +22,7 @@ try {
     const demos = Array.from({ length: 1000 }, (_, i) => ({ id: 'demo-' + i, name: 'match_' + i + '.dem', path: 'E:/replays/' + i + '.dem', bytes: 214800000, createdMs: new Date(2026, 8, 8, 17, 0).getTime() - i * 60000, mtimeMs: new Date(2026, 8, 8, 17, i % 60).getTime(), status: 'parsed', mapName: i % 2 ? 'Inferno' : 'Mirage', summary: { rounds: 22, kills: 100, highlights: 1, scoreA: 13, scoreB: 9, players: ['Player'] } }));
     const options = { width: 1920, height: 1080, fps: 60, codec: 'h264', hud: true, crosshair: true, radar: true, killFeed: true, viewmodel: true, tracers: true, maxSizeMb: 20, trueView: true };
     const jobTime = Date.now();
-    const jobs = Array.from({ length: 100 }, (_, i) => ({ id: 'job-' + i, demoId: i === 1 ? 'demo-999' : 'demo-0', highlightIds: ['highlight-1'], options, status: i === 0 ? 'running' : i === 1 ? 'queued' : 'done', stage: i === 0 ? 'recording 1/2' : '', createdAt: new Date(jobTime - 45000).toISOString(), startedAt: i === 1 ? undefined : new Date(jobTime - 40000).toISOString(), finishedAt: i > 1 ? new Date(jobTime - 10000).toISOString() : undefined, outputs: i < 2 ? [] : Array.from({length:i===2?3:1},(_,j)=>({ file: 'E:/clips/' + i + '-' + j + '.mp4', bytes: 18400000, title: 'Round 08', highlightId: 'highlight-1', isFinal: j===2 })), log: ['recording'] }));
+    const jobs = Array.from({ length: 100 }, (_, i) => ({ id: 'job-' + i, demoId: i === 1 ? 'demo-999' : 'demo-0', highlightIds: ['highlight-1'], options, status: i === 0 ? 'running' : i === 1 ? 'queued' : 'done', stage: i === 0 ? 'recording 1/2' : '', progress: i === 0 ? 0.35 : undefined, createdAt: new Date(jobTime - 45000).toISOString(), startedAt: i === 1 ? undefined : new Date(jobTime - 40000).toISOString(), finishedAt: i > 1 ? new Date(jobTime - 10000).toISOString() : undefined, outputs: i < 2 ? [] : Array.from({length:i===2?3:1},(_,j)=>({ file: 'E:/clips/' + i + '-' + j + '.mp4', bytes: 18400000, title: 'Round 08', highlightId: 'highlight-1', isFinal: j===2 })), log: ['recording'] }));
     const player = {steamid:'1',name:'Player',team:'A',kills:20,deaths:10,assists:3,openingKills:4,openingDeaths:2,flashAssists:1,roundsPlayed:22,roundsSurvived:12,kast:77.3,tradeKills:2,tradedDeaths:1,heDamage:20,fireDamage:10,opponents:{'2':3},aim:{all:{shots:100,hits:25,headHits:5,headEligibleHits:20,firstShots:10,firstHits:4,sprayShots:30,sprayHits:9}},activity:{shots:100,flashes:2,smokes:3,hes:2,fires:1,enemiesFlashed:3,teammatesFlashed:1,enemyBlindSeconds:7},clutches:[{round:8,side:'CT',versus:2,kills:2,outcome:'won'}],headshots:10,headshotPct:50,kd:2,multiKills:{'2k':2,'3k':1,'4k':0,'5k':0},clutchesWon:1,damage:2000,utilityDamage:30,friendlyDamage:0,adr:90,highlights:1,bestScore:8};
     player.recoil = {ak47:[{x:0,y:0,samples:2},{x:-1,y:-2,samples:2},{x:1,y:-4,samples:2},{x:2,y:-5,samples:1}]};
     const status = { missingRenderTools:[],ok:true,problems:[],dataDir:'E:/data',activeRender:'job-0',version:'test' };
@@ -128,6 +128,18 @@ try {
   await videoTab.locator('.rt-TabsTriggerInner .bi-hourglass-split').waitFor({state:'detached'});
   await page.locator('.notification-viewport').getByRole('button',{name:'Close',exact:true}).click();
   await page.locator('.job-card').first().waitFor();
+  const progressBar = page.getByRole('progressbar', {name:'Overall progress (estimated)'});
+  assert.equal(await progressBar.getAttribute('aria-valuenow'), '35');
+  assert.ok(!(await page.locator('.job-card').first().innerText()).includes('Elapsed'), 'Running timer has no redundant prefix');
+  const elapsedBefore = await page.locator('.job-card').first().innerText();
+  await page.waitForTimeout(1100);
+  assert.notEqual(await page.locator('.job-card').first().innerText(), elapsedBefore, 'Elapsed timer advances without progress events');
+  await page.evaluate(async () => {
+    const jobs = await window.__TAURI_INTERNALS__.invoke('list_jobs');
+    window.emitTestEvent({type:'job-changed', job:{...jobs[0],stage:'encoding 2/2: fitting',progress:0.82}});
+  });
+  await page.waitForFunction(() => document.querySelector('[role="progressbar"]')?.getAttribute('aria-valuenow') === '82');
+  assert.ok((await page.locator('.job-card').first().innerText()).includes('Encoding 2/2 · Fitting file size'));
   assert.ok(await page.locator('.job-card').count()<15,'Job DOM bounded by viewport');
   const reparseButton = page.locator('.demo-heading button').filter({ has: page.locator('.bi-arrow-clockwise') });
   await reparseButton.click();

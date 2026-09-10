@@ -5,6 +5,6 @@ use std::path::{Path, PathBuf};
 fn main() {
     let a: Vec<String> = std::env::args().collect();
     let ffmpeg = PathBuf::from(std::env::var("FFMPEG").unwrap_or_else(|_| "ffmpeg".into()));
-    let r = encode_to_size(&ffmpeg, Path::new(&a[1]), Path::new(&a[2]), a[3].parse().unwrap(), &a[4], 128).unwrap();
+    let r = encode_to_size(&ffmpeg, Path::new(&a[1]), Path::new(&a[2]), a[3].parse().unwrap(), &a[4], 192).unwrap();
     println!("{} kbps → {} bytes", r.bitrate_kbps, r.bytes);
 }

@@ -271,6 +271,7 @@
     "submitting": "提交中…"
   },
   "renders": {
+    "overallProgress": "整体进度（估计）",
     "status": {
       "queued": "排队中",
       "running": "渲染中",
@@ -281,7 +282,12 @@
     "stage": {
       "starting": "准备中",
       "recording": "录制中（CS2）",
-      "encoding": "编码中"
+      "encoding": "编码中",
+      "seeking": "定位片段",
+      "setup": "准备录制",
+      "muxing": "合并音视频",
+      "merging": "合并片段",
+      "fitting": "压缩至大小上限"
     },
     "waitingPrevious": "等待上一个任务完成…",
     "starting": "准备中…",

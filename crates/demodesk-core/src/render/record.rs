@@ -43,6 +43,7 @@ pub struct RecordSession<'a> {
     pub cancel: Arc<AtomicBool>,
     pub log: &'a mut dyn FnMut(String),
     pub stage: &'a mut dyn FnMut(&str),
+    pub progress: &'a mut dyn FnMut(f64),
 }
 
 fn tasklist(image: &str, verbose: bool) -> String {
@@ -483,7 +484,9 @@ impl RecordSession<'_> {
     }
 
     fn handle_console_line(&mut self, line: &str, progress: &mut Progress) {
-        if let Some((i, n, what)) = parse_marker(line) {
+        if let Some(value) = line.split(MARK).nth(1).and_then(|s| s.trim().strip_prefix("progress ")).and_then(|s| s.trim().parse::<f64>().ok()).filter(|v| v.is_finite() && (0.0..=1.0).contains(v)) {
+            (self.progress)(value);
+        } else if let Some((i, n, what)) = parse_marker(line) {
             progress.seen_marker = true;
             match what {
                 "seek" => (self.stage)(&format!("recording {i}/{n}: seeking")),

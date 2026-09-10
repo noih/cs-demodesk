@@ -7,23 +7,12 @@ import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
 import { api, errorText, mb, type ParsedDemo, type RenderJob } from '../api.ts';
 import { LogView } from './LogView.tsx';
-import { fmtDateTime } from '../i18n/index.ts';
+import { fmtDateTime, translateRenderStage } from '../i18n/index.ts';
 
 function initializePreview(video: HTMLVideoElement | null) {
   if (video) video.volume = 0.15;
 }
 const COLOR: Record<RenderJob['status'], 'gray' | 'amber' | 'green' | 'red'> = { queued: 'amber', running: 'amber', done: 'green', error: 'red', cancelled: 'gray' };
-const STAGES = ['starting', 'recording', 'encoding'] as const;
-const isStage = (s: string): s is (typeof STAGES)[number] => (STAGES as readonly string[]).includes(s);
-
-/** "[3/5] recording …" or "encoding 2/4" → 0..1, undefined when the stage carries no counter. */
-function progressOf(job: RenderJob): number | undefined {
-  const m = job.stage?.match(/(\d+)\s*\/\s*(\d+)/);
-  if (!m) return undefined;
-  const cur = Number(m[1]);
-  const total = Number(m[2]);
-  return total > 0 ? Math.min(1, cur / total) : undefined;
-}
 
 function duration(job: RenderJob, t: TFunction, now: number): string | undefined {
   if (!job.startedAt) return undefined;
@@ -46,7 +35,7 @@ function JobCard({ job, parsed, onChanged }: { job: RenderJob; parsed: ParsedDem
     const timer = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(timer);
   }, [job.status, job.finishedAt]);
-  const pct = progressOf(job);
+  const pct = job.progress === undefined ? undefined : Math.min(99, Math.floor(job.progress * 100));
   const total = job.outputs.reduce((s, o) => s + o.bytes, 0);
   const revealTarget = job.outputs[0]?.file;
   const hasOptions = job.options.trueView || !job.options.hud || !job.options.crosshair || !job.options.radar || !job.options.killFeed || !job.options.viewmodel || !job.options.tracers || job.options.chat || job.options.xray || job.options.voice;
@@ -96,11 +85,11 @@ function JobCard({ job, parsed, onChanged }: { job: RenderJob; parsed: ParsedDem
 
       {active && (
         <Box className="job-content">
-          <Flex justify="between" align="center" mb={pct !== undefined ? '1' : '0'}>
+          <Flex justify="between" align="center" mb="2" gap="3" wrap="wrap">
             <Flex align="center" gap="2">
               <Spinner size="1" />
               <Text size="2" color="amber">
-                {job.stage ? (isStage(job.stage) ? t(`renders.stage.${job.stage}`) : job.stage) : job.status === 'queued' ? t('renders.waitingPrevious') : t('renders.starting')}
+                {job.stage ? translateRenderStage(job.stage) : job.status === 'queued' ? t('renders.waitingPrevious') : t('renders.starting')}
               </Text>
               {job.log.length > 0 && (
                 <Text size="1" color="gray" truncate style={{ maxWidth: 520 }}>
@@ -112,7 +101,13 @@ function JobCard({ job, parsed, onChanged }: { job: RenderJob; parsed: ParsedDem
               {duration(job, t, now)}
             </Text>
           </Flex>
-          {pct !== undefined && <Progress value={Math.round(pct * 100)} color="amber" />}
+          {job.status === 'running' && <>
+            <Flex justify="between" mb="1">
+              <Text size="1" color="gray">{t('renders.overallProgress')}</Text>
+              <Text size="1" style={{ fontVariantNumeric: 'tabular-nums' }}>{pct === undefined ? '—' : `${pct}%`}</Text>
+            </Flex>
+            <Progress value={pct} color="amber" aria-label={t('renders.overallProgress')} />
+          </>}
         </Box>
       )}
 

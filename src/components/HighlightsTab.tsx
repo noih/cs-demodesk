@@ -1,14 +1,15 @@
 import { useNotify } from './Notifications.tsx';
 import { displayPlayerName } from '../playerName.ts';
 import { useMemo, useState } from 'react';
-import { Badge, Box, Button, Checkbox, DataList, Dialog, Flex, Grid, SegmentedControl, Select, Slider, Switch, Table, Text } from '@radix-ui/themes';
+import { Badge, Box, Button, Checkbox, Dialog, Flex, Grid, SegmentedControl, Select, Slider, Switch, Table, Text } from '@radix-ui/themes';
 import { useTranslation } from 'react-i18next';
 import { api, clock, errorText, DEFAULT_RENDER_OPTIONS, type DemoMeta, type Highlight, type ParsedDemo, type RenderOptions, type Status } from '../api.ts';
 
 const RESOLUTIONS = [
   { label: '720p', width: 1280, height: 720 },
   { label: '1080p', width: 1920, height: 1080 },
-  { label: '1440p', width: 2560, height: 1440 },
+  { label: '2K', width: 2560, height: 1440 },
+  { label: '4K', width: 3840, height: 2160 },
 ];
 const HOT_TAGS = new Set(['ace', '4k', 'clutch', 'knife', 'noscope']);
 /** HUD switches in the export dialog, in display order. */
@@ -140,12 +141,12 @@ export function HighlightsTab({ meta, parsed, status, onRendered, onSetup }: { m
       </Table.Root>
 
       <Dialog.Root open={dialog} onOpenChange={setDialog}>
-        <Dialog.Content maxWidth="1000px">
+        <Dialog.Content maxWidth="860px">
           <Dialog.Title>{t('highlights.dialogTitle')}</Dialog.Title>
           <Dialog.Description size="2" color="gray">
             {t('highlights.summary', { n: chosen.length, seconds: Math.round(selectedSeconds) })}
           </Dialog.Description>
-          <Grid columns={{ initial: '1', sm: '260px 260px minmax(0, 1fr)' }} gap="5" mt="4" align="start">
+          <Grid columns={{ initial: '1', sm: 'minmax(0, 1fr) minmax(0, 1fr)' }} gap="5" mt="4" align="start">
             <Flex direction="column" gap="3">
               {chosen.length > 1 && (
                 <Text as="label" size="2">
@@ -181,7 +182,7 @@ export function HighlightsTab({ meta, parsed, status, onRendered, onSetup }: { m
                   style={{ width: '100%' }}
                 >
                   {RESOLUTIONS.map((r) => (
-                    <SegmentedControl.Item key={r.width} value={String(r.width)}>
+                    <SegmentedControl.Item key={r.width} value={String(r.width)} title={`${r.width} × ${r.height}`}>
                       {r.label}
                     </SegmentedControl.Item>
                   ))}
@@ -194,6 +195,7 @@ export function HighlightsTab({ meta, parsed, status, onRendered, onSetup }: { m
                 <SegmentedControl.Root size="1" value={String(opts.fps)} onValueChange={(v) => setOpts({ ...opts, fps: Number(v) })} style={{ width: '100%' }}>
                   <SegmentedControl.Item value="30">30</SegmentedControl.Item>
                   <SegmentedControl.Item value="60">60</SegmentedControl.Item>
+                  <SegmentedControl.Item value="90">90</SegmentedControl.Item>
                 </SegmentedControl.Root>
               </Box>
               <Box>
@@ -210,24 +212,18 @@ export function HighlightsTab({ meta, parsed, status, onRendered, onSetup }: { m
                   </Select.Content>
                 </Select.Root>
               </Box>
-              <Text as="label" size="1">
-                <Flex align="center" justify="between" gap="3">
-                  {t('highlights.hideGame')}
-                  <Switch size="1" checked={!opts.showGame} onCheckedChange={(hideGame) => setOpts({ ...opts, showGame: !hideGame })} />
-                </Flex>
-              </Text>
             </Flex>
             <Flex direction="column" gap="3">
-              <DataList.Root size="1">
+              <Flex direction="column" gap="3">
                 {HUD_TOGGLES.map((key) => (
-                  <DataList.Item key={key} align="center">
-                    <DataList.Label>{t(`highlights.toggle.${key}`)}</DataList.Label>
-                    <DataList.Value>
-                      <Switch size="1" checked={opts[key]} disabled={key === 'crosshair' && !opts.hud} onCheckedChange={(v) => setOpts({ ...opts, [key]: v })} />
-                    </DataList.Value>
-                  </DataList.Item>
+                  <Text as="label" size="1" key={key}>
+                    <Flex align="center" justify="between" gap="3">
+                      <Text color="gray">{t(`highlights.toggle.${key}`)}</Text>
+                      <Switch size="1" style={{ flexShrink: 0 }} checked={opts[key]} disabled={key === 'crosshair' && !opts.hud} onCheckedChange={(v) => setOpts({ ...opts, [key]: v })} />
+                    </Flex>
+                  </Text>
                 ))}
-              </DataList.Root>
+              </Flex>
               <Box>
                 <Text as="div" size="1" color="gray" mb="1">
                   {t('highlights.hudScale', { n: opts.hudScale.toFixed(2) })}
@@ -235,48 +231,19 @@ export function HighlightsTab({ meta, parsed, status, onRendered, onSetup }: { m
                 <Slider min={0.5} max={0.95} step={0.05} value={[opts.hudScale]} onValueChange={([v]) => setOpts({ ...opts, hudScale: v ?? 0.85 })} />
               </Box>
             </Flex>
-            <Box>
-              <Text as="div" size="1" color="gray" mb="1">
-                {t('highlights.clips')}
-              </Text>
-              <Box style={{ maxHeight: 340, overflow: 'auto', border: '1px solid var(--gray-a5)', borderRadius: 'var(--radius-2)' }}>
-                <Table.Root className="nowrap-headers" size="1">
-                  <Table.Header>
-                    <Table.Row>
-                      <Table.ColumnHeaderCell align="right" width="48px">
-                        {t('highlights.col.round')}
-                      </Table.ColumnHeaderCell>
-                      <Table.ColumnHeaderCell>{t('highlights.col.player')}</Table.ColumnHeaderCell>
-                      <Table.ColumnHeaderCell>{t('highlights.col.what')}</Table.ColumnHeaderCell>
-                      <Table.ColumnHeaderCell align="right" width="48px">
-                        {t('highlights.col.length')}
-                      </Table.ColumnHeaderCell>
-                    </Table.Row>
-                  </Table.Header>
-                  <Table.Body>
-                    {[...chosen]
-                      .sort((a, b) => a.startTick - b.startTick)
-                      .map((h) => (
-                        <Table.Row key={h.id}>
-                          <Table.Cell align="right">{h.round}</Table.Cell>
-                          <Table.Cell>
-                            <Text truncate style={{ display: 'block', maxWidth: 100 }}>
-                              {displayPlayerName(h.player.name)}
-                            </Text>
-                          </Table.Cell>
-                          <Table.Cell style={{ whiteSpace: 'nowrap' }}>{summaryOf(h)}</Table.Cell>
-                          <Table.Cell align="right">{Math.round((h.endTick - h.startTick) / tr)}s</Table.Cell>
-                        </Table.Row>
-                      ))}
-                  </Table.Body>
-                </Table.Root>
-              </Box>
-            </Box>
           </Grid>
           <Flex direction="column" mt="4" gap="4">
-            <Text size="1" color="gray">
-              {t(opts.showGame ? 'highlights.visibleGame' : 'highlights.hiddenGame')}
-            </Text>
+            <Flex direction="column" gap="2" pt="3" style={{ borderTop: '1px solid var(--app-border)' }}>
+              <Text as="label" size="1">
+                <Flex align="center" gap="2">
+                  <Switch size="1" checked={!opts.showGame} onCheckedChange={(hideGame) => setOpts({ ...opts, showGame: !hideGame })} />
+                  {t('highlights.hideGame')}
+                </Flex>
+              </Text>
+              <Text size="1" color="gray">
+                {t(opts.showGame ? 'highlights.visibleGame' : 'highlights.hiddenGame')}
+              </Text>
+            </Flex>
             <Flex gap="3" justify="end" align="center" wrap="wrap">
               {status && !status.ok && (
                 <Button className="environment-notice" variant="soft" color="red" style={{ marginRight: 'auto' }} onClick={() => { setDialog(false); onSetup(); }}>

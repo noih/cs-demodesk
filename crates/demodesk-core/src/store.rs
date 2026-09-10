@@ -198,6 +198,8 @@ pub struct RenderJob {
     pub status: JobStatus,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stage: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub progress: Option<f64>,
     pub created_at: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub started_at: Option<String>,
@@ -415,7 +417,7 @@ impl Store {
     }
     pub fn new_job(&self, demo_id: &str, highlight_ids: Vec<String>, options: RenderOptions) -> Result<RenderJob> {
         let id = format!("{}-{}", chrono::Utc::now().format("%Y%m%dT%H%M%S"), &sha1_smol::Sha1::from(format!("{demo_id}{:?}{}", highlight_ids, now()).as_bytes()).digest().to_string()[..4]);
-        let job = RenderJob { schema_version: JOB_SCHEMA_VERSION, id, demo_id: demo_id.to_string(), highlight_ids, options, status: JobStatus::Queued, stage: None, created_at: now(), started_at: None, finished_at: None, error: None, outputs: vec![], log: vec![] };
+        let job = RenderJob { schema_version: JOB_SCHEMA_VERSION, id, demo_id: demo_id.to_string(), highlight_ids, options, status: JobStatus::Queued, stage: None, progress: None, created_at: now(), started_at: None, finished_at: None, error: None, outputs: vec![], log: vec![] };
         self.save_job(&job)?;
         Ok(job)
     }

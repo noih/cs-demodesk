@@ -46,7 +46,7 @@
   "app": {
     "backendError": "Cannot reach the backend: {{error}}",
     "renderNotReady": "Rendering not ready - open Settings",
-    "rendering": "Rendering {{n}}",
+    "rendering": "{{n}} rendering",
     "pickDemo": "Pick a demo",
     "goToSettings": "Go to Settings"
   },
@@ -275,6 +275,7 @@
     "submitting": "Submitting..."
   },
   "renders": {
+    "overallProgress": "Overall progress (estimated)",
     "status": {
       "queued": "Queued",
       "running": "Rendering",
@@ -285,7 +286,12 @@
     "stage": {
       "starting": "Starting",
       "recording": "Recording (CS2)",
-      "encoding": "Encoding"
+      "encoding": "Encoding",
+      "seeking": "Seeking",
+      "setup": "Preparing capture",
+      "muxing": "Combining audio and video",
+      "merging": "Merging clips",
+      "fitting": "Fitting file size"
     },
     "waitingPrevious": "Waiting for the previous job...",
     "starting": "Starting...",

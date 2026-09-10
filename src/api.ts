@@ -237,7 +237,7 @@ export const DEFAULT_RENDER_OPTIONS: RenderOptions = {
   width: 1920,
   height: 1080,
   codec: 'libx264',
-  crf: 23,
+  crf: 20,
   container: 'mp4',
   camera: 'slot',
   deathNoticeSeconds: 5,
@@ -277,6 +277,7 @@ export interface RenderJob {
   options: RenderOptions;
   status: JobStatus;
   stage?: string;
+  progress?: number;
   createdAt: string;
   startedAt?: string;
   finishedAt?: string;

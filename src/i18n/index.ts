@@ -62,3 +62,13 @@ export function translateProblem(problem: string): string {
   const key = keys.find(([prefix]) => problem.startsWith(prefix))?.[1];
   return key ? i18n.t(`diagnostics.${key}`) : problem;
 }
+
+/** Translate complete known stages; preserve unfamiliar diagnostics verbatim. */
+export function translateRenderStage(stage: string): string {
+  const match = /^(starting|recording|encoding)(?: (\d+\/\d+))?(?:: (seeking|setup|muxing|merging|fitting))?$/.exec(stage);
+  if (!match) return stage;
+  const [, phase, count, detail] = match;
+  const isKey = (key: string): key is keyof typeof en.renders.stage => Object.hasOwn(en.renders.stage, key);
+  if (!phase || !isKey(phase) || (detail && !isKey(detail))) return stage;
+  return `${i18n.t(`renders.stage.${phase}`)}${count ? ` ${count}` : ''}${detail && isKey(detail) ? ` · ${i18n.t(`renders.stage.${detail}`)}` : ''}`;
+}

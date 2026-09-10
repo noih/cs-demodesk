@@ -88,3 +88,4 @@ Run powershell -NoProfile -File scripts/test-store-version.ps1 for boundary chec
 To manually test the missing-WebView2 native prompt without uninstalling Runtime:
 cargo test -p demodesk --lib webview_runtime::tests::missing_runtime_install_guidance -- --ignored
 The prompt uses the Windows user interface language (Traditional/Simplified Chinese, Japanese, Korean, Russian, or English; other languages fall back to English). Choose No to exit, or Yes to open Microsoft's official download page.
+See [Video encoding](../docs/video-encoding.md) for quality defaults, size limits, and FFmpeg regression checks.

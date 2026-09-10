@@ -759,6 +759,7 @@ impl Engine {
         job.status = JobStatus::Running;
         job.started_at = Some(now());
         job.stage = Some("starting".into());
+        job.progress = Some(0.0);
         self.persist(&job);
 
         let progress = Mutex::new(job.clone());
@@ -776,6 +777,13 @@ impl Engine {
             j.stage = Some(s.to_string());
             self.persist(&j);
         };
+        let mut report_progress = |value: f64| {
+            let mut j = progress.lock().unwrap();
+            let value = value.clamp(0.0, 0.99).max(j.progress.unwrap_or(0.0));
+            if value - j.progress.unwrap_or(0.0) < 0.005 { return; }
+            j.progress = Some(value);
+            self.persist(&j);
+        };
         let outcome = self.get_demo(&job.demo_id).ok_or_else(|| anyhow!("demo not found")).and_then(|(meta, parsed)| {
             let parsed = parsed.ok_or_else(|| anyhow!("demo not parsed (parse it again after restarting the app)"))?;
             let wanted: HashSet<&str> = job.highlight_ids.iter().map(|s| s.as_str()).collect();
@@ -790,9 +798,12 @@ impl Engine {
                 cancel: cancel.clone(),
                 log: &mut log,
                 stage: &mut stage,
+                progress: &mut report_progress,
             })
         });
-        job.log = progress.into_inner().unwrap().log;
+        let latest = progress.into_inner().unwrap();
+        job.log = latest.log;
+        job.progress = latest.progress;
 
         *self.active_job.lock().unwrap() = None;
         job.finished_at = Some(now());
@@ -800,6 +811,7 @@ impl Engine {
         match outcome {
             Ok(result) => {
                 job.outputs = job_outputs(&result);
+                if !job.outputs.is_empty() { job.progress = Some(1.0); }
                 job.status = if job.outputs.is_empty() { JobStatus::Error } else { JobStatus::Done };
                 if job.outputs.is_empty() {
                     job.error = Some("no clip was recorded".into());

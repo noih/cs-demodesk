@@ -139,6 +139,28 @@ mod platform {
             stdout.read_to_end(&mut out.stdout)?; stderr.read_to_end(&mut out.stderr)?;
             Ok(out)
         }
+        pub fn output_with_progress(&self, command: &mut Command, progress: &mut dyn FnMut(&[u8])) -> io::Result<Output> {
+            let stdout = tempfile::NamedTempFile::new()?;
+            let mut reader = stdout.reopen()?;
+            let mut stderr = tempfile::tempfile()?;
+            let mut child = self.start(command, Some((stdout.as_file(), &stderr)))?;
+            let mut data = vec![];
+            let status = loop {
+                let before = data.len();
+                reader.read_to_end(&mut data)?;
+                progress(&data[before..]);
+                if let Some(status) = child.try_wait()? { break status; }
+                std::thread::sleep(std::time::Duration::from_millis(250));
+            };
+            self.finish()?;
+            let before = data.len();
+            reader.read_to_end(&mut data)?;
+            progress(&data[before..]);
+            stderr.seek(SeekFrom::Start(0))?;
+            let mut errors = vec![];
+            stderr.read_to_end(&mut errors)?;
+            Ok(Output { status, stdout: data, stderr: errors })
+        }
         fn start(&self, command: &Command, capture: Option<(&File, &File)>) -> io::Result<Child> {
             let program = wide(command.get_program())?;
             let mut line = vec![];
@@ -211,6 +233,28 @@ impl ProcessTree {
     pub fn finish(&self) -> std::io::Result<()> { Ok(()) }
     pub fn spawn(&self, command: &mut std::process::Command) -> std::io::Result<std::process::Child> { command.spawn() }
     pub fn output(&self, command: &mut std::process::Command) -> std::io::Result<std::process::Output> { command.output() }
+    pub fn output_with_progress(&self, command: &mut std::process::Command, progress: &mut dyn FnMut(&[u8])) -> std::io::Result<std::process::Output> {
+        use std::io::{Read, Seek, SeekFrom};
+        let stdout = tempfile::NamedTempFile::new()?;
+        let mut reader = stdout.reopen()?;
+        let mut stderr = tempfile::tempfile()?;
+        let mut child = command.stdout(stdout.reopen()?).stderr(stderr.try_clone()?).spawn()?;
+        let mut data = vec![];
+        let status = loop {
+            let before = data.len();
+            reader.read_to_end(&mut data)?;
+            progress(&data[before..]);
+            if let Some(status) = child.try_wait()? { break status; }
+            std::thread::sleep(std::time::Duration::from_millis(250));
+        };
+        let before = data.len();
+        reader.read_to_end(&mut data)?;
+        progress(&data[before..]);
+        stderr.seek(SeekFrom::Start(0))?;
+        let mut errors = vec![];
+        stderr.read_to_end(&mut errors)?;
+        Ok(std::process::Output { status, stdout: data, stderr: errors })
+    }
 }
 
 #[cfg(all(test, windows))]

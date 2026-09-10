@@ -181,7 +181,7 @@ export function DemoView({ meta, jobs, status, onChanged, onRemoved, requestedTa
               {runningJobs > 0 && (
                 <Tooltip content={`${t('renders.status.running')}: ${runningJobs}`}>
                   <Badge ml="2" variant="soft" color="amber" aria-label={`${t('renders.status.running')}: ${runningJobs}`}>
-                    <span aria-hidden="true"><Spinner size="1" /></span>{runningJobs}
+                    <span aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center' }}><Spinner size="1" /></span>{runningJobs}
                   </Badge>
                 </Tooltip>
               )}

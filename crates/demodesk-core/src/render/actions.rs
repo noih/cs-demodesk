@@ -79,6 +79,8 @@ pub fn build_schedule(clips: &[RenderClip], o: &ActionsOptions) -> Vec<Scheduled
 
     let mut prev_end: Option<i32> = None;
     let n = order.len();
+    let total_ticks: f64 = clips.iter().map(|c| (c.highlight.end_tick - c.highlight.start_tick).max(1) as f64).sum();
+    let mut completed_ticks = 0.0;
     for (seq, &ci) in order.iter().enumerate() {
         let clip = &clips[ci];
         let h = &clip.highlight;
@@ -169,6 +171,16 @@ pub fn build_schedule(clips: &[RenderClip], o: &ActionsOptions) -> Vec<Scheduled
         push(end_tick, &mut slot, "mirv_streams record end".into());
         push(end_tick, &mut slot, format!("echo {MARK} seq {} of {n} end", seq + 1));
 
+        let clip_ticks = (h.end_tick - h.start_tick).max(1) as f64;
+        // At most 100 updates per clip, including long clips; each marker follows real demo time.
+        for step in 0..=100 {
+            let tick = start_tick + ((end_tick - start_tick) as i64 * step / 100) as i32;
+            let fraction = (completed_ticks + clip_ticks * step as f64 / 100.0) / total_ticks;
+            let mut slot = 10 + step as u32;
+            push(tick, &mut slot, format!("echo {MARK} progress {fraction:.6}"));
+        }
+        completed_ticks += clip_ticks;
+
         // 5. Quit one second after the last clip.
         if seq + 1 == n {
             let mut slot = 0;
@@ -249,6 +261,17 @@ mod tests {
                 assert!(volume.tick < start.tick);
             }
         }
+    }
+
+    #[test]
+    fn recording_progress_follows_duration_across_unequal_clips() {
+        let schedule = build_schedule(&[clip(10_000, 11_000, Some(3)), clip(20_000, 23_000, Some(3))], &opts(&RenderOptions::default()));
+        let values: Vec<(i32, f64)> = schedule.iter().filter_map(|a| a.cmd.strip_prefix("echo [demodesk] progress ").map(|p| (a.tick.floor() as i32, p.parse().unwrap()))).collect();
+        assert_eq!(values.first(), Some(&(10_000, 0.0)));
+        assert_eq!(values.last(), Some(&(23_000, 1.0)));
+        assert!(values.contains(&(11_000, 0.25)));
+        assert!(values.contains(&(20_000, 0.25)));
+        assert!(values.windows(2).all(|w| w[0].1 <= w[1].1));
     }
 
     #[test]

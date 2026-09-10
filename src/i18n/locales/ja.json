@@ -271,6 +271,7 @@
     "submitting": "送信中…"
   },
   "renders": {
+    "overallProgress": "全体の進捗（推定）",
     "status": {
       "queued": "待機中",
       "running": "レンダリング中",
@@ -281,7 +282,12 @@
     "stage": {
       "starting": "準備中",
       "recording": "録画中（CS2）",
-      "encoding": "エンコード中"
+      "encoding": "エンコード中",
+      "seeking": "シーク中",
+      "setup": "録画準備中",
+      "muxing": "映像と音声を結合中",
+      "merging": "クリップを結合中",
+      "fitting": "サイズ上限に圧縮中"
     },
     "waitingPrevious": "前のジョブの完了を待機中…",
     "starting": "準備中…",

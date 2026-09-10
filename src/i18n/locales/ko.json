@@ -271,6 +271,7 @@
     "submitting": "요청 중..."
   },
   "renders": {
+    "overallProgress": "전체 진행률 (추정)",
     "status": {
       "queued": "대기 중",
       "running": "렌더링 중",
@@ -281,7 +282,12 @@
     "stage": {
       "starting": "시작 중",
       "recording": "녹화 중 (CS2)",
-      "encoding": "인코딩 중"
+      "encoding": "인코딩 중",
+      "seeking": "구간 탐색 중",
+      "setup": "녹화 준비 중",
+      "muxing": "영상과 오디오 결합 중",
+      "merging": "클립 병합 중",
+      "fitting": "크기 제한에 맞춰 압축 중"
     },
     "waitingPrevious": "이전 작업을 기다리는 중...",
     "starting": "시작 중...",

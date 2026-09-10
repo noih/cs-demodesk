@@ -17,7 +17,7 @@ mod audio;
 use crate::model::{DemoInfo, Highlight};
 use actions::{build_schedule, steamid_to_account_id, ActionsOptions, Camera, RenderClip};
 use anyhow::{anyhow, Result};
-use encode::{bytes_to_mb, concat_clips, encode_to_size, mux_clip};
+use encode::{bytes_to_mb, concat_clips, encode_to_size_with_progress, mux_clip};
 use paths::{resolve_tool_paths, to_forward_slashes, PathOverrides, ToolPaths, IS_WINDOWS};
 use leftovers::{has_leftovers, remove_leftovers};
 use record::{collect_clip_outputs, run_recording_session, RecordSession};
@@ -141,7 +141,7 @@ impl Default for RenderOptions {
             width: 1920,
             height: 1080,
             codec: "libx264".into(),
-            crf: 23,
+            crf: 20,
             container: "mp4".into(),
             camera: Camera::Slot,
             death_notice_seconds: 5,
@@ -206,6 +206,7 @@ pub struct RenderJobInput<'a> {
     pub cancel: Arc<AtomicBool>,
     pub log: &'a mut dyn FnMut(String),
     pub stage: &'a mut dyn FnMut(&str),
+    pub progress: &'a mut dyn FnMut(f64),
 }
 
 fn safe_name(s: &str) -> String {
@@ -213,7 +214,7 @@ fn safe_name(s: &str) -> String {
 }
 
 pub fn render_highlights(input: RenderJobInput) -> Result<RenderResult> {
-    let RenderJobInput { demo, demo_path, mut highlights, output_dir, options: o, tools, cancel, log, stage } = input;
+    let RenderJobInput { demo, demo_path, mut highlights, output_dir, options: o, tools, cancel, log, stage, progress } = input;
     let (Some(cs2_dir), Some(cs2_exe), Some(hlae_exe), Some(hlae_dll), Some(ffmpeg_exe)) = (tools.cs2_dir, tools.cs2_exe, tools.hlae_exe, tools.hlae_dll, tools.ffmpeg_exe) else {
         return Err(anyhow!("environment not ready — check the settings page"));
     };
@@ -238,44 +239,51 @@ pub fn render_highlights(input: RenderJobInput) -> Result<RenderResult> {
 
     let schedule = build_schedule(
         &clips,
-        &ActionsOptions { render: &o, tick_rate: demo.tick_rate, output_dir: to_forward_slashes(&output_dir), ffmpeg_preset: encode::record_preset(&o.codec, o.crf) },
+        &ActionsOptions { render: &o, tick_rate: demo.tick_rate, output_dir: to_forward_slashes(&output_dir), ffmpeg_preset: encode::record_preset(&o.codec, if o.max_size_mb.is_some() { o.crf.min(16) } else { o.crf }) },
     );
     let total_seconds: f64 = highlights.iter().map(|h| (h.end_tick - h.start_tick) as f64 / demo.tick_rate).sum();
     let timeout_seconds = (180.0 + highlights.len() as f64 * 30.0 + total_seconds * 6.0) as u64;
 
-    stage("recording");
-    let mut session = RecordSession {
-        demo_path,
-        cs2_dir,
-        cs2_exe,
-        hlae_exe,
-        hlae_dll,
-        ffmpeg_exe: ffmpeg_exe.clone(),
-        output_dir: output_dir.clone(),
-        cfg_dir: tools.tools_dir.parent().map(|p| p.join("cfg")).unwrap_or_else(|| output_dir.join("cfg")),
-        show_game: o.show_game,
-        width: o.width,
-        height: o.height,
-        schedule,
-        timeout_seconds,
-        extra_launch_options: o.extra_launch_options.clone(),
-        cancel: cancel.clone(),
-        log,
-        stage,
-    };
-    run_recording_session(&mut session)?;
-    let log = session.log;
-    let stage = session.stage;
+    // ponytail: phase weights estimate work, not elapsed time; measure costs if adding time estimates.
+    let recording_end = if o.max_size_mb.is_some() { 0.70 } else { 0.90 };
+    let muxing_end = if o.max_size_mb.is_some() { 0.75 } else { 0.98 };
+    {
+        let mut recording_progress = |p: f64| progress(p * recording_end);
+        stage("recording");
+        let mut session = RecordSession {
+            demo_path,
+            cs2_dir,
+            cs2_exe,
+            hlae_exe,
+            hlae_dll,
+            ffmpeg_exe: ffmpeg_exe.clone(),
+            output_dir: output_dir.clone(),
+            cfg_dir: tools.tools_dir.parent().map(|p| p.join("cfg")).unwrap_or_else(|| output_dir.join("cfg")),
+            show_game: o.show_game,
+            width: o.width,
+            height: o.height,
+            schedule,
+            timeout_seconds,
+            extra_launch_options: o.extra_launch_options.clone(),
+            cancel: cancel.clone(),
+            log: &mut *log,
+            stage: &mut *stage,
+            progress: &mut recording_progress,
+        };
+        run_recording_session(&mut session)?;
+    }
 
     stage("encoding");
+    progress(recording_end);
     let outputs = collect_clip_outputs(&output_dir, clips.len(), &o.container);
-    let fit_to_size = |file: PathBuf, log: &mut dyn FnMut(String)| -> Result<PathBuf> {
-        let Some(mb) = o.max_size_mb else { return Ok(file) };
-        if std::fs::metadata(&file)?.len() <= (mb * 1024.0 * 1024.0) as u64 {
+    let fit_to_size = |file: PathBuf, log: &mut dyn FnMut(String), report: &mut dyn FnMut(f64)| -> Result<PathBuf> {
+        let Some(mb) = o.max_size_mb else { report(1.0); return Ok(file) };
+        if std::fs::metadata(&file)?.len() <= (mb * 1_000_000.0) as u64 {
+            report(1.0);
             return Ok(file);
         }
         let small = file.with_extension(format!("{}mb.mp4", mb as u32));
-        let r = encode_to_size(ffmpeg, &file, &small, mb, &o.codec, 128)?;
+        let r = encode_to_size_with_progress(ffmpeg, &file, &small, mb, &o.codec, o.audio_kbps, report)?;
         log(format!("{} → {} ({} kbps, {} MB)", file.file_name().unwrap().to_string_lossy(), small.file_name().unwrap().to_string_lossy(), r.bitrate_kbps, bytes_to_mb(r.bytes)));
         let _ = std::fs::remove_file(&file);
         Ok(small)
@@ -284,6 +292,7 @@ pub fn render_highlights(input: RenderJobInput) -> Result<RenderResult> {
     let mut result = RenderResult { final_video: None, final_bytes: None, clips: vec![] };
     let mut muxed: Vec<PathBuf> = vec![];
     for out in &outputs {
+        stage(&format!("encoding {}/{}: muxing", out.index + 1, outputs.len()));
         let h = &highlights[out.index];
         let tags = h.tags.iter().filter(|t| t.ends_with('k') || *t == "ace" || *t == "clutch").cloned().collect::<Vec<_>>().join("_");
         let name = format!("{:02}-r{}-{}-{}.{}", out.index + 1, h.round, safe_name(&h.player.name), if tags.is_empty() { "clip".into() } else { tags }, o.container);
@@ -294,14 +303,17 @@ pub fn render_highlights(input: RenderJobInput) -> Result<RenderResult> {
             continue;
         }
         mux_clip(ffmpeg, out, &dest, o.audio_kbps)?;
+        progress(recording_end + (muxing_end - recording_end) * (out.index + 1) as f64 / outputs.len() as f64);
         muxed.push(dest.clone());
         result.clips.push(RenderedClip { highlight_id: h.id.clone(), title: h.title.clone(), file: Some(dest), bytes: None });
     }
     if o.merge && muxed.len() > 1 {
         // One video: the size limit applies to the joined file; the per-clip files are intermediates.
         let merged = output_dir.join(format!("highlights.{}", o.container));
+        stage("encoding: merging");
         concat_clips(ffmpeg, &muxed, &merged)?;
-        let merged = fit_to_size(merged, log)?;
+        stage("encoding: fitting");
+        let merged = fit_to_size(merged, log, &mut |p| progress(muxing_end + (0.99 - muxing_end) * p))?;
         result.final_bytes = Some(std::fs::metadata(&merged)?.len());
         result.final_video = Some(merged);
         for c in &mut result.clips {
@@ -312,12 +324,16 @@ pub fn render_highlights(input: RenderJobInput) -> Result<RenderResult> {
             }
         }
     } else {
-        for c in &mut result.clips {
+        let mut completed_seconds = 0.0;
+        for (i, c) in result.clips.iter_mut().enumerate() {
+            let seconds = (highlights[i].end_tick - highlights[i].start_tick) as f64 / demo.tick_rate;
             if let Some(file) = c.file.take() {
-                let fitted = fit_to_size(file, log)?;
+                stage(&format!("encoding {}/{}: fitting", i + 1, highlights.len()));
+                let fitted = fit_to_size(file, log, &mut |p| progress(muxing_end + (0.99 - muxing_end) * (completed_seconds + seconds * p) / total_seconds.max(0.001)))?;
                 c.bytes = Some(std::fs::metadata(&fitted)?.len());
                 c.file = Some(fitted);
             }
+            completed_seconds += seconds;
         }
     }
     if !o.keep_raw_files {

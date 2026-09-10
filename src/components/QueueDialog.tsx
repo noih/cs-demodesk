@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Badge, Button, Dialog, Flex, IconButton, Text } from '@radix-ui/themes';
 import { useTranslation } from 'react-i18next';
 import { api, errorText, type DemoMeta, type RenderJob } from '../api.ts';
-import { fmtDateTime } from '../i18n/index.ts';
+import { fmtDateTime, translateRenderStage } from '../i18n/index.ts';
 
 type ClipInfo = { titles: Map<string, string>; error?: string };
 type LoadClips = (demoId: string) => Promise<ClipInfo>;
@@ -53,7 +53,7 @@ function QueueList({ jobs, demos, onSelect }: { jobs: RenderJob[]; demos: DemoMe
         <Text weight="medium" className="queue-demo-name">{demo?.mapName ?? demo?.name ?? job.demoId}</Text>
       </Flex>
       <Text as="p" size="1" color="gray" className="queue-meta">{fmtDateTime(job.createdAt)} · {t('renders.summary', { n: job.highlightIds.length })} · {job.options.height}p{job.options.fps}</Text>
-      {job.stage && <Text as="p" size="2" className="queue-stage">{job.stage.replace(/\b(starting|recording|encoding)\b/g, stage => t('renders.stage.' + stage, { defaultValue: stage }))}</Text>}
+      {job.stage && <Text as="p" size="2" className="queue-stage">{translateRenderStage(job.stage)}</Text>}
       <QueueClips job={job} loadClips={loadClips} />
       <Flex gap="2" wrap="wrap" justify="end" className="queue-actions">
         <Button size="2" variant="outline" disabled={!demo} onClick={() => onSelect(job.demoId)}>{t('ui.goToDemo')}</Button>
