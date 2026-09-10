@@ -6,6 +6,8 @@ edition.workspace = true
 description = "CS DemoDesk core — CS2 demo parsing, highlight detection, statistics and HLAE rendering (no Tauri dependency)"
 
 [dependencies]
+csgoproto = { path = "../../vendor/demoparser/csgoproto" }
+prost = "0.13.3"
 parser = { path = "../../vendor/demoparser/parser" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

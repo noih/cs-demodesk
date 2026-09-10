@@ -134,6 +134,9 @@ pub struct DemoMeta {
     pub path: String,
     pub bytes: u64,
     pub mtime_ms: f64,
+    pub created_ms: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub match_time_ms: Option<f64>,
     pub status: DemoStatus,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
@@ -146,6 +149,10 @@ pub struct DemoMeta {
 }
 
 impl DemoMeta {
+    pub fn date_ms(&self) -> f64 {
+        if self.status == DemoStatus::Parsed { self.match_time_ms.unwrap_or(self.created_ms) } else { self.created_ms }
+    }
+
     /// Same size and (within a millisecond) same mtime: the file has not changed.
     pub fn same_file(&self, bytes: u64, mtime_ms: f64) -> bool {
         self.bytes == bytes && (self.mtime_ms - mtime_ms).abs() < 1.0
@@ -589,5 +596,49 @@ mod tests {
         for value in ["../clip.mp4", "nested/../../clip.mp4", "", "/absolute/clip.mp4"] {
             assert!(!safe_relative(Path::new(value)), "{value}");
         }
+    }
+}
+
+
+// Valve's .dem.info carries a Unix match date; demo ticks are not wall-clock time.
+pub fn match_time_ms(path: &Path) -> Option<f64> {
+    use prost::Message;
+    use std::io::Read;
+    let mut info_path = path.as_os_str().to_os_string();
+    info_path.push(".info");
+    let mut bytes = Vec::new();
+    std::fs::File::open(Path::new(&info_path)).ok()?.take(4 * 1024 * 1024 + 1).read_to_end(&mut bytes).ok()?;
+    if bytes.len() > 4 * 1024 * 1024 { return None; }
+    let info = csgoproto::CDataGccStrike15V2MatchInfo::decode(bytes.as_slice()).ok()?;
+    info.matchtime.filter(|time| *time > 0).map(|time| f64::from(time) * 1000.0)
+}
+
+#[cfg(test)]
+mod demo_date_tests {
+    use super::*;
+    use prost::Message;
+
+    #[test]
+    fn match_metadata_and_mixed_dates() {
+        let dir = tempfile::tempdir().unwrap();
+        let demo = dir.path().join("match.dem");
+        let info_path = dir.path().join("match.dem.info");
+        assert_eq!(match_time_ms(&demo), None);
+        let info = csgoproto::CDataGccStrike15V2MatchInfo { matchtime: Some(1_700_000_000), ..Default::default() };
+        std::fs::write(&info_path, info.encode_to_vec()).unwrap();
+        assert_eq!(match_time_ms(&demo), Some(1_700_000_000_000.0));
+        std::fs::write(&info_path, [255]).unwrap();
+        assert_eq!(match_time_ms(&demo), None);
+        let meta = |id: &str, status: &str, created: f64, matched: Option<f64>| -> DemoMeta {
+            serde_json::from_value(serde_json::json!({
+                "id": id, "name": id, "path": "", "bytes": 0, "mtimeMs": 9999,
+                "createdMs": created, "matchTimeMs": matched, "status": status
+            })).unwrap()
+        };
+        let mut demos = vec![meta("old-match", "parsed", 500.0, Some(100.0)),
+            meta("new-file", "new", 300.0, Some(900.0)), meta("new-match", "parsed", 50.0, Some(400.0)),
+            meta("no-date", "parsed", 200.0, None)];
+        demos.sort_by(|a,b| b.date_ms().total_cmp(&a.date_ms()));
+        assert_eq!(demos.iter().map(|d| d.id.as_str()).collect::<Vec<_>>(), ["new-match", "new-file", "no-date", "old-match"]);
     }
 }

@@ -1,3 +1,4 @@
+import { demoDate, compareDemoDates } from '../demoDate.ts';
 import { useAppTheme } from '../AppTheme.tsx';
 import { Spinner } from './Spinner.tsx';
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -82,11 +83,11 @@ export function DemoList({
         const hay = [d.name, d.mapName ?? '', ...(d.summary?.players ?? [])].join(' ').toLowerCase();
         if (!words.every((w) => hay.includes(w))) return false;
       }
-      const day = dayOf(new Date(d.mtimeMs));
+      const day = dayOf(new Date(demoDate(d)));
       if (from && day < from) return false;
       if (to && day > to) return false;
       return true;
-    });
+    }).sort(compareDemoDates);
   }, [demos, query, from, to]);
 
   const virtualizer = useVirtualizer({
@@ -209,7 +210,7 @@ export function DemoList({
                       <span className="demo-name"><Text weight="bold" truncate>{d.mapName ?? t('common.unknown')}</Text>
                         {d.summary && <span className="demo-score"><span>{d.summary.scoreA}</span><i>:</i><span>{d.summary.scoreB}</span></span>}
                       </span>
-                      <span className="demo-date mono">{format(d.mtimeMs, 'yyyy-MM-dd HH:mm')}</span>
+                      <span className="demo-date mono">{format(demoDate(d), 'yyyy-MM-dd HH:mm')}</span>
                       <span className="demo-states">
                         <span>{t('demoList.videos', { n: exports?.videos ?? 0 })}</span>
                         <span className="demo-job-states">

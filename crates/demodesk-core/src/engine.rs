@@ -257,20 +257,22 @@ impl Engine {
     /// Rescan the file system and merge with the in-memory parse state.
     pub fn list_demos(self: &Arc<Self>) -> Vec<DemoMeta> {
         // Everything that touches the disk happens before the lock.
-        let scanned: Vec<(PathBuf, u64, f64)> = self
+        let scanned: Vec<(PathBuf, u64, f64, f64, Option<f64>)> = self
             .demo_paths()
             .into_iter()
             .filter_map(|path| {
                 let st = std::fs::metadata(&path).ok()?;
                 let mtime_ms = st.modified().ok().and_then(|m| m.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_millis() as f64).unwrap_or(0.0);
-                Some((path, st.len(), mtime_ms))
+                let created_ms = st.created().ok().and_then(|m| m.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_millis() as f64).unwrap_or(mtime_ms);
+                let match_time_ms = crate::store::match_time_ms(&path);
+                Some((path, st.len(), mtime_ms, created_ms, match_time_ms))
             })
             .collect();
-        let keep: HashSet<String> = scanned.iter().map(|(p, _, _)| Self::demo_id(p)).collect();
+        let keep: HashSet<String> = scanned.iter().map(|(p, _, _, _, _)| Self::demo_id(p)).collect();
         let list = {
             let mut demos = self.demos.lock().unwrap();
             let mut stale: Vec<String> = vec![];
-            for (path, bytes, mtime_ms) in scanned {
+            for (path, bytes, mtime_ms, created_ms, match_time_ms) in scanned {
                 let id = Self::demo_id(&path);
                 let entry = demos.entry(id.clone()).or_insert_with(|| {
                     // A result stored by an earlier session counts as parsed (loaded lazily).
@@ -283,6 +285,8 @@ impl Engine {
                             path: path.to_string_lossy().to_string(),
                             bytes,
                             mtime_ms,
+                            created_ms,
+                            match_time_ms,
                             status: if failure.is_some() { DemoStatus::Error } else if stored.is_some() { DemoStatus::Parsed } else { DemoStatus::New },
                             error: failure,
                             map_name: stored.as_ref().map(|s| s.map_name.clone()),
@@ -304,6 +308,8 @@ impl Engine {
                 }
                 entry.meta.bytes = bytes;
                 entry.meta.mtime_ms = mtime_ms;
+                entry.meta.created_ms = created_ms;
+                entry.meta.match_time_ms = match_time_ms;
             }
             let parsing = self.parsing.lock().unwrap();
             demos.retain(|id, _| keep.contains(id) || parsing.contains(id));
@@ -311,7 +317,7 @@ impl Engine {
                 self.store.delete_parsed(id);
             }
             let mut list: Vec<DemoMeta> = demos.values().map(|e| e.meta.clone()).collect();
-            list.sort_by(|a, b| b.mtime_ms.total_cmp(&a.mtime_ms));
+            list.sort_by(|a, b| b.date_ms().total_cmp(&a.date_ms()).then_with(|| a.id.cmp(&b.id)));
             list
         };
         self.store.prune_parsed(&keep);

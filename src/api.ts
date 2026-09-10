@@ -191,6 +191,8 @@ export interface DemoMeta {
   path: string;
   bytes: number;
   mtimeMs: number;
+  createdMs: number;
+  matchTimeMs?: number;
   status: DemoStatus;
   error?: string;
   mapName?: string;
