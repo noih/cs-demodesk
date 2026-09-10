@@ -148,7 +148,7 @@ export function DemoList({
         </Flex>
         <Popover.Root>
           <Tooltip delayDuration={150} content={t('ui.filter')}><Popover.Trigger><IconButton variant="ghost" className="filter-trigger" data-filtered={filtered} aria-label={t('ui.filter')}><i aria-hidden="true" className={'bi app-icon ' + (filtered ? 'bi-funnel-fill' : 'bi-funnel')} /></IconButton></Popover.Trigger></Tooltip>
-          <Popover.Content width="320px" align="start"><Flex direction="column" gap="3">
+          <Popover.Content width="max-content" align="start"><Flex direction="column" gap="3">
         <TextField.Root size="2" placeholder={t('demoList.searchPlaceholder')} value={query} onChange={(e) => setQuery(e.target.value)}>
           <TextField.Slot>
             <i aria-hidden="true" className="bi bi-search app-icon"  />

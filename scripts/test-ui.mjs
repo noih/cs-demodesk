@@ -422,6 +422,17 @@ try {
     return result;
   });
   assert.deepEqual(dateOverflow, {fits:true,whiteSpace:'nowrap',overflow:'hidden',ellipsis:'ellipsis'}, 'Narrow date labels stay on one line inside the button');
+  for (const label of ['From', 'To']) {
+    const fits = await page.getByRole('button', {name:label,exact:true}).evaluate(button => {
+      const text = button.querySelector('[title]');
+      const original = text.textContent;
+      text.textContent = '2026/09/10';
+      const fits = text.scrollWidth <= text.clientWidth;
+      text.textContent = original;
+      return fits;
+    });
+    assert.ok(fits, 'Date filter expands to display a complete date');
+  }
   await page.getByRole('textbox').fill('   ');
   assert.equal(await page.locator('.filter-trigger').getAttribute('data-filtered'), 'false');
   await page.getByRole('textbox').fill('no matches');

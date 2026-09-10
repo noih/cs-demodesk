@@ -24,7 +24,7 @@ export function DateField({ value, onChange, label, min, max }: { value: string;
   return (
     <Popover.Root open={open} onOpenChange={setOpen}>
       <Popover.Trigger>
-        <Button size="2" variant="surface" color="gray" aria-label={label} style={{ flex: 1, minWidth: 0 }}>
+        <Button size="2" variant="surface" color="gray" aria-label={label} style={{ flex: 1, minWidth: 'max-content' }}>
           <i aria-hidden="true" className="bi bi-calendar3 app-icon" style={{ flexShrink: 0 }} />
           <Text truncate title={text}>{text}</Text>
         </Button>
