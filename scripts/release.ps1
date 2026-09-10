@@ -44,7 +44,7 @@ Run "npm version $Version --no-git-tag-version --allow-same-version"
 Set-Text src-tauri/tauri.conf.json ((Get-Content src-tauri/tauri.conf.json -Raw) -replace '"version": "[^"]+"', "`"version`": `"$Version`"")
 
 Step 'Running checks'
-& "/test-store-version.ps1"
+& "$PSScriptRoot/test-store-version.ps1"
 Run 'cargo test -p demodesk-core'
 Run 'npm run build'
 Run 'cargo test -p demodesk --lib data_directory::tests'
