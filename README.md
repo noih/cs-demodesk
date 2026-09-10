@@ -17,6 +17,8 @@ Both editions provide the same demo analysis, highlight video export, and 2D rep
 
 Review match results and player performance across combat, utility and round situations. Comparison charts, round trends and recoil plots help explore the match from different angles.
 
+![Recoil trajectories for AK-47, M4A4, and M4A1-S](docs/images/en/03-combat-analysis.png)
+
 ### Highlight videos
 
 - Highlights (multi-kills, clutches, ninja defuses) are detected and scored automatically

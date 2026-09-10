@@ -10,6 +10,8 @@ Counter-Strike 2 demo 的 Windows 桌面工具（單一可攜 `.exe`）：從一
 
 整理比賽結果與玩家表現，涵蓋交戰、道具使用與各種回合情境，並透過比較圖表、回合趨勢及壓槍軌跡，從不同角度回顧比賽。
 
+![AK-47、M4A4 與 M4A1-S 的壓槍軌跡](docs/images/zh-TW/03-combat-analysis.png)
+
 ### 高光影片
 
 - 自動偵測並評分高光片段（多殺、clutch、ninja defuse）
