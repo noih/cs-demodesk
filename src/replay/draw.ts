@@ -89,16 +89,19 @@ function place(m: MapAssets, lay: Layout, x: number, y: number, z: number): [num
   return [ox + ix * lay.k, oy + iy * lay.k, li];
 }
 
-export function draw(ctx: CanvasRenderingContext2D, width: number, height: number, m: MapAssets, images: HTMLImageElement[], state: TickState, tg: DrawToggles, view: View, focus?: number, labelSize = 14, annotations: Annotation[] = []) {
+export function draw(ctx: CanvasRenderingContext2D, width: number, height: number, m: MapAssets, images: ImageBitmap[], state: TickState, tg: DrawToggles, view: View, focus?: number, labelSize = 14, annotations: Annotation[] = []) {
   ctx.clearRect(0, 0, width, height);
   const lay = layout(width, height, m.layers.length, view);
   const k = lay.k;
-  // radar images
+  // Smooth radar enlargement without affecting other canvas elements.
+  ctx.save();
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
   images.forEach((img, i) => {
     const [ox, oy] = lay.origins[i]!;
-    if (img.complete && img.naturalWidth > 0) ctx.drawImage(img, ox, oy, lay.side, lay.side);
-
+    if (img.width > 0) ctx.drawImage(img, ox, oy, lay.side, lay.side);
   });
+  ctx.restore();
   drawAnnotations(ctx, lay, annotations);
   m.layers.forEach((_, i) => {
     const [ox, oy] = lay.origins[i]!;

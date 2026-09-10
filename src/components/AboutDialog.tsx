@@ -9,6 +9,7 @@ const THIRD_PARTY: Array<{ name: string; repo: string; license: string; url: str
   { name: 'HLAE', repo: 'advancedfx/advancedfx', license: 'custom', url: 'https://github.com/advancedfx/advancedfx' },
   { name: 'FFmpeg', repo: 'BtbN/FFmpeg-Builds', license: 'GPL', url: 'https://github.com/BtbN/FFmpeg-Builds' },
   { name: 'Source 2 Viewer', repo: 'ValveResourceFormat/ValveResourceFormat', license: 'MIT', url: 'https://github.com/ValveResourceFormat/ValveResourceFormat' },
+  { name: 'FidelityFX CAS', repo: 'GPUOpen-Effects/FidelityFX-CAS', license: 'MIT', url: 'https://github.com/GPUOpen-Effects/FidelityFX-CAS' },
   { name: 'demoparser', repo: 'LaihoE/demoparser', license: 'MIT', url: 'https://github.com/LaihoE/demoparser' },
 ];
 

@@ -4,7 +4,7 @@ import { Spinner } from './Spinner.tsx';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Box, Button, Callout, Flex, IconButton, Select, Text, Tooltip } from '@radix-ui/themes';
 import { useTranslation } from 'react-i18next';
-import i18n from '../i18n/index.ts';
+import { loadRadarImages } from '../replay/radar.ts';
 import { api, errorText, type DemoMeta, type MapAssets, type ParsedDemo, type RoundInfo, type Team } from '../api.ts';
 import { Clock, layerOf, Replay, roundAt, toImage, type TickState } from '../replay/engine.ts';
 import { DEFAULT_TOGGLES, draw, layout, teamColor, type DrawToggles, type View } from '../replay/draw.ts';
@@ -16,7 +16,7 @@ import { ReplayOptions } from './replay/ReplayOptions.tsx';
 interface Loaded {
   replay: Replay;
   map: MapAssets;
-  images: HTMLImageElement[];
+  images: ImageBitmap[];
 }
 
 const DRAWING_COLORS = [['pink', '#ff38b8'], ['red', '#ff4545'], ['violet', '#8759ff'], ['ocean', '#1565c0'], ['green', '#00c66b'], ['brown', '#b08060'], ['white', '#ffffff'], ['gray', '#858585']] as const;
@@ -25,20 +25,11 @@ const SPEEDS = ['0.5', '1', '2'];
 const FOCUS_ZOOM = 1.5;
 const ZOOM_STEP = 1.3;
 
-async function load(meta: DemoMeta, parsed: ParsedDemo): Promise<Loaded> {
+async function load(meta: DemoMeta, parsed: ParsedDemo, signal: AbortSignal): Promise<Loaded> {
   const [data, map, kills] = await Promise.all([api.replay(meta.id), api.mapAssets(parsed.info.mapName), api.kills(meta.id)]);
-  const images = await Promise.all(
-    map.layers.map(
-      (l) =>
-        new Promise<HTMLImageElement>((resolve, reject) => {
-          const img = new Image();
-          img.onload = () => resolve(img);
-          img.onerror = () => reject(new Error(i18n.t('replay.imageLoadFailed', { file: l.image })));
-          img.src = api.fileSrc(l.path);
-        }),
-    ),
-  );
-  return { replay: new Replay(data, parsed, kills), map, images };
+  const replay = new Replay(data, parsed, kills);
+  const images = await loadRadarImages(map.layers.map(layer => api.fileSrc(layer.path)), signal);
+  return { replay, map, images };
 }
 
 export function ReplayTab({ meta, parsed, onSetup }: { meta: DemoMeta; parsed: ParsedDemo; onSetup: () => void }) {
@@ -48,13 +39,20 @@ export function ReplayTab({ meta, parsed, onSetup }: { meta: DemoMeta; parsed: P
   const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
-    let alive = true;
+    const controller = new AbortController();
+    let resources: Loaded | undefined;
     setError(undefined);
-    load(meta, parsed)
-      .then((l) => alive && setLoaded(l))
-      .catch((e) => alive && setError(errorText(e)));
+    setLoaded(undefined);
+    load(meta, parsed, controller.signal)
+      .then((l) => {
+        if (controller.signal.aborted) { l.images.forEach(image => image.close()); return; }
+        resources = l;
+        setLoaded(l);
+      })
+      .catch((e) => !controller.signal.aborted && setError(errorText(e)));
     return () => {
-      alive = false;
+      controller.abort();
+      resources?.images.forEach(image => image.close());
     };
   }, [meta.id, meta.parsedAt, parsed, attempt]);
 
@@ -215,7 +213,8 @@ function Player({ loaded }: { loaded: Loaded }) {
             v.panX = w / 2 - (ox + ix * lay.k);
             v.panY = h / 2 - (oy + iy * lay.k);
           }
-          draw(ctx, w, h, map, images, s, togglesRef.current, viewRef.current, f, labelSizeRef.current, draft.current ? [...annotations.current, draft.current] : annotations.current);          if (now - lastUi > 100) {
+          draw(ctx, w, h, map, images, s, togglesRef.current, viewRef.current, f, labelSizeRef.current, draft.current ? [...annotations.current, draft.current] : annotations.current);
+          if (now - lastUi > 100) {
             lastUi = now;
             setState(s);
           }

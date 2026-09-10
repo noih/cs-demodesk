@@ -1,3 +1,4 @@
+import { sharpenCas } from '../src/replay/cas.ts';
 import { draw, DEFAULT_TOGGLES } from '../src/replay/draw.ts';
 import assert from 'node:assert/strict';
 import test from 'node:test';
@@ -152,9 +153,23 @@ test('annotations sit directly above the radar and below replay effects', () => 
   }});
   const map={posX:0,posY:0,scale:1,layers:[{altitudeMin:-100,altitudeMax:100}]};
   const state={tick:1,players:[],grenades:[],shots:[],deaths:[],effects:[{kind:'smoke',x:100,y:100,z:0,start:0,end:10}]};
-  draw(ctx,500,500,map,[{complete:true,naturalWidth:1024}],state,DEFAULT_TOGGLES,{zoom:1,panX:0,panY:0},undefined,14,[{tool:'pen',color:'#ff70d4',layer:0,points:[[0,0],[200,200]]}]);
+  draw(ctx,500,500,map,[{width:2048,height:2048}],state,DEFAULT_TOGGLES,{zoom:1,panX:0,panY:0},undefined,14,[{tool:'pen',color:'#ff70d4',layer:0,points:[[0,0],[200,200]]}]);
   const radar=calls.findIndex(c=>c.key==='drawImage');
   const ink=calls.findIndex(c=>c.key==='stroke' && c.stroke==='#ff70d4');
   const smoke=calls.findIndex(c=>c.key==='arc');
   assert.ok(radar>=0 && radar<ink && ink<smoke,'Radar → annotation → smoke');
+});
+
+test('CAS preserves flat colors and alpha while increasing a soft edge contrast', () => {
+  const flat = new Uint8ClampedArray([80,120,160,255,80,120,160,128,80,120,160,255]);
+  assert.deepEqual(sharpenCas(flat,3,1),flat);
+  assert.deepEqual(sharpenCas(flat.slice(0,4),1,1),flat.slice(0,4));
+  const ramp = new Uint8ClampedArray([64,64,64,255,64,64,64,255,100,100,100,255,160,160,160,255,192,192,192,255,192,192,192,255]);
+  const result = sharpenCas(ramp,6,1);
+  assert.ok(result[8] < ramp[8] && result[12] > ramp[12], 'Soft transition gains contrast');
+  assert.equal(result[0],64);
+  assert.equal(result[20],192);
+  const transparent = new Uint8ClampedArray([255,0,255,0,80,120,160,255]);
+  assert.deepEqual(sharpenCas(transparent,2,1),transparent,'Hidden RGB cannot contaminate a visible border');
+  assert.throws(()=>sharpenCas(flat,1,1));
 });

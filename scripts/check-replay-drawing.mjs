@@ -6,9 +6,14 @@ export async function checkReplayDrawing(page) {
     const original = window.__TAURI_INTERNALS__.invoke;
     const rounds = [1, 2].map((round, i) => ({round, startTick:i * 6400, freezeEndTick:i * 6400 + 128, endTick:i * 6400 + 6200, officiallyEndedTick:(i + 1) * 6400 - 1, roster:{}}));
     const data = {schemaVersion:3,tickRate:64,step:4,firstTick:0,lastTick:12799,players:[],weapons:[''],events:[],frames:[{t:0,p:[],g:[]},{t:12799,p:[],g:[]}]};
+    const radar = document.createElement('canvas');
+    radar.width = radar.height = 1024;
+    radar.getContext('2d').fillStyle = '#263440';
+    radar.getContext('2d').fillRect(0, 0, 1024, 1024);
+    const radarUrl = radar.toDataURL();
     window.__TAURI_INTERNALS__.convertFileSrc = path => path === 'drawing-replay'
       ? 'data:application/json,' + encodeURIComponent(JSON.stringify(data))
-      : 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024"><rect width="1024" height="1024" fill="#263440"/></svg>');
+      : radarUrl;
     window.__TAURI_INTERNALS__.invoke = async (cmd,args) => {
       if (cmd === 'get_replay') return {path:'drawing-replay',bytes:100};
       if (cmd === 'get_map_assets') return {posX:0,posY:0,scale:1,layers:['Upper','Lower'].map((name,i)=>({name,path:name,image:name,altitudeMin:i*100,altitudeMax:(i+1)*100}))};
@@ -117,8 +122,19 @@ export async function checkReplayDrawing(page) {
     window.cancelAnimationFrame=id=>{frames.delete(id);cancel(id);};
     window.addEventListener=(type,listener,options)=>{if(type==='keydown')keys.add(listener);add(type,listener,options);};
     window.removeEventListener=(type,listener,options)=>{if(type==='keydown')keys.delete(listener);remove(type,listener,options);};
-    window.replayResources=()=>({frames:frames.size,keys:keys.size});
+    const NativeWorker = window.Worker;
+    let workers = 0;
+    const bitmaps = [];
+    window.Worker = class extends NativeWorker {
+      constructor(...args) {
+        super(...args); workers++;
+        this.addEventListener('message', ({data}) => { if (data.images) bitmaps.push(...data.images); });
+      }
+      terminate() { if (!this.stopped) { this.stopped = true; workers--; } super.terminate(); }
+    };
+    window.replayResources=()=>({frames:frames.size,keys:keys.size,workers,bitmaps:bitmaps.filter(image=>image.width>0).length});
     window.restoreReplayTracking=()=>{
+      window.Worker=NativeWorker;
       window.requestAnimationFrame=request;window.cancelAnimationFrame=cancel;
       window.addEventListener=add;window.removeEventListener=remove;
       delete window.replayResources;delete window.restoreReplayTracking;
@@ -136,11 +152,11 @@ export async function checkReplayDrawing(page) {
       await page.getByRole('tab').filter({hasText:'Players'}).click();
       await canvas.waitFor({state:'detached'});
       await page.waitForFunction(()=>{const r=window.replayResources();return r.frames===0 && r.keys===0;});
-      assert.deepEqual(await page.evaluate(()=>window.replayResources()),{frames:0,keys:0},'Leaving 2D releases animation callbacks and key listeners');
+      assert.deepEqual(await page.evaluate(()=>window.replayResources()),{frames:0,keys:0,workers:0,bitmaps:0},'Leaving 2D releases animation callbacks, key listeners, workers and bitmaps');
       await cdp.send('HeapProfiler.collectGarbage');
       heaps.push((await cdp.send('Runtime.getHeapUsage')).usedSize);
     }
-    console.log('Replay cleanup: 6 drawing/unmount cycles, no remaining RAF or key listeners; post-GC heap bytes:',heaps.join(', '));
+    console.log('Replay cleanup: 6 drawing/unmount cycles, no remaining RAF, key listeners, radar workers or bitmaps; post-GC heap bytes:',heaps.join(', '));
   } finally {
     await page.evaluate(()=>window.restoreReplayTracking());
     await cdp.detach();
