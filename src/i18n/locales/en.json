@@ -319,6 +319,23 @@
     "empty": "No exported videos yet."
   },
   "replay": {
+    "drawing": {
+      "brown": "Brown",
+      "gray": "Gray",
+      "ocean": "Ocean blue",
+      "ellipse": "Ellipse",
+      "rectangle": "Rectangle",
+      "toggle": "Annotate",
+      "pen": "Pen",
+      "arrow": "Arrow",
+      "undo": "Undo",
+      "clear": "Clear",
+      "pink": "Magenta",
+      "red": "Red",
+      "violet": "Violet",
+      "green": "Green",
+      "white": "White"
+    },
     "imageLoadFailed": "Cannot load {{file}}",
     "downloadTools": "Download tools",
     "preparing": "Preparing",

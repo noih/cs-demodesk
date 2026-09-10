@@ -315,6 +315,23 @@
     "empty": "还没有输出的视频。"
   },
   "replay": {
+    "drawing": {
+      "brown": "棕色",
+      "gray": "灰色",
+      "ocean": "海洋深蓝",
+      "ellipse": "圆形",
+      "rectangle": "矩形",
+      "toggle": "手绘标注",
+      "pen": "画笔",
+      "arrow": "箭头",
+      "undo": "撤销",
+      "clear": "清空",
+      "pink": "桃红色",
+      "red": "红色",
+      "violet": "深紫色",
+      "green": "绿色",
+      "white": "白色"
+    },
     "imageLoadFailed": "无法加载 {{file}}",
     "downloadTools": "下载工具",
     "preparing": "准备中",

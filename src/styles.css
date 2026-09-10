@@ -675,3 +675,36 @@ video {
   transform: translateY(-50%);
   border-color: transparent transparent transparent #fff;
 }
+
+.replay-drawing-color { width: 24px; height: 24px; border: 2px solid #111; border-radius: 50%; cursor: pointer; }
+.replay-drawing-color[aria-pressed="true"] { outline: 2px solid var(--app-text); outline-offset: 2px; }
+.replay-drawing-color:focus-visible { outline: 3px solid var(--app-accent); outline-offset: 3px; }
+
+.replay-drawing-toolbar {
+  position: absolute;
+  top: 88px;
+  left: 12px;
+  max-height: calc(100% - 136px);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 6px;
+  background: var(--app-panel);
+  border: 1px solid var(--app-border);
+  border-radius: var(--radius-3);
+  box-shadow: 0 2px 8px #0004;
+}
+.replay-drawing-toolbar > button { flex-shrink: 0; }
+.replay-drawing-tools {
+  display: grid;
+  grid-template-columns: repeat(2, 24px);
+  gap: 8px;
+  padding: 5px;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+
+.replay-drawing-toolbar .rt-IconButton[aria-pressed="true"],
+.replay-drawing-tools .rt-IconButton:not([aria-pressed]):not(:disabled) { background: var(--app-accent); color: var(--app-accentText); box-shadow: none; }

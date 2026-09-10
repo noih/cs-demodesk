@@ -315,6 +315,23 @@
     "empty": "書き出した動画はまだありません。"
   },
   "replay": {
+    "drawing": {
+      "brown": "茶色",
+      "gray": "灰色",
+      "ocean": "オーシャンブルー",
+      "ellipse": "楕円",
+      "rectangle": "四角形",
+      "toggle": "書き込み",
+      "pen": "ペン",
+      "arrow": "矢印",
+      "undo": "元に戻す",
+      "clear": "消去",
+      "pink": "マゼンタ",
+      "red": "赤",
+      "violet": "すみれ色",
+      "green": "緑",
+      "white": "白"
+    },
     "imageLoadFailed": "{{file}} を読み込めません",
     "downloadTools": "ツールをダウンロード",
     "preparing": "準備中",

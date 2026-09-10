@@ -8,6 +8,7 @@ import i18n from '../i18n/index.ts';
 import { api, errorText, type DemoMeta, type MapAssets, type ParsedDemo, type RoundInfo, type Team } from '../api.ts';
 import { Clock, layerOf, Replay, roundAt, toImage, type TickState } from '../replay/engine.ts';
 import { DEFAULT_TOGGLES, draw, layout, teamColor, type DrawToggles, type View } from '../replay/draw.ts';
+import { annotationPoint, type Annotation, type DrawingTool } from '../replay/annotations.ts';
 import { TeamPanel } from './replay/TeamPanel.tsx';
 import { RoundTimeline } from './replay/RoundTimeline.tsx';
 import { ReplayOptions } from './replay/ReplayOptions.tsx';
@@ -18,6 +19,7 @@ interface Loaded {
   images: HTMLImageElement[];
 }
 
+const DRAWING_COLORS = [['pink', '#ff38b8'], ['red', '#ff4545'], ['violet', '#8759ff'], ['ocean', '#1565c0'], ['green', '#00c66b'], ['brown', '#b08060'], ['white', '#ffffff'], ['gray', '#858585']] as const;
 const SPEEDS = ['0.5', '1', '2'];
 /** zoom while following a player */
 const FOCUS_ZOOM = 1.5;
@@ -106,19 +108,39 @@ function Player({ loaded }: { loaded: Loaded }) {
   const [focus, setFocus] = useState<number>();
   const [panelOpen, setPanelOpen] = useState(true);
   const [state, setState] = useState<TickState>(() => replay.stateAt(clockRef.current.tick));
+  const annotations = useRef<Annotation[]>([]);
+  const draft = useRef<Annotation | null>(null);
+  const annotationRound = useRef(state.round?.round);
+  const [drawing, setDrawing] = useState(false);
+  const [tool, setTool] = useState<DrawingTool>('pen');
+  const [color, setColor] = useState<string>(DRAWING_COLORS[0][1]);
+  const [annotationCount, setAnnotationCount] = useState(0);
+  const clearAnnotations = useCallback(() => {
+    annotations.current = [];
+    draft.current = null;
+    setAnnotationCount(0);
+  }, []);
+  const syncAnnotationRound = useCallback((round: number | undefined) => {
+    if (annotationRound.current === round) return;
+    annotationRound.current = round;
+    clearAnnotations();
+  }, [clearAnnotations]);
   togglesRef.current = toggles;
   focusRef.current = focus;
 
   const seek = useCallback(
     (tick: number) => {
       clockRef.current.seek(tick);
-      setState(replay.stateAt(clockRef.current.tick));
+      const next = replay.stateAt(clockRef.current.tick);
+      syncAnnotationRound(next.round?.round);
+      setState(next);
     },
-    [replay],
+    [replay, syncAnnotationRound],
   );
   const play = useCallback((on: boolean) => {
     const c = clockRef.current;
     if (on && c.tick >= c.last) c.seek(c.first);
+    if (on) { setDrawing(false); draft.current = null; }
     c.playing = on;
     setPlaying(on);
   }, []);
@@ -182,6 +204,7 @@ function Player({ loaded }: { loaded: Loaded }) {
         if (ctx && w > 0 && h > 0) {
           ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
           const s = replay.stateAt(c.tick);
+          syncAnnotationRound(s.round?.round);
           const f = focusRef.current;
           const target = f !== undefined ? s.players.find((p) => p.pid === f) : undefined;
           if (target?.alive) {
@@ -192,8 +215,7 @@ function Player({ loaded }: { loaded: Loaded }) {
             v.panX = w / 2 - (ox + ix * lay.k);
             v.panY = h / 2 - (oy + iy * lay.k);
           }
-          draw(ctx, w, h, map, images, s, togglesRef.current, viewRef.current, f, labelSizeRef.current);
-          if (now - lastUi > 100) {
+          draw(ctx, w, h, map, images, s, togglesRef.current, viewRef.current, f, labelSizeRef.current, draft.current ? [...annotations.current, draft.current] : annotations.current);          if (now - lastUi > 100) {
             lastUi = now;
             setState(s);
           }
@@ -203,7 +225,7 @@ function Player({ loaded }: { loaded: Loaded }) {
     };
     raf = requestAnimationFrame(frame);
     return () => cancelAnimationFrame(raf);
-  }, [replay, map, images]);
+  }, [replay, map, images, syncAnnotationRound]);
 
   // keyboard: space play/pause, ←/→ ±5 s, PageUp/PageDown rounds, Esc unfocus
   useEffect(() => {
@@ -211,27 +233,32 @@ function Player({ loaded }: { loaded: Loaded }) {
       const tag = (e.target as HTMLElement | null)?.tagName;
       if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return;
       if (e.code === 'Space') {
+        if (tag === 'BUTTON') return;
         e.preventDefault();
         play(!clockRef.current.playing);
       } else if (e.code === 'ArrowLeft') seek(clockRef.current.tick - tr * 5);
       else if (e.code === 'ArrowRight') seek(clockRef.current.tick + tr * 5);
       else if (e.code === 'PageUp') stepRound(-1);
       else if (e.code === 'PageDown') stepRound(1);
-      else if (e.code === 'Escape') toggleFocus(undefined);
+      else if (e.code === 'Escape') {
+        if (drawing) { setDrawing(false); draft.current = null; }
+        else toggleFocus(undefined);
+      }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [play, seek, stepRound, toggleFocus, tr]);
+  }, [play, seek, stepRound, toggleFocus, tr, drawing]);
 
   // mouse: wheel zoom, drag pan (releases focus), click a disc to focus
   const drag = useRef<{ x: number; y: number } | null>(null);
   const dragged = useRef(false);
   const onWheel = (e: React.WheelEvent) => {
+    if (draft.current) return;
     const box = boxRef.current!.getBoundingClientRect();
     setZoomTo(viewRef.current.zoom * (e.deltaY < 0 ? 1.15 : 1 / 1.15), e.clientX - box.left - box.width / 2, e.clientY - box.top - box.height / 2);
   };
   const onMouseMove = (e: React.MouseEvent) => {
-    if (!drag.current || viewRef.current.zoom === 1) return;
+    if (drawing || !drag.current || viewRef.current.zoom === 1) return;
     if (focusRef.current !== undefined) toggleFocus(undefined);
     viewRef.current.panX += e.clientX - drag.current.x;
     viewRef.current.panY += e.clientY - drag.current.y;
@@ -239,6 +266,7 @@ function Player({ loaded }: { loaded: Loaded }) {
     dragged.current = true;
   };
   const onClick = (e: React.MouseEvent) => {
+    if (drawing) return;
     if (dragged.current) {
       dragged.current = false;
       return;
@@ -257,6 +285,34 @@ function Player({ loaded }: { loaded: Loaded }) {
     if (hit) toggleFocus(hit.pid);
   };
 
+  const pointerPoint = (e: React.PointerEvent<HTMLCanvasElement>, layer?: number) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    return annotationPoint(layout(rect.width, rect.height, map.layers.length, viewRef.current), e.clientX - rect.left, e.clientY - rect.top, layer);
+  };
+  const startStroke = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (!drawing || e.button !== 0 || !e.isPrimary) return;
+    const hit = pointerPoint(e);
+    if (!hit) return;
+    e.preventDefault();
+    e.currentTarget.setPointerCapture(e.pointerId);
+    draft.current = { tool, color, layer: hit.layer, points: [hit.point] };
+  };
+  const moveStroke = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    const stroke = draft.current;
+    if (!stroke || !e.currentTarget.hasPointerCapture(e.pointerId)) return;
+    const hit = pointerPoint(e, stroke.layer);
+    if (!hit) return;
+    if (stroke.tool !== 'pen') stroke.points = [stroke.points[0]!, hit.point];
+    else stroke.points.push(hit.point);
+  };
+  const finishStroke = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (!draft.current || !e.currentTarget.hasPointerCapture(e.pointerId)) return;
+    moveStroke(e);
+    annotations.current.push(draft.current);
+    draft.current = null;
+    setAnnotationCount(annotations.current.length);
+    e.currentTarget.releasePointerCapture(e.pointerId);
+  };
   const curRound = state.round;
   const teamLabel = (side: Team) => (curRound && replay.ctKey(curRound) === (side === 'CT' ? 'B' : 'A') ? t('common.teamB') : t('common.teamA'));
 
@@ -283,8 +339,25 @@ function Player({ loaded }: { loaded: Loaded }) {
 
       <Flex gap="3" style={{ flex: 1, minHeight: 0 }}>
         {/* map */}
-        <Box ref={boxRef} className="replay-box" onWheel={onWheel} onMouseDown={(e) => (drag.current = { x: e.clientX, y: e.clientY })} onMouseUp={() => (drag.current = null)} onMouseLeave={() => (drag.current = null)} onMouseMove={onMouseMove} onClick={onClick}>
-          <canvas ref={canvasRef} />
+        <Box ref={boxRef} className="replay-box" onWheel={onWheel} onMouseDown={(e) => { if (!drawing && e.target === canvasRef.current) drag.current = { x: e.clientX, y: e.clientY }; }} onMouseUp={() => (drag.current = null)} onMouseLeave={() => (drag.current = null)} onMouseMove={onMouseMove} onClick={onClick}>
+          <canvas ref={canvasRef} style={{ cursor: drawing ? 'crosshair' : undefined, touchAction: drawing ? 'none' : undefined }} onPointerDown={startStroke} onPointerMove={moveStroke} onPointerUp={finishStroke} onPointerCancel={() => { draft.current = null; }} onLostPointerCapture={() => { draft.current = null; }} />
+          <div className="replay-drawing-toolbar" onMouseDown={(e) => e.stopPropagation()} onClick={(e) => e.stopPropagation()} onWheel={(e) => e.stopPropagation()}>
+            <IconButton color="gray" size="1" aria-label={t('replay.drawing.toggle')} title={t('replay.drawing.toggle')} variant="soft" aria-pressed={drawing} aria-expanded={drawing} onClick={() => {
+              play(false);
+              setDrawing(!drawing);
+              draft.current = null;
+              drag.current = null;
+              dragged.current = false;
+            }}>
+              <i aria-hidden="true" className={`bi ${drawing ? 'bi-palette-fill' : 'bi-palette'} app-icon`} />
+            </IconButton>
+            {drawing && <div className="replay-drawing-tools">
+              {([['pen', 'brush'], ['arrow', 'arrow-up-right'], ['ellipse', 'circle'], ['rectangle', 'square']] as const).map(([value, icon]) => <IconButton color="gray" key={value} size="1" variant="soft" aria-label={t(`replay.drawing.${value}`)} title={t(`replay.drawing.${value}`)} aria-pressed={tool === value} onClick={() => setTool(value)}><i aria-hidden="true" className={`bi bi-${icon} app-icon`} /></IconButton>)}
+              {DRAWING_COLORS.map(([name, value]) => <button key={name} className="replay-drawing-color" style={{ backgroundColor: value }} aria-label={t(`replay.drawing.${name}`)} title={t(`replay.drawing.${name}`)} aria-pressed={color === value} onClick={() => setColor(value)} />)}
+              <IconButton color="gray" size="1" variant="soft" aria-label={t('replay.drawing.undo')} title={t('replay.drawing.undo')} disabled={annotationCount === 0} onClick={() => { annotations.current.pop(); setAnnotationCount(annotations.current.length); }}><i aria-hidden="true" className="bi bi-arrow-90deg-left app-icon" /></IconButton>
+              <IconButton color="gray" size="1" variant="soft" aria-label={t('replay.drawing.clear')} title={t('replay.drawing.clear')} disabled={annotationCount === 0} onClick={clearAnnotations}><i aria-hidden="true" className="bi bi-trash3 app-icon" /></IconButton>
+            </div>}
+          </div>
           {toggles.clock && curRound && (
             <div className="replay-hud replay-clock">
               <div className="dim">{t('common.roundN', { n: curRound.round })}</div>

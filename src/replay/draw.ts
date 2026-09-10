@@ -1,3 +1,4 @@
+import { drawAnnotations, type Annotation } from './annotations.ts';
 import { displayPlayerName } from '../playerName.ts';
 // Canvas drawing for the 2D replay. One radar image per vertical layer, laid out
 // side by side; every marker lands on the layer its z belongs to.
@@ -88,7 +89,7 @@ function place(m: MapAssets, lay: Layout, x: number, y: number, z: number): [num
   return [ox + ix * lay.k, oy + iy * lay.k, li];
 }
 
-export function draw(ctx: CanvasRenderingContext2D, width: number, height: number, m: MapAssets, images: HTMLImageElement[], state: TickState, tg: DrawToggles, view: View, focus?: number, labelSize = 14) {
+export function draw(ctx: CanvasRenderingContext2D, width: number, height: number, m: MapAssets, images: HTMLImageElement[], state: TickState, tg: DrawToggles, view: View, focus?: number, labelSize = 14, annotations: Annotation[] = []) {
   ctx.clearRect(0, 0, width, height);
   const lay = layout(width, height, m.layers.length, view);
   const k = lay.k;
@@ -96,6 +97,11 @@ export function draw(ctx: CanvasRenderingContext2D, width: number, height: numbe
   images.forEach((img, i) => {
     const [ox, oy] = lay.origins[i]!;
     if (img.complete && img.naturalWidth > 0) ctx.drawImage(img, ox, oy, lay.side, lay.side);
+
+  });
+  drawAnnotations(ctx, lay, annotations);
+  m.layers.forEach((_, i) => {
+    const [ox, oy] = lay.origins[i]!;
     if (m.layers.length > 1) {
       ctx.fillStyle = 'rgba(0,0,0,0.5)';
       ctx.font = `${Math.max(10, 12 * Math.sqrt(view.zoom))}px system-ui, sans-serif`;
@@ -108,6 +114,7 @@ export function draw(ctx: CanvasRenderingContext2D, width: number, height: numbe
       ctx.fillText(label, ox + 11, oy + 15);
     }
   });
+
   const r = Math.max(4, 7 * k * 1.2);
   const font = `${Math.max(9, Math.round(11 * Math.sqrt(view.zoom)))}px system-ui, sans-serif`;
 

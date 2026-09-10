@@ -315,6 +315,23 @@
     "empty": "還沒有輸出的影片。"
   },
   "replay": {
+    "drawing": {
+      "brown": "棕色",
+      "gray": "灰色",
+      "ocean": "海洋深藍",
+      "ellipse": "圓形",
+      "rectangle": "矩形",
+      "toggle": "手繪標註",
+      "pen": "畫筆",
+      "arrow": "箭頭",
+      "undo": "復原",
+      "clear": "清空",
+      "pink": "桃紅色",
+      "red": "紅色",
+      "violet": "深紫色",
+      "green": "綠色",
+      "white": "白色"
+    },
     "imageLoadFailed": "無法載入 {{file}}",
     "downloadTools": "下載工具",
     "preparing": "準備中",

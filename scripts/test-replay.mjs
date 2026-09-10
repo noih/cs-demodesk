@@ -80,7 +80,7 @@ test('player labels stay above every marker and focus is painted last', () => {
     get(target, key) {
       if (key in target) return target[key];
       if (key === 'measureText') return text => ({ width: text.length * 8 });
-      return (...args) => calls.push({ key, args, color: target.fillStyle });
+      return (...args) => calls.push({ key, args, color: target.fillStyle, stroke: target.strokeStyle });
     },
   });
   const player = { x: 100, y: 100, z: 0, yaw: 0, hp: 100, alive: true, team: 'CT' };
@@ -107,4 +107,54 @@ test('sampled fire cells disappear and seeking restores their recorded state', (
   assert.deepEqual(r.stateAt(104).fireCells, [[10, 20, 30]]);
   assert.deepEqual(r.stateAt(108).fireCells, []);
   assert.equal(r.stateAt(100).fireCells.length, 2);
+});
+
+// Drawing coordinates use radar pixels so resize, pan and zoom preserve map positions.
+test('annotations stay on their floor through zoom, pan and vertical layout', async () => {
+  const { annotationPoint, drawAnnotations } = await import('../src/replay/annotations.ts');
+  const { layout } = await import('../src/replay/draw.ts');
+  const initial = layout(1000,600,2,{zoom:1,panX:0,panY:0});
+  const [ox,oy] = initial.origins[1];
+  const hit = annotationPoint(initial,ox+initial.side/2,oy+initial.side/4);
+  assert.deepEqual(hit,{layer:1,point:[512,256]});
+  assert.equal(annotationPoint(initial,-1,-1),undefined);
+  assert.deepEqual(annotationPoint(initial,-100,-100,1).point,[0,0]);
+  assert.deepEqual(annotationPoint(initial,10000,10000,1).point,[1024,1024]);
+  for(const [width,height,view] of [[1000,600,{zoom:2,panX:50,panY:-30}],[400,900,{zoom:1,panX:0,panY:0}]]) {
+    const lay=layout(width,height,2,view), calls=[];
+    const ctx=new Proxy({}, {get:(_,key)=>(...args)=>calls.push([key,...args])});
+    drawAnnotations(ctx,lay,[{tool:'arrow',color:'#fff',layer:hit.layer,points:[hit.point,[700,400]]}]);
+    assert.deepEqual(calls.find(c=>c[0]==='moveTo'),['moveTo',lay.origins[1][0]+512*lay.k,lay.origins[1][1]+256*lay.k]);
+    assert.equal(calls.filter(c=>c[0]==='stroke').length,2,'Dark outline and colored stroke');
+    assert.ok(calls.some(c=>c[0]==='clip'),'Drawing stays inside its floor');
+    assert.equal(calls.filter(c=>c[0]==='moveTo').length,3,'Arrow has two head segments');
+  }
+});
+
+test('ellipse and rectangle support dragging in either direction without a diagonal', async () => {
+  const { drawAnnotations } = await import('../src/replay/annotations.ts');
+  const lay={side:1024,k:1,origins:[[10,20]]};
+  for(const tool of ['ellipse','rectangle']) for(const points of [[[100,200],[300,400]],[[300,400],[100,200]]]) {
+    const calls=[];
+    const ctx=new Proxy({}, {get:(_,key)=>(...args)=>calls.push([key,...args])});
+    drawAnnotations(ctx,lay,[{tool,color:'#fff',layer:0,points}]);
+    if(tool==='ellipse') assert.deepEqual(calls.find(c=>c[0]==='ellipse'),['ellipse',210,320,100,100,0,0,Math.PI*2]);
+    else assert.deepEqual(calls.filter(c=>c[0]==='rect').at(-1),['rect',110,220,200,200]);
+    assert.ok(!calls.some(c=>c[0]==='lineTo'),'Shapes have no diagonal line');
+  }
+});
+
+test('annotations sit directly above the radar and below replay effects', () => {
+  const calls=[];
+  const ctx=new Proxy({}, {get(target,key) {
+    if(key in target) return target[key];
+    return (...args)=>calls.push({key,args,stroke:target.strokeStyle});
+  }});
+  const map={posX:0,posY:0,scale:1,layers:[{altitudeMin:-100,altitudeMax:100}]};
+  const state={tick:1,players:[],grenades:[],shots:[],deaths:[],effects:[{kind:'smoke',x:100,y:100,z:0,start:0,end:10}]};
+  draw(ctx,500,500,map,[{complete:true,naturalWidth:1024}],state,DEFAULT_TOGGLES,{zoom:1,panX:0,panY:0},undefined,14,[{tool:'pen',color:'#ff70d4',layer:0,points:[[0,0],[200,200]]}]);
+  const radar=calls.findIndex(c=>c.key==='drawImage');
+  const ink=calls.findIndex(c=>c.key==='stroke' && c.stroke==='#ff70d4');
+  const smoke=calls.findIndex(c=>c.key==='arc');
+  assert.ok(radar>=0 && radar<ink && ink<smoke,'Radar → annotation → smoke');
 });

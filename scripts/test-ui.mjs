@@ -1,3 +1,4 @@
+import { checkReplayDrawing } from './check-replay-drawing.mjs';
 import assert from 'node:assert/strict';
 import { readdir, readFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
@@ -811,6 +812,7 @@ try {
   await page.getByLabel('HLAE.exe',{exact:true}).fill('E:/custom/HLAE.exe');
   await hlaeField.getByRole('button',{name:'Browse...',exact:true}).click();
   assert.equal(await page.evaluate(() => window.testCalls.filter(c=>c.cmd==='browse_directory').at(-1).args.path), 'E:/custom/HLAE.exe');
+  await checkReplayDrawing(page);
   assert.deepEqual(errors,[]);
   console.log('UI checks passed: virtual lists, lazy demo reads, content-sized tabs, themes, charts, filters, queue jump, settings.');
 } finally { await browser.close(); await new Promise(resolve => server.httpServer.close(resolve)); }
