@@ -2,7 +2,14 @@
 
 English | [繁體中文](README.zh-TW.md) | [简体中文](README.zh-CN.md) | [日本語](README.ja.md) | [한국어](README.ko.md) | [Русский](README.ru.md)
 
-A Windows desktop tool for Counter-Strike 2 demos (single portable `.exe`): match statistics, highlight video export, and a 2D replay of the whole match from one `.dem` file.
+A Windows desktop tool for Counter-Strike 2 demos: match statistics, highlight video export, and a 2D replay of the whole match from one `.dem` file.
+
+## Download
+
+- **[Microsoft Store](https://apps.microsoft.com/detail/9N5G4VXSDGS5)** — Install and receive updates through Microsoft Store.
+- **[Portable EXE](https://github.com/noih/cs-demodesk/releases/latest)** — Download the standalone `.exe` from GitHub Releases and run it without installation.
+
+Both editions provide the same demo analysis, highlight video export, and 2D replay features.
 
 ## Features
 
