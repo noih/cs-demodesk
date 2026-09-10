@@ -25,7 +25,7 @@ function roundTimelineOption(parsed: ParsedDemo, metric: Trend, t: TFunction, co
     itemStyle: { color: teamMetric ? s.id === 'B' ? colors.teamB : colors.teamA : palette.get(s.id) },
   }));
   return {
-    tooltip: { trigger: 'axis', renderMode: 'richText', axisPointer: { type: 'line' } },
+    tooltip: { trigger: 'axis', order: 'valueDesc', renderMode: 'richText', axisPointer: { type: 'line' } },
     legend: { show: false },
     grid: { left: fontSize * 4, right: 25, top: 25, bottom: fontSize * 3 + 12 },
     xAxis: { type: 'category', boundaryGap: false, data: parsed.roundSummaries.map(r => String(r.round)), axisLabel: { color: colors.muted }, name: t('charts.roundAxis'), nameLocation: 'middle', nameGap: fontSize + 16 },
@@ -141,17 +141,15 @@ export function ChartsTab({ parsed }: { parsed: ParsedDemo }) {
         <Flex gap="1" wrap="wrap" mb="3">
           {TRENDS.map(key => <Button key={key} size="1" color={key === trend ? 'amber' : 'gray'} variant={key === trend ? 'solid' : 'soft'} aria-pressed={key === trend} onClick={() => setTrend(key)}>{t(`charts.trend.${key}`)}</Button>)}
         </Flex>
-        <Box style={{ overflowX: 'auto' }}>
-          <Flex gap="1" mb="2" style={{ minWidth: parsed.roundSummaries.length * 30 }}>
-            {parsed.roundSummaries.map(r => {
-              const highlights = parsed.highlights.filter(h => h.round === r.round);
-              const detail = [t('common.roundN', { n: r.round }), r.winner ? t('charts.roundTooltipWin', { team: t(r.winner === 'A' ? 'common.teamA' : 'common.teamB') }) : t('common.unknown'), t('charts.roundKills', { a: r.killsA, b: r.killsB }), ...highlights.map(h => h.title)].join(' · ');
-              return <Tooltip delayDuration={150} key={r.round} content={detail}><Box className="round-summary" tabIndex={0} aria-label={detail} style={{ flex: 1, textAlign: 'center', borderTop: '4px solid ' + (r.winner === 'A' ? colors.teamA : r.winner === 'B' ? colors.teamB : colors.muted), background: colors.panel, padding: '10px 4px', minWidth: 36, cursor: 'help' }}>
-                <Text as="div" size="1" style={{ fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>{r.round}</Text>
-                <Text as="div" size="1" aria-hidden="true" style={{ minHeight: '1.5em' }}>{highlights.length > 0 ? '★' : '\u00a0'}</Text>
-              </Box></Tooltip>;
+        <Box mb="2" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(36px, 1fr))', gap: 4 }}>
+          {parsed.roundSummaries.map(r => {
+            const highlights = parsed.highlights.filter(h => h.round === r.round);
+            const detail = [t('common.roundN', { n: r.round }), r.winner ? t('charts.roundTooltipWin', { team: t(r.winner === 'A' ? 'common.teamA' : 'common.teamB') }) : t('common.unknown'), t('charts.roundKills', { a: r.killsA, b: r.killsB }), ...highlights.map(h => h.title)].join(' · ');
+            return <Tooltip delayDuration={150} key={r.round} content={detail}><Box className="round-summary" tabIndex={0} aria-label={detail} style={{ textAlign: 'center', borderTop: '4px solid ' + (r.winner === 'A' ? colors.teamA : r.winner === 'B' ? colors.teamB : colors.muted), background: colors.panel, padding: '10px 4px', minWidth: 36, cursor: 'help' }}>
+              <Text as="div" size="1" style={{ fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>{r.round}</Text>
+              <Text as="div" size="1" aria-hidden="true" style={{ minHeight: '1.5em' }}>{highlights.length > 0 ? '★' : '\u00a0'}</Text>
+            </Box></Tooltip>;
             })}
-          </Flex>
         </Box>
         <Text size="1" color="gray">{t(trend === 'cash' ? 'charts.cashHint' : trend === 'difference' ? 'charts.differenceHint' : 'charts.cumulativeHint')}</Text>
         <EChart option={{ ...timeline, series: (timeline.series as Array<{ id: string }>).filter(series => !hiddenSeries.includes(series.id)) }} height={380} />
