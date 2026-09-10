@@ -255,7 +255,8 @@ export function RendersTab({ jobs, parsed, onChanged, scrollRef }: { jobs: Rende
         <div
           key={row.key}
           data-index={row.index}
-          ref={virtualizer.measureElement}
+          // Reattach after renders so measure() also refreshes unchanged mounted cards.
+          ref={(element) => virtualizer.measureElement(element)}
           style={{ position: 'absolute', top: 0, left: 0, width: '100%', transform: `translateY(${row.start - scrollMargin}px)` }}
         >
           <JobCard job={jobs[row.index]!} parsed={parsed} onChanged={onChanged} />

@@ -293,7 +293,7 @@
     },
     "stage": {
       "starting": "Запуск",
-      "recording": "Запись (CS2)",
+      "recording": "Запись",
       "encoding": "Кодирование",
       "seeking": "Поиск фрагмента",
       "setup": "Подготовка записи",

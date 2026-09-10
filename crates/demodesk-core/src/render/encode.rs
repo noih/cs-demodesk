@@ -104,16 +104,47 @@ fn tag_args(codec: &str) -> Vec<String> {
     if is_hevc(codec) { vec![s("-tag:v"), s("hvc1")] } else { vec![] }
 }
 
-const NVENC_QUALITY: &str = "-preset p6 -tune hq -rc-lookahead 20 -spatial-aq 1 -aq-strength 8 -multipass fullres";
+const NVENC_RECORDING: &str = "-preset p5 -tune hq -multipass qres -rc-lookahead 0 -spatial-aq 1 -bf 2";
+
+const NVENC_COMPATIBLE: &str = "-preset p4 -tune hq -multipass disabled -rc-lookahead 0 -spatial-aq 0 -temporal-aq 0 -bf 0 -b_ref_mode disabled";
+
+fn with_nvenc_fallback<T>(compatible: &mut bool, mut encode: impl FnMut(bool) -> Result<T>) -> Result<T> {
+    match encode(*compatible) {
+        Ok(value) => Ok(value),
+        Err(first) if !*compatible => {
+            *compatible = true;
+            eprintln!("NVENC failed; retrying with compatibility settings: {first:#}");
+            encode(true).map_err(|last| anyhow!("NVENC failed: {first:#}; compatibility retry failed: {last:#}"))
+        }
+        Err(error) => Err(error),
+    }
+}
+
+/// Probe the actual capture format before launching the game, with one compatibility retry.
+pub fn checked_record_preset(ffmpeg: &Path, options: &super::RenderOptions, log: &mut dyn FnMut(String)) -> Result<(String, bool)> {
+    let preset = record_preset(&options.codec, options.crf, options.fps);
+    if !options.codec.contains("nvenc") { return Ok((preset, false)); }
+    let mut compatible = false;
+    let selected = with_nvenc_fallback(&mut compatible, |fallback| {
+        let selected = if fallback { preset.replace(NVENC_RECORDING, NVENC_COMPATIBLE).replace("main -b_ref_mode middle", "main") } else { preset.clone() };
+        let mut args = vec![s("-f"), s("lavfi"), s("-i"), format!("color=size={}x{}:rate={}", options.width, options.height, options.fps), s("-frames:v"), s("3")];
+        args.extend(selected.split_whitespace().map(s));
+        args.extend([s("-f"), s("null"), s(if cfg!(windows) { "NUL" } else { "/dev/null" })]);
+        run(ffmpeg, &args)?;
+        Ok(selected)
+    })?;
+    if compatible { log("NVENC: using compatibility settings (B-frames, AQ and multipass disabled)".into()); }
+    Ok((selected, compatible))
+}
 
 /// Quality-targeted arguments HLAE hands to ffmpeg while recording (`crf` ≈ quality, lower = better).
-/// NVENC ignores `-crf`; its equivalent is `-cq` with `-b:v 0`.
-pub fn record_preset(codec: &str, crf: u32) -> String {
+/// NVENC uses constant QP for capture; size fitting uses VBR separately.
+pub fn record_preset(codec: &str, crf: u32, fps: u32) -> String {
     let mut parts = vec![format!("-c:v {codec}"), s("-pix_fmt yuv420p")];
     if codec.contains("nvenc") {
-        parts.push(format!("-rc vbr -cq {crf} -b:v 0 {NVENC_QUALITY}"));
+        parts.push(format!("-rc constqp -qp {crf} -b:v 0 {NVENC_RECORDING} -g {} -profile:v {}", u64::from(fps) * 2, if is_hevc(codec) { "main -b_ref_mode middle" } else { "high" }));
     } else {
-        parts.push(format!("-crf {crf} -preset slow"));
+        parts.push(format!("-crf {crf} -preset {} -profile:v {} -g {}", if is_hevc(codec) { "fast" } else { "veryfast" }, if is_hevc(codec) { "main" } else { "high" }, u64::from(fps) * 2));
     }
     parts.extend(tag_args(codec));
     parts.join(" ")
@@ -122,10 +153,10 @@ pub fn record_preset(codec: &str, crf: u32) -> String {
 /// Re-encode from the same source on each attempt; publish only a size-checked file.
 /// NVENC multipass is per-frame analysis, not the CPU encoders' file-level two passes.
 pub fn encode_to_size(ffmpeg_exe: &Path, input: &Path, output: &Path, max_size_mb: f64, codec: &str, audio_kbps: u32) -> Result<SizeResult> {
-    encode_to_size_with_progress(ffmpeg_exe, input, output, max_size_mb, codec, audio_kbps, &mut |_| {})
+    encode_to_size_with_progress(ffmpeg_exe, input, output, max_size_mb, codec, audio_kbps, &mut false, &mut |_| {})
 }
 
-pub fn encode_to_size_with_progress(ffmpeg_exe: &Path, input: &Path, output: &Path, max_size_mb: f64, codec: &str, audio_kbps: u32, progress: &mut dyn FnMut(f64)) -> Result<SizeResult> {
+pub fn encode_to_size_with_progress(ffmpeg_exe: &Path, input: &Path, output: &Path, max_size_mb: f64, codec: &str, audio_kbps: u32, compatible: &mut bool, progress: &mut dyn FnMut(f64)) -> Result<SizeResult> {
     if !CODECS.iter().any(|(name, _)| *name == codec) { return Err(anyhow!("unsupported video encoder: {codec}")); }
     if !max_size_mb.is_finite() || max_size_mb <= 0.0 { return Err(anyhow!("invalid file size limit")); }
     if input == output { return Err(anyhow!("input and output must be different files")); }
@@ -139,22 +170,29 @@ pub fn encode_to_size_with_progress(ffmpeg_exe: &Path, input: &Path, output: &Pa
     let output_s = temp.to_string_lossy().to_string();
     let mut common = vec![s("-y"), s("-i"), input_s.clone(), s("-map"), s("0:v:0"), s("-map"), s("0:a:0?"), s("-c:a"), s("aac"), s("-b:a"), format!("{audio_kbps}k"), s("-ar"), s("48000"), s("-ac"), s("2"), s("-movflags"), s("+faststart"), s("-pix_fmt"), s("yuv420p"), s("-fps_mode"), s("passthrough")];
     common.extend(tag_args(codec));
+    let mut reported = 0.0_f64;
     for attempt in 0..4 {
         // Leave space for size verification and retries without moving backwards.
         let start = 1.0 - 0.1_f64.powi(attempt);
         let span = 0.9 * 0.1_f64.powi(attempt);
         if codec.contains("nvenc") {
-            let mut args = common.clone();
-            args.extend([s("-c:v"), s(codec), s("-rc"), s("vbr"), s("-b:v"), format!("{bitrate}k"), s("-maxrate"), format!("{}k", u64::from(bitrate) * 2), s("-bufsize"), format!("{}k", u64::from(bitrate) * 4)]);
-            args.extend(NVENC_QUALITY.split_whitespace().map(s));
-            args.push(output_s.clone());
-            run_progress(ffmpeg_exe, &args, seconds, &mut |p| progress(start + span * p))?;
+            with_nvenc_fallback(compatible, |fallback| {
+                let mut args = common.clone();
+                args.extend([s("-c:v"), s(codec), s("-rc"), s("vbr"), s("-b:v"), format!("{bitrate}k"), s("-maxrate"), format!("{bitrate}k"), s("-bufsize"), format!("{}k", u64::from(bitrate) * 2)]);
+                args.extend(if fallback { NVENC_COMPATIBLE } else { NVENC_RECORDING }.split_whitespace().map(s));
+                args.extend([s("-force_key_frames"), s("expr:gte(t,n_forced*2)"), s("-profile:v"), s(if is_hevc(codec) { "main" } else { "high" })]);
+                if is_hevc(codec) && !fallback { args.extend([s("-b_ref_mode"), s("middle")]); }
+                args.push(output_s.clone());
+                run_progress(ffmpeg_exe, &args, seconds, &mut |p| {
+                    reported = reported.max(start + span * p);
+                    progress(reported);
+                })
+            })?;
         } else {
             let tmp = tempfile::tempdir()?;
             let passlog = tmp.path().join("ffmpeg2pass").to_string_lossy().replace('\\', "/");
             let null_sink = if cfg!(windows) { "NUL" } else { "/dev/null" };
-            // File-size targeting does not need a streaming-style peak bitrate ceiling.
-            let rate = [s("-c:v"), s(codec), s("-b:v"), format!("{bitrate}k"), s("-preset"), s("slow"), s("-pix_fmt"), s("yuv420p"), s("-fps_mode"), s("passthrough")];
+            let rate = [s("-c:v"), s(codec), s("-b:v"), format!("{bitrate}k"), s("-maxrate"), format!("{}k", (bitrate as f64 * 1.3) as u32), s("-bufsize"), format!("{}k", u64::from(bitrate) * 2), s("-preset"), s("medium"), s("-pix_fmt"), s("yuv420p"), s("-fps_mode"), s("passthrough")];
             let pass_args = |n: u32| -> Vec<String> {
                 if codec == "libx265" { vec![s("-x265-params"), format!("pass={n}:stats={}.x265", passlog.replace(':', "\\:"))] }
                 else { vec![s("-pass"), n.to_string(), s("-passlogfile"), passlog.clone()] }
@@ -193,6 +231,32 @@ mod tests {
     use super::*;
 
     #[test]
+    fn compatibility_retry_is_bounded_and_reused() {
+        let mut compatible = false;
+        let mut calls = vec![];
+        let result = with_nvenc_fallback(&mut compatible, |fallback| {
+            calls.push(fallback);
+            if fallback { Ok(42) } else { Err(anyhow!("unsupported B-frames")) }
+        }).unwrap();
+        assert_eq!(result, 42);
+        assert_eq!(calls, [false, true]);
+        calls.clear();
+        assert!(with_nvenc_fallback::<()>(&mut compatible, |fallback| {
+            calls.push(fallback); Err(anyhow!("still fails"))
+        }).is_err());
+        assert_eq!(calls, [true]);
+        calls.clear();
+        let error = with_nvenc_fallback::<()>(&mut false, |fallback| {
+            calls.push(fallback); Err(anyhow!(if fallback { "fallback error" } else { "primary error" }))
+        }).unwrap_err().to_string();
+        assert_eq!(calls, [false, true]);
+        assert!(error.contains("primary error") && error.contains("fallback error"));
+        calls.clear();
+        with_nvenc_fallback(&mut false, |fallback| { calls.push(fallback); Ok(()) }).unwrap();
+        assert_eq!(calls, [false]);
+    }
+
+    #[test]
     fn size_budget_accounts_for_decimal_units_audio_and_invalid_inputs() {
         assert_eq!(video_bitrate_for_size(20.0, 60.0, 192), 2421);
         assert_eq!(video_bitrate_for_size(20.0, 60.0, 0), 2613);
@@ -203,12 +267,21 @@ mod tests {
     #[test]
     fn record_presets_preserve_encoder_and_quality_without_resizing() {
         for (codec, _) in CODECS {
-            let preset = record_preset(codec, 20);
+            let preset = record_preset(codec, 20, 90);
             assert!(preset.contains(&format!("-c:v {codec}")));
-            assert!(preset.contains(if codec.contains("nvenc") { "-cq 20" } else { "-crf 20 -preset slow" }));
+            assert!(preset.contains(if codec.contains("nvenc") { "-rc constqp -qp 20" } else { "-crf 20" }));
             assert!(!preset.contains("scale="));
             assert!(!preset.contains("-r "));
-            if codec.contains("nvenc") { assert!(preset.contains("-rc-lookahead 20 -spatial-aq 1")); }
+            if codec.contains("nvenc") {
+                assert!(preset.contains(NVENC_RECORDING));
+                assert!(preset.contains("-g 180"));
+                assert!(!preset.contains("-cq "));
+                assert!(record_preset(codec, 20, 60).contains("-g 120"));
+            } else {
+                assert!(preset.contains(if is_hevc(codec) { "-preset fast -profile:v main" } else { "-preset veryfast -profile:v high" }));
+                assert!(preset.contains("-g 180"));
+                assert!(!preset.contains("-tune"));
+            }
         }
     }
     #[test]
@@ -231,9 +304,19 @@ mod tests {
             if codec.contains("nvenc") && std::env::var_os("TEST_NVENC").is_none() { continue; }
             let output = dir.path().join(format!("{codec}.mp4"));
             let mut updates = vec![];
-            let result = encode_to_size_with_progress(&ffmpeg, &input, &output, 0.5, codec, 192, &mut |p| updates.push(p)).unwrap();
+            let capture = dir.path().join(format!("capture-{codec}.mp4"));
+            let mut args = vec![s("-y"), s("-i"), input.to_string_lossy().into_owned()];
+            let (preset, _) = checked_record_preset(&ffmpeg, &super::super::RenderOptions {
+                codec: codec.into(), crf: 20, fps: 90, width: 960, height: 540,
+                ..super::super::RenderOptions::default()
+            }, &mut |_| {}).unwrap();
+            args.extend(preset.split_whitespace().map(s));
+            args.extend([s("-c:a"), s("aac"), capture.to_string_lossy().into_owned()]);
+            run(&ffmpeg, &args).unwrap();
+            let result = encode_to_size_with_progress(&ffmpeg, &capture, &output, 0.5, codec, 192, &mut false, &mut |p| updates.push(p)).unwrap();
             assert_eq!(updates.last(), Some(&1.0));
-            assert!(updates.iter().any(|p| *p > 0.0 && *p < 0.9));
+            // Fast hardware encodes may first report at pass completion (0.9), before verification.
+            assert!(updates.iter().any(|p| *p > 0.0 && *p < 1.0));
             assert!(updates.windows(2).all(|w| w[0] <= w[1]), "progress must not reset between passes or retries: {updates:?}");
             assert!(result.bytes > 0 && result.bytes <= 500_000);
             let mut probe = Command::new(ffprobe_exe(&ffmpeg));
@@ -250,8 +333,34 @@ mod tests {
             let saved = std::fs::read(&output).unwrap();
             assert!(encode_to_size(&ffmpeg, &input, &output, 0.001, codec, 192).is_err());
             assert_eq!(std::fs::read(&output).unwrap(), saved);
+            if codec.contains("nvenc") {
+                let compatible_capture = dir.path().join(format!("compatible-{codec}.mp4"));
+                let compatible_preset = record_preset(codec, 20, 90).replace(NVENC_RECORDING, NVENC_COMPATIBLE).replace("main -b_ref_mode middle", "main");
+                let mut args = vec![s("-y"), s("-i"), input.to_string_lossy().into_owned()];
+                args.extend(compatible_preset.split_whitespace().map(s));
+                args.extend([s("-c:a"), s("aac"), compatible_capture.to_string_lossy().into_owned()]);
+                run(&ffmpeg, &args).unwrap();
+                let fitted = dir.path().join(format!("compatible-fitted-{codec}.mp4"));
+                let result = encode_to_size_with_progress(&ffmpeg, &compatible_capture, &fitted, 0.5, codec, 192, &mut true, &mut |_| {}).unwrap();
+                assert!(result.bytes > 0 && result.bytes <= 500_000);
+                assert!((probe_duration_seconds(&ffmpeg, &fitted).unwrap() - 4.0).abs() < 0.1);
+            }
             println!("{codec}: {} bytes, 960x540 at 90 FPS, stereo 48 kHz; failure preserves output", result.bytes);
         }
+        let vfr = dir.path().join("vfr.mkv");
+        run(&ffmpeg, &[s("-y"), s("-i"), input.to_string_lossy().into_owned(), s("-vf"), s("select=mod(n\\,5)"), s("-fps_mode"), s("passthrough"), s("-c:v"), s("ffv1"), s("-an"), vfr.to_string_lossy().into_owned()]).unwrap();
+        let fitted = dir.path().join("vfr.mp4");
+        encode_to_size(&ffmpeg, &vfr, &fitted, 0.5, "libx264", 192).unwrap();
+        let timestamps = |path: &Path| -> Vec<f64> {
+            let out = Command::new(ffprobe_exe(&ffmpeg)).args(["-v", "error", "-select_streams", "v:0", "-show_entries", "frame=best_effort_timestamp_time", "-of", "json"]).arg(path).output().unwrap();
+            assert!(out.status.success());
+            let info: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+            info["frames"].as_array().unwrap().iter().map(|f| f["best_effort_timestamp_time"].as_str().unwrap().parse().unwrap()).collect()
+        };
+        let before = timestamps(&vfr);
+        let after = timestamps(&fitted);
+        assert_eq!(before.len(), after.len(), "Size fitting must not duplicate or drop VFR frames");
+        assert!(before.iter().zip(&after).all(|(a,b)| ((a-before[0])-(b-after[0])).abs() < 0.002), "Size fitting must preserve frame timing");
         let silent = dir.path().join("silent.mkv");
         run(&ffmpeg, &[s("-y"), s("-i"), input.to_string_lossy().into_owned(), s("-an"), s("-c:v"), s("copy"), silent.to_string_lossy().into_owned()]).unwrap();
         let output = dir.path().join("silent.mp4");

@@ -285,7 +285,7 @@
     },
     "stage": {
       "starting": "Starting",
-      "recording": "Recording (CS2)",
+      "recording": "Recording",
       "encoding": "Encoding",
       "seeking": "Seeking",
       "setup": "Preparing capture",

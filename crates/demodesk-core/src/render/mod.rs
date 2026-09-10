@@ -141,7 +141,7 @@ impl Default for RenderOptions {
             width: 1920,
             height: 1080,
             codec: "libx264".into(),
-            crf: 20,
+            crf: 19,
             container: "mp4".into(),
             camera: Camera::Slot,
             death_notice_seconds: 5,
@@ -237,9 +237,11 @@ pub fn render_highlights(input: RenderJobInput) -> Result<RenderResult> {
         log(format!("warning: no player slot for {} — camera will not follow them", missing_slots.join(", ")));
     }
 
+    if cancel.load(std::sync::atomic::Ordering::Relaxed) { return Err(anyhow!("cancelled")); }
+    let (preset, mut compatible) = encode::checked_record_preset(ffmpeg, &o, log)?;
     let schedule = build_schedule(
         &clips,
-        &ActionsOptions { render: &o, tick_rate: demo.tick_rate, output_dir: to_forward_slashes(&output_dir), ffmpeg_preset: encode::record_preset(&o.codec, if o.max_size_mb.is_some() { o.crf.min(16) } else { o.crf }) },
+        &ActionsOptions { render: &o, tick_rate: demo.tick_rate, output_dir: to_forward_slashes(&output_dir), ffmpeg_preset: preset },
     );
     let total_seconds: f64 = highlights.iter().map(|h| (h.end_tick - h.start_tick) as f64 / demo.tick_rate).sum();
     let timeout_seconds = (180.0 + highlights.len() as f64 * 30.0 + total_seconds * 6.0) as u64;
@@ -276,14 +278,14 @@ pub fn render_highlights(input: RenderJobInput) -> Result<RenderResult> {
     stage("encoding");
     progress(recording_end);
     let outputs = collect_clip_outputs(&output_dir, clips.len(), &o.container);
-    let fit_to_size = |file: PathBuf, log: &mut dyn FnMut(String), report: &mut dyn FnMut(f64)| -> Result<PathBuf> {
+    let mut fit_to_size = |file: PathBuf, log: &mut dyn FnMut(String), report: &mut dyn FnMut(f64)| -> Result<PathBuf> {
         let Some(mb) = o.max_size_mb else { report(1.0); return Ok(file) };
         if std::fs::metadata(&file)?.len() <= (mb * 1_000_000.0) as u64 {
             report(1.0);
             return Ok(file);
         }
         let small = file.with_extension(format!("{}mb.mp4", mb as u32));
-        let r = encode_to_size_with_progress(ffmpeg, &file, &small, mb, &o.codec, o.audio_kbps, report)?;
+        let r = encode_to_size_with_progress(ffmpeg, &file, &small, mb, &o.codec, o.audio_kbps, &mut compatible, report)?;
         log(format!("{} → {} ({} kbps, {} MB)", file.file_name().unwrap().to_string_lossy(), small.file_name().unwrap().to_string_lossy(), r.bitrate_kbps, bytes_to_mb(r.bytes)));
         let _ = std::fs::remove_file(&file);
         Ok(small)

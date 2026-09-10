@@ -281,7 +281,7 @@
     },
     "stage": {
       "starting": "準備中",
-      "recording": "錄影中（CS2）",
+      "recording": "錄影中",
       "encoding": "編碼中",
       "seeking": "定位片段",
       "setup": "準備錄影",

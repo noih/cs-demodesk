@@ -232,12 +232,14 @@ export interface RenderOptions {
   audioKbps: number;
   extraLaunchOptions: string[];
 }
+export const RENDER_QUALITY: Record<string, number> = { libx264: 19, libx265: 20, h264_nvenc: 20, hevc_nvenc: 20 };
+
 export const DEFAULT_RENDER_OPTIONS: RenderOptions = {
   fps: 60,
   width: 1920,
   height: 1080,
   codec: 'libx264',
-  crf: 20,
+  crf: RENDER_QUALITY.libx264 ?? 19,
   container: 'mp4',
   camera: 'slot',
   deathNoticeSeconds: 5,

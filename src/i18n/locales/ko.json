@@ -281,7 +281,7 @@
     },
     "stage": {
       "starting": "시작 중",
-      "recording": "녹화 중 (CS2)",
+      "recording": "녹화 중",
       "encoding": "인코딩 중",
       "seeking": "구간 탐색 중",
       "setup": "녹화 준비 중",

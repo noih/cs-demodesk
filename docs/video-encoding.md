@@ -2,13 +2,14 @@
 
 Resolution, FPS and encoder follow the export options. Size fitting never resizes or changes frame rate.
 
-- No limit: CRF/CQ 20 by default, CPU preset slow; NVIDIA p6, HQ, 20-frame lookahead, spatial AQ, full-resolution multipass.
-- Limited: capture at CRF/CQ 16 or better to reduce loss before fitting. Already-small files are kept. CPU fitting uses two file passes; NVIDIA multipass is per-frame rate control with peaks allowed at twice the average bitrate.
+- CPU capture defaults: x264 CRF 19 / veryfast / High, x265 CRF 20 / fast / Main; both use a two-second GOP and no tune override. Selecting NVIDIA in the export dialog uses CQP 20, P5/HQ, quarter-resolution multipass, lookahead disabled, spatial AQ enabled, two B-frames and a two-second GOP. HEVC uses Main profile and B-frame references; H.264 uses High profile. Resolution and FPS stay user-selected.
+- NVIDIA capture parameters are tested with three synthetic frames at the requested resolution/FPS before launching HLAE. On error, retry once with P4, B-frames/references, AQ and multipass disabled. Reuse the selected compatibility mode across all clips and size fitting; HLAE records only once. Size fitting also permits one compatibility retry if its initial NVENC encode fails. If compatibility mode fails, report failure without switching codec, resolution or FPS.
+- CQP has no size guarantee. Limited NVIDIA exports use VBR with the same preset/AQ settings, while CPU fitting uses two file passes with preset medium. Actual bytes are verified before publishing.
 - Audio defaults to AAC stereo, 192 kbit/s, 48 kHz, including size fitting.
 - Limits use decimal MB (20 MB = 20,000,000 bytes). Reserve 2% initially for muxing and rate-control error, then subtract audio. Silent inputs reserve no audio.
 - Check actual output bytes. Retry from the same source at a lower bitrate at most three times. Publish only an output within the limit; on failure preserve the source and any existing destination.
 
-These quality defaults may take longer and need more temporary disk space than the previous CRF/CQ 23 defaults. Synthetic SSIM comparisons are regression evidence, not a guarantee for every CS2 scene.
+The NVIDIA settings follow the [OBS recording baseline](https://obsproject.com/kb/advanced-recording-settings-guide), mapped to FFmpeg. The export dialog offers 30 and 60 FPS; existing jobs with other frame rates remain readable.
 
 ## Verification
 

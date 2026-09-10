@@ -281,7 +281,7 @@
     },
     "stage": {
       "starting": "準備中",
-      "recording": "録画中（CS2）",
+      "recording": "録画中",
       "encoding": "エンコード中",
       "seeking": "シーク中",
       "setup": "録画準備中",

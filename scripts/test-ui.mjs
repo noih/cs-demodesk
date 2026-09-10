@@ -141,6 +141,27 @@ try {
   await page.waitForFunction(() => document.querySelector('[role="progressbar"]')?.getAttribute('aria-valuenow') === '82');
   assert.ok((await page.locator('.job-card').first().innerText()).includes('Encoding 2/2 · Fitting file size'));
   assert.ok(await page.locator('.job-card').count()<15,'Job DOM bounded by viewport');
+  // Width changes invalidate off-screen heights; mounted cards must stay measured
+  // even when progress updates do not change their physical height.
+  for (const width of [1200, 1360]) {
+    await page.setViewportSize({width, height:940});
+    await page.waitForTimeout(100);
+    const overlaps = await page.evaluate(async () => {
+      const [job] = await window.__TAURI_INTERNALS__.invoke('list_jobs');
+      const failures = [];
+      for (let step = 0; step < 12; step++) {
+        window.emitTestEvent({type:'job-changed',job:{...job,progress:0.4+step/100}});
+        await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+        const cards = [...document.querySelectorAll('.job-card')].map(el => el.getBoundingClientRect());
+        for (let i=1;i<cards.length;i++) {
+          if (cards[i].top < cards[i-1].bottom + 10) failures.push({step,gap:cards[i].top-cards[i-1].bottom});
+        }
+      }
+      return failures;
+    });
+    assert.deepEqual(overlaps, [], 'Progress updates preserve measured card heights after resizing');
+  }
+
   const reparseButton = page.locator('.demo-heading button').filter({ has: page.locator('.bi-arrow-clockwise') });
   await reparseButton.click();
   const pendingParse = page.locator('.demo-heading button[aria-busy="true"]');
@@ -705,6 +726,8 @@ try {
   await page.getByRole('button',{name:/^Export/}).click();
   const exportDialog = page.getByRole('dialog').filter({has:page.getByRole('button',{name:'Export',exact:true})});
   await exportDialog.waitFor();
+  assert.equal(await exportDialog.getByRole("radio", {name:"90", exact:true}).count(), 0, "90 FPS is not offered for new exports");
+  assert.equal(await exportDialog.getByRole("radio", {name:"60", exact:true}).getAttribute("aria-checked"), "true", "New exports default to 60 FPS");
   const hideGame = exportDialog.getByRole('switch',{name:'Hide game in background'});
   await hideGame.waitFor();
   assert.equal(await hideGame.isChecked(),true,'Game is hidden by default');

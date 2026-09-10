@@ -3,7 +3,7 @@ import { displayPlayerName } from '../playerName.ts';
 import { useMemo, useState } from 'react';
 import { Badge, Box, Button, Checkbox, Dialog, Flex, Grid, SegmentedControl, Select, Slider, Switch, Table, Text } from '@radix-ui/themes';
 import { useTranslation } from 'react-i18next';
-import { api, clock, errorText, DEFAULT_RENDER_OPTIONS, type DemoMeta, type Highlight, type ParsedDemo, type RenderOptions, type Status } from '../api.ts';
+import { api, clock, errorText, DEFAULT_RENDER_OPTIONS, RENDER_QUALITY, type DemoMeta, type Highlight, type ParsedDemo, type RenderOptions, type Status } from '../api.ts';
 
 const RESOLUTIONS = [
   { label: '720p', width: 1280, height: 720 },
@@ -195,14 +195,13 @@ export function HighlightsTab({ meta, parsed, status, onRendered, onSetup }: { m
                 <SegmentedControl.Root size="1" value={String(opts.fps)} onValueChange={(v) => setOpts({ ...opts, fps: Number(v) })} style={{ width: '100%' }}>
                   <SegmentedControl.Item value="30">30</SegmentedControl.Item>
                   <SegmentedControl.Item value="60">60</SegmentedControl.Item>
-                  <SegmentedControl.Item value="90">90</SegmentedControl.Item>
                 </SegmentedControl.Root>
               </Box>
               <Box>
                 <Text as="div" size="1" color="gray" mb="1">
                   {t('highlights.encoder')}
                 </Text>
-                <Select.Root value={opts.codec} onValueChange={(v) => setOpts({ ...opts, codec: v })} size="1">
+                <Select.Root value={opts.codec} onValueChange={(v) => setOpts({ ...opts, codec: v, crf: RENDER_QUALITY[v] ?? DEFAULT_RENDER_OPTIONS.crf })} size="1">
                   <Select.Trigger style={{ width: '100%' }} />
                   <Select.Content>
                     <Select.Item value="libx264">H.264 · CPU（libx264）</Select.Item>
