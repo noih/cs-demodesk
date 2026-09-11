@@ -2,12 +2,12 @@ import { useEffect, useRef } from 'react';
 import { useAppTheme } from '../AppTheme.tsx';
 import * as echarts from 'echarts/core';
 import { BarChart, LineChart, RadarChart, ScatterChart } from 'echarts/charts';
-import { DataZoomInsideComponent, GridComponent, LegendComponent, TooltipComponent, RadarComponent } from 'echarts/components';
+import { DataZoomInsideComponent, GridComponent, LegendComponent, MarkLineComponent, TooltipComponent, RadarComponent } from 'echarts/components';
 import { LabelLayout } from 'echarts/features';
 import { CanvasRenderer } from 'echarts/renderers';
 import type { EChartsCoreOption, ECharts } from 'echarts/core';
 
-echarts.use([BarChart, LineChart, RadarChart, ScatterChart, DataZoomInsideComponent, GridComponent, LegendComponent, TooltipComponent, RadarComponent, CanvasRenderer, LabelLayout]);
+echarts.use([BarChart, LineChart, RadarChart, ScatterChart, DataZoomInsideComponent, GridComponent, LegendComponent, MarkLineComponent, TooltipComponent, RadarComponent, CanvasRenderer, LabelLayout]);
 
 /** Ten distinct colours, one per player in a match (team A takes the first five). */
 export const PLAYER_COLORS = ['#5b9cf6', '#f59e0b', '#22c55e', '#ef4444', '#a855f7', '#2dd4bf', '#facc15', '#f472b6', '#e5e7eb', '#a3e635'];

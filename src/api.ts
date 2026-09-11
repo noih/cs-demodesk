@@ -69,6 +69,8 @@ export interface AimStats {
   firstShots: number; firstHits: number; sprayShots: number; sprayHits: number;
 }
 export interface RecoilPoint { x: number; y: number; samples: number }
+export interface RecoilShot { tick: number; origin: [number, number, number]; viewPitch: number; viewYaw: number }
+export interface RecoilBurst { round: number; startTick: number; shots: RecoilShot[] }
 export interface PlayerStats {
   steamid: string;
   name: string;
@@ -88,7 +90,7 @@ export interface PlayerStats {
   fireDamage: number;
   opponents: Record<string, number>;
   aim: Record<string, AimStats>;
-  recoil: Record<string, RecoilPoint[]>;
+  recoil: Record<string, RecoilBurst[]>;
   activity: { shots: number; flashes: number; smokes: number; hes: number; fires: number; enemiesFlashed: number; teammatesFlashed: number; enemyBlindSeconds: number };
   clutches: { round: number; side: Team; versus: number; kills: number; outcome: 'won' | 'saved' | 'lost' }[];
   headshots: number;

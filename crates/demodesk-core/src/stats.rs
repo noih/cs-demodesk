@@ -34,7 +34,7 @@ pub struct PlayerStats {
     pub fire_damage: u32,
     pub activity: ActivityStats,
     pub aim: BTreeMap<String, crate::aim::AimStats>,
-    pub recoil: BTreeMap<String, Vec<crate::aim::RecoilPoint>>,
+    pub recoil: BTreeMap<String, Vec<crate::aim::RecoilBurst>>,
     pub clutches: Vec<ClutchStats>,
     pub opponents: BTreeMap<String, u32>,
     pub headshots: u32,

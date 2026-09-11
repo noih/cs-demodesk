@@ -124,8 +124,7 @@ mod tests {
     }
 }
 
-/// Mean view-angle movement, aligned to fresh rifle bursts within one demo.
-/// This includes target tracking; it is not isolated mouse input or bullet impact.
+/// Chart coordinates, also used by the bundled angular calibration.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RecoilPoint {
@@ -134,56 +133,69 @@ pub struct RecoilPoint {
     pub samples: u32,
 }
 
-pub fn recoil(events: &[GameEvent], rounds: &[RoundInfo], tick_rate: f64) -> BTreeMap<String, BTreeMap<String, Vec<RecoilPoint>>> {
-    struct Shot { tick: i32, round: i32, weapon: String, angles: Option<(f64, f64)>, index: Option<f64> }
+/// Eye angles describe aiming input, while firing angles also contain weapon recoil.
+/// Fire-event origins include movement and eye height during duck transitions.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RecoilShot {
+    pub tick: i32,
+    pub origin: [f64; 3],
+    pub view_pitch: f64,
+    pub view_yaw: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RecoilBurst {
+    pub round: i32,
+    pub start_tick: i32,
+    pub shots: Vec<RecoilShot>,
+}
+
+pub fn recoil(events: &[GameEvent], rounds: &[RoundInfo], tick_rate: f64) -> BTreeMap<String, BTreeMap<String, Vec<RecoilBurst>>> {
+    struct Shot { tick: i32, round: i32, weapon: String, ray: Option<RecoilShot>, index: Option<f64> }
     let mut players: BTreeMap<String, Vec<Shot>> = BTreeMap::new();
-    for event in events.iter().filter(|e| e.name == "weapon_fire") {
+    for event in events.iter().filter(|e| e.name == "fire_bullets") {
         let f = Fields(event);
         if f.bool("is_freeze_period") { continue; }
         let Some(round) = rounds.iter().find(|r| f.tick() >= r.freeze_end_tick && f.tick() <= r.officially_ended_tick) else { continue };
         let id = f.str("user_steamid");
         if id.is_empty() { continue; }
-        let gun = f.str("weapon");
-        let angles = f.opt_num("user_yaw").zip(f.opt_num("user_pitch"))
-            .filter(|(yaw, pitch)| yaw.is_finite() && yaw.abs() <= 360.0 && pitch.is_finite() && pitch.abs() <= 90.0);
-        // Retain missing samples and other guns as boundaries; never bridge them.
-        players.entry(id).or_default().push(Shot { tick: f.tick(), round: round.round, weapon: weapon(&gun).into(), angles,
-            index: f.opt_num("user_fl_recoil_idx").filter(|n| n.is_finite() && *n >= 0.0) });
+        let gun = match f.int("item_def_index") { 7 => "ak47", 16 => "m4a1", 60 => "m4a1_silencer", _ => "" };
+        let ray = (|| {
+            let origin = [f.opt_num("origin_x")?, f.opt_num("origin_y")?, f.opt_num("origin_z")?];
+            let (pitch, yaw) = (f.opt_num("user_pitch")?, f.opt_num("user_yaw")?);
+            if !origin.iter().all(|n| n.is_finite()) || !pitch.is_finite() || pitch.abs() > 90.0 || !yaw.is_finite() || yaw.abs() > 360.0 { return None; }
+            Some(RecoilShot { tick: f.tick(), origin, view_pitch: pitch, view_yaw: yaw })
+        })();
+        // Retain invalid samples and other guns as boundaries; never bridge them.
+        players.entry(id).or_default().push(Shot { tick: f.tick(), round: round.round, weapon: gun.into(), ray,
+            index: f.opt_num("recoil_index").filter(|n| n.is_finite() && *n >= 0.0) });
     }
     let mut out = BTreeMap::new();
     for (id, mut shots) in players {
         shots.sort_by_key(|s| s.tick);
-        let mut weapons: BTreeMap<String, Vec<RecoilPoint>> = BTreeMap::new();
+        let mut weapons: BTreeMap<String, Vec<RecoilBurst>> = BTreeMap::new();
         let mut start = 0;
         while start < shots.len() {
             let first = &shots[start];
-            if !matches!(first.weapon.as_str(), "ak47" | "m4a1" | "m4a1_silencer") || first.angles.is_none() || !first.index.is_some_and(|n| n < 0.01) {
+            if first.weapon.is_empty() || first.ray.is_none() || !first.index.is_some_and(|n| n < 0.01) {
                 start += 1;
                 continue;
             }
             let mut end = start + 1;
             while end < shots.len() {
                 let (prev, next) = (&shots[end - 1], &shots[end]);
-                if next.round != first.round || next.weapon != first.weapon || next.angles.is_none()
+                if next.round != first.round || next.weapon != first.weapon || next.ray.is_none()
                     || next.tick <= prev.tick || (next.tick - prev.tick) as f64 > tick_rate * 0.3
                     || !next.index.zip(prev.index).is_some_and(|(n, p)| (n - p - 1.0).abs() < 0.05) { break; }
                 end += 1;
             }
             if end - start >= 3 {
-                let points = weapons.entry(first.weapon.clone()).or_default();
-                let (mut previous_yaw, first_pitch) = first.angles.expect("validated first shot");
-                let mut yaw_delta = 0.0;
-                for (i, shot) in shots[start..end].iter().enumerate() {
-                    let (yaw, pitch) = shot.angles.expect("validated burst sample");
-                    yaw_delta += (yaw - previous_yaw + 180.0).rem_euclid(360.0) - 180.0;
-                    previous_yaw = yaw;
-                    if points.len() <= i { points.push(RecoilPoint::default()); }
-                    let point = &mut points[i];
-                    point.samples += 1;
-                    // Positive X = right, positive Y = up; CS pitch increases downwards.
-                    point.x += (-yaw_delta - point.x) / f64::from(point.samples);
-                    point.y += (first_pitch - pitch - point.y) / f64::from(point.samples);
-                }
+                weapons.entry(first.weapon.clone()).or_default().push(RecoilBurst {
+                    round: first.round, start_tick: first.tick,
+                    shots: shots[start..end].iter().map(|s| s.ray.clone().expect("validated burst sample")).collect(),
+                });
             }
             start = end;
         }
@@ -198,33 +210,39 @@ mod recoil_tests {
     use parser::second_pass::{game_events::EventField, variants::Variant};
 
     #[test]
-    fn aligns_fresh_bursts_unwraps_yaw_and_keeps_late_shot_sample_counts() {
+    fn preserves_individual_rays_and_breaks_on_missing_samples_weapons_rounds_and_recovery() {
         let round: RoundInfo = serde_json::from_value(serde_json::json!({"round":1,"startTick":0,"freezeEndTick":10,"endTick":400,"officiallyEndedTick":410,"reason":"","roster":{}})).unwrap();
-        let shot = |tick, index: f32, yaw: Option<f32>, pitch: f32, gun: &str| GameEvent { name: "weapon_fire".into(), tick, fields: vec![
-            EventField { name:"weapon".into(), data:Some(Variant::String(gun.into())) },
+        let shot = |tick, index: f32, yaw: Option<f32>, height: f32, gun| GameEvent { name: "fire_bullets".into(), tick, fields: vec![
+            EventField { name:"item_def_index".into(), data:Some(Variant::U32(gun)) },
             EventField { name:"user_steamid".into(), data:Some(Variant::String("p".into())) },
+            EventField { name:"angles_y".into(), data:Some(Variant::F32(77.)) },
             EventField { name:"user_yaw".into(), data:yaw.map(Variant::F32) },
-            EventField { name:"user_pitch".into(), data:Some(Variant::F32(pitch)) },
-            EventField { name:"user_fl_recoil_idx".into(), data:Some(Variant::F32(index)) },
+            EventField { name:"user_pitch".into(), data:Some(Variant::F32(index)) },
+            EventField { name:"angles_x".into(), data:Some(Variant::F32(-index)) },
+            EventField { name:"origin_x".into(), data:Some(Variant::F32(index * 10.)) },
+            EventField { name:"origin_y".into(), data:Some(Variant::F32(index * 20.)) },
+            EventField { name:"origin_z".into(), data:Some(Variant::F32(height)) },
+            EventField { name:"recoil_index".into(), data:Some(Variant::F32(index)) },
         ] };
         let mut events = vec![
-            shot(10,0.,Some(179.),1.,"weapon_ak47"), shot(16,1.,Some(-179.),3.,"weapon_ak47"), shot(22,2.,Some(-177.),5.,"weapon_ak47"), shot(28,3.,Some(-175.),7.,"weapon_ak47"),
-            shot(60,0.,Some(0.),10.,"ak47"), shot(66,1.,Some(4.),14.,"ak47"), shot(72,2.,Some(8.),18.,"ak47"),
-            // Missing intermediate angle must not be bridged into a three-shot burst.
-            shot(100,0.,Some(0.),0.,"ak47"), shot(106,1.,None,0.,"ak47"), shot(112,2.,Some(4.),4.,"ak47"), shot(118,3.,Some(6.),6.,"ak47"),
-            // Unrecovered and interrupted bursts are excluded, as are other weapons.
-            shot(140,0.5,Some(0.),0.,"ak47"), shot(146,1.5,Some(1.),1.,"ak47"), shot(152,2.5,Some(2.),2.,"ak47"),
-            shot(180,0.,Some(0.),0.,"m4a1"), shot(186,1.,Some(2.),1.,"m4a1_silencer"), shot(192,2.,Some(4.),2.,"m4a1_silencer"),
-            shot(220,0.,Some(0.),0.,"m4a1_silencer"), shot(226,1.,Some(1.),2.,"m4a1_silencer"), shot(232,2.,Some(2.),4.,"m4a1_silencer"),
-            shot(270,0.,Some(0.),0.,"ak47"), shot(290,1.,Some(1.),1.,"ak47"), shot(296,2.,Some(2.),2.,"ak47"),
-            shot(401,0.,Some(0.),0.,"ak47"), shot(407,1.,Some(1.),1.,"ak47"), shot(413,2.,Some(2.),2.,"ak47"),
+            shot(10,0.,Some(179.),64.,7), shot(16,1.,Some(-179.),54.,7), shot(22,2.,Some(-177.),46.,7), shot(28,3.,Some(-175.),46.,7),
+            shot(60,0.,Some(0.),64.,7), shot(66,1.,Some(4.),64.,7), shot(72,2.,Some(8.),64.,7),
+            shot(100,0.,Some(0.),64.,7), shot(106,1.,None,64.,7), shot(112,2.,Some(4.),64.,7), shot(118,3.,Some(6.),64.,7),
+            shot(140,0.5,Some(0.),64.,7), shot(146,1.5,Some(1.),64.,7), shot(152,2.5,Some(2.),64.,7),
+            shot(180,0.,Some(0.),64.,16), shot(186,1.,Some(2.),64.,60), shot(192,2.,Some(4.),64.,60),
+            shot(220,0.,Some(0.),64.,60), shot(226,1.,Some(1.),64.,60), shot(232,2.,Some(2.),64.,60),
+            shot(270,0.,Some(0.),64.,7), shot(290,1.,Some(1.),64.,7), shot(296,2.,Some(2.),64.,7),
+            shot(401,0.,Some(0.),64.,7), shot(407,1.,Some(1.),64.,7), shot(413,2.,Some(2.),64.,7),
+            shot(310,0.,Some(0.),64.,7), shot(316,1.,Some(1.),f32::NAN,7), shot(322,2.,Some(2.),64.,7),
+            shot(340,0.,Some(0.),64.,7), shot(346,2.,Some(1.),64.,7), shot(352,3.,Some(2.),64.,7),
         ];
-        events.reverse(); // Message order is not assumed.
+        events.reverse();
         let result = recoil(&events, &[round], 64.0);
-        let points = &result["p"]["ak47"];
-        assert_eq!(points.iter().map(|p|p.samples).collect::<Vec<_>>(), vec![2,2,2,1]);
-        assert_eq!(points.iter().map(|p|(p.x,p.y)).collect::<Vec<_>>(), vec![(0.,0.),(-3.,-3.),(-6.,-6.),(-6.,-6.)]);
+        let bursts = &result["p"]["ak47"];
+        assert_eq!(bursts.iter().map(|b| (b.round,b.start_tick,b.shots.len())).collect::<Vec<_>>(), vec![(1,10,4),(1,60,3)]);
+        assert_eq!(bursts[0].shots[2].origin, [20.,40.,46.]);
+        assert_eq!((bursts[0].shots[2].view_pitch,bursts[0].shots[2].view_yaw),(2.,-177.));
         assert_eq!(result["p"].len(),2);
-        assert_eq!(result["p"]["m4a1_silencer"][2].y,-4.);
+        assert_eq!(result["p"]["m4a1_silencer"][0].shots.len(),3);
     }
 }

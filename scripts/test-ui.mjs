@@ -4,6 +4,7 @@ import { readdir, readFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { preview } from 'vite';
 import { initialAppearance, THEMES } from '../src/themes.ts';
+import { projectReference } from '../src/recoil.ts';
 const calibration = JSON.parse(await readFile(new URL('../src/data/recoil-reference.json', import.meta.url), 'utf8'));
 const require = createRequire(import.meta.url);
 const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
@@ -24,7 +25,11 @@ try {
     const jobTime = Date.now();
     const jobs = Array.from({ length: 100 }, (_, i) => ({ id: 'job-' + i, demoId: i === 1 ? 'demo-999' : 'demo-0', highlightIds: ['highlight-1'], options, status: i === 0 ? 'running' : i === 1 ? 'queued' : 'done', stage: i === 0 ? 'recording 1/2' : '', progress: i === 0 ? 0.35 : undefined, createdAt: new Date(jobTime - 45000).toISOString(), startedAt: i === 1 ? undefined : new Date(jobTime - 40000).toISOString(), finishedAt: i > 1 ? new Date(jobTime - 10000).toISOString() : undefined, outputs: i < 2 ? [] : Array.from({length:i===2?3:1},(_,j)=>({ file: 'E:/clips/' + i + '-' + j + '.mp4', bytes: 18400000, title: 'Round 08', highlightId: 'highlight-1', isFinal: j===2 })), log: ['recording'] }));
     const player = {steamid:'1',name:'Player',team:'A',kills:20,deaths:10,assists:3,openingKills:4,openingDeaths:2,flashAssists:1,roundsPlayed:22,roundsSurvived:12,kast:77.3,tradeKills:2,tradedDeaths:1,heDamage:20,fireDamage:10,opponents:{'2':3},aim:{all:{shots:100,hits:25,headHits:5,headEligibleHits:20,firstShots:10,firstHits:4,sprayShots:30,sprayHits:9}},activity:{shots:100,flashes:2,smokes:3,hes:2,fires:1,enemiesFlashed:3,teammatesFlashed:1,enemyBlindSeconds:7},clutches:[{round:8,side:'CT',versus:2,kills:2,outcome:'won'}],headshots:10,headshotPct:50,kd:2,multiKills:{'2k':2,'3k':1,'4k':0,'5k':0},clutchesWon:1,damage:2000,utilityDamage:30,friendlyDamage:0,adr:90,highlights:1,bestScore:8};
-    player.recoil = {ak47:[{x:0,y:0,samples:2},{x:-1,y:-2,samples:2},{x:1,y:-4,samples:2},{x:2,y:-5,samples:1}]};
+    const ray = ([x,y], i) => ({ tick: 100 + i * 6, origin: [0,0,64], viewYaw: Math.atan2(x,1000) * 180 / Math.PI, viewPitch: Math.atan2(y,Math.hypot(1000,x)) * 180 / Math.PI });
+    player.recoil = {ak47:[
+      {round:1,startTick:100,shots:[[0,0],[-40,40],[0,80],[40,100]].map(ray)},
+      {round:2,startTick:200,shots:[[0,0],[4000,40],[40,80]].map((p,i)=>({...ray(p,i),tick:200+i*6,origin:[i*20,-i*10,64-i*5]}))},
+    ]};
     const status = { missingRenderTools:[],ok:true,problems:[],dataDir:'E:/data',activeRender:'job-0',version:'test' };
     window.testCalls = [];
     const callbacks = new Map();
@@ -321,30 +326,81 @@ try {
   assert.deepEqual(await recoilPlayers.evaluateAll(buttons => buttons.map(button => button.getAttribute('aria-pressed'))), ['true', 'true', 'true']);
   const zoomIn = recoil.getByRole('button',{name:'Zoom in',exact:true});
   const zoomOut = recoil.getByRole('button',{name:'Zoom out',exact:true});
-  const resetZoom = recoil.getByRole('button',{name:'Reset zoom (reference)',exact:true});
+  const resetZoom = recoil.getByRole('button',{name:'Reset zoom',exact:true});
   assert.ok(!(await zoomOut.isDisabled()));
   const checkPlot = async (zoom, playerPoint = false) => {
-    // Check known shot positions, without depending on tooltip/label rasterization.
+    // Check a late reference point even for 3-shot bursts, plus known player positions.
     await page.waitForFunction(({ zoom, accent, weapons, playerPoint }) => {
       const canvas = document.querySelector('[data-testid="recoil-chart"] canvas');
       const plots = [weapons.ak47,weapons.m4a1,weapons.m4a1_silencer].map(points => {
         const xs = points.map(p=>p.x), ys = points.map(p=>p.y);
         return { points, cx: (Math.min(0,...xs)+Math.max(0,...xs))/2, cy: (Math.min(0,...ys)+Math.max(0,...ys))/2 };
       });
-      const halfSpan = Math.max(3,...plots.flatMap(p=>p.points.map(v=>Math.max(Math.abs(v.x-p.cx),Math.abs(v.y-p.cy))*1.2))) / (zoom*.8);
+      const halfSpan = Math.max(10,...plots.flatMap(p=>p.points.map(v=>Math.max(Math.abs(v.x-p.cx),Math.abs(v.y-p.cy))*1.2))) / (zoom*.8*0.84375);
       const {cx,cy,points} = plots[0];
       const inset = Math.ceil(parseFloat(getComputedStyle(canvas).getPropertyValue('--app-font-caption')) * 3 + 8);
-      const point = playerPoint ? { x: 2, y: -5 } : points.reduce((best,p)=>Math.hypot(p.x-cx,p.y-cy)<Math.hypot(best.x-cx,best.y-cy)?p:best);
+      const point = playerPoint ? { x: -40, y: -100 } : points.reduce((best,p)=>Math.hypot(p.x-cx,p.y-cy)<Math.hypot(best.x-cx,best.y-cy)?p:best);
       return [[point.x, point.y]].every(([px, py]) => {
         const x = (inset + (px - cx + halfSpan) / (2 * halfSpan) * (canvas.clientWidth - inset - 20)) * canvas.width / canvas.clientWidth;
         const y = (20 + (halfSpan - (py - cy)) / (2 * halfSpan) * (canvas.clientHeight - inset - 20)) * canvas.height / canvas.clientHeight;
         const pixels = canvas.getContext('2d').getImageData(Math.round(x)-3, Math.round(y)-3, 7, 7).data;
         return Array.from({length:49},(_,n)=>n*4).some(offset=>accent.every((value,i)=>Math.abs(pixels[offset+i]-value)<5));
       });
-    }, { zoom, playerPoint, weapons: calibration.weapons, accent: (playerPoint ? THEMES.light.players.split(',')[7] : THEMES.light.accent).match(/[a-f0-9]{2}/gi).map(v => parseInt(v, 16)) });
+    }, { zoom, playerPoint, weapons: Object.fromEntries(Object.entries(calibration.weapons).map(([id,points])=>[id,projectReference(points)])), accent: (playerPoint ? THEMES.light.players.split(',')[7] : THEMES.light.accent).match(/[a-f0-9]{2}/gi).map(v => parseInt(v, 16)) });
   };
   await checkPlot(1);
+  const burstView = recoil.getByRole('combobox', { name: 'AK-47 Burst view' });
+  const previousBurst = recoil.getByRole('button', { name: 'AK-47 Previous burst', exact: true });
+  const nextBurst = recoil.getByRole('button', { name: 'AK-47 Next burst', exact: true });
+  await recoilPlayers.first().click();
+  const fixedReferenceImage = await recoil.locator('canvas').first().evaluate(canvas=>canvas.toDataURL());
+  for (const button of [nextBurst,nextBurst,previousBurst,previousBurst]) {
+    await button.click();
+    await page.waitForTimeout(100);
+    assert.equal(await recoil.locator('canvas').first().evaluate(canvas=>canvas.toDataURL()),fixedReferenceImage,'Full reference and axes stay pixel-identical across bursts with different origins');
+  }
+  await recoilPlayers.first().click();
+  await zoomIn.click();
+  assert.equal(await resetZoom.innerText(), '120%');
+  assert.ok(await previousBurst.isDisabled());
+  await nextBurst.click();
+  assert.match(await burstView.innerText(), /Burst 1/);
+  await checkPlot(1.2);
+  await nextBurst.click();
+  assert.match(await burstView.innerText(), /Burst 2/);
+  await checkPlot(1.2); // The extreme second-shot outlier must not rescale the reference.
+  assert.ok(await nextBurst.isDisabled());
+  await previousBurst.click();
+  await previousBurst.click();
+  assert.equal(await burstView.innerText(), 'Average');
+  const selectorBox = await burstView.boundingBox();
+  const previousBox = await previousBurst.boundingBox(), nextBox = await nextBurst.boundingBox();
+  assert.ok(selectorBox.width > 200 && Math.abs(selectorBox.x - previousBox.x - previousBox.width - 4) < 2 && Math.abs(nextBox.x - selectorBox.x - selectorBox.width - 4) < 2, 'Selector fills the space between navigation buttons');
+  assert.ok(await recoil.getByRole('button', { name: 'M4A4 Next burst', exact: true }).isDisabled());
+  const meanImage = await recoil.locator('canvas').first().evaluate(canvas => canvas.toDataURL());
+  await burstView.click();
+  await page.getByRole('option', { name: 'Burst 2 · R2 · tick 200 · 3 shots', exact: true }).click();
+  await page.waitForFunction(before => document.querySelector('[data-testid="recoil-chart"] canvas').toDataURL() !== before, meanImage);
+  assert.match(await burstView.innerText(), /Burst 2/);
+  await checkPlot(1.2); // The extreme second-shot outlier must not rescale the reference.
+  await burstView.click();
+  await page.getByRole('option', { name: 'Average', exact: true }).click();
+  await checkPlot(1.2, true);
+  assert.equal(await resetZoom.innerText(), '120%', 'Burst arrows and selector preserve zoom');
+  await resetZoom.click();
+  await checkPlot(1, true);
   const playShots = recoil.getByRole('button', { name: 'Play AK-47', exact: true });
+  const playPosition = await playShots.boundingBox(), chartPosition = await recoil.locator('.recoil-plot').first().boundingBox();
+  const plotInset = await recoil.locator('canvas').first().evaluate(canvas => Math.ceil(parseFloat(getComputedStyle(canvas).getPropertyValue('--app-font-caption')) * 3 + 8));
+  assert.ok(Math.abs(playPosition.x + playPosition.width - (chartPosition.x + chartPosition.width - 28)) < 2 && Math.abs(playPosition.y + playPosition.height - (chartPosition.y + chartPosition.height - plotInset - 8)) < 2, 'Playback is inside the plotting area at the bottom right');
+  assert.equal(playPosition.width,30);
+  assert.equal(playPosition.height,30);
+  const rightGap = chartPosition.x + chartPosition.width - 20 - playPosition.x - playPosition.width;
+  const bottomGap = chartPosition.y + chartPosition.height - plotInset - playPosition.y - playPosition.height;
+  assert.ok(Math.abs(rightGap-8)<1 && Math.abs(bottomGap-8)<1, 'Playback has equal 8px right and bottom gaps');
+  const iconPosition = await playShots.locator('svg').boundingBox();
+  assert.ok(Math.abs(iconPosition.x + iconPosition.width/2 - playPosition.x - playPosition.width/2) < 1 && Math.abs(iconPosition.y + iconPosition.height/2 - playPosition.y - playPosition.height/2) < 1, 'Playback SVG is centred in both axes');
+  assert.equal(await playShots.innerText(), '', 'Playback uses only the familiar icon');
   assert.ok(await recoil.getByRole('button', { name: 'Play M4A4', exact: true }).isDisabled());
   assert.ok(await recoil.getByRole('button', { name: 'Play M4A1-S', exact: true }).isDisabled());
   const clockStart = new Date();
@@ -369,10 +425,13 @@ try {
   const firstShot = await recoilCanvases();
   assert.ok(firstShot[0] !== completeShots[0], 'Playback reveals a partial player trajectory');
   assert.ok(firstShot.slice(1).every((image,i) => image === completeShots[i+1]), 'Other weapon panels do not change');
-  await checkPlot(1); // The full fixed reference remains visible during playback.
+  await checkPlot(1); // The complete fixed reference remains visible during playback.
+  // The second shot is an off-screen outlier; check the third visible shot's pulse.
+  await page.clock.runFor(200);
+  const pulsingShot = await recoilCanvases();
   await page.clock.runFor(50);
   const settledShot = await recoilCanvases();
-  assert.ok(settledShot[0] !== firstShot[0], 'The newly fired point settles to its normal size');
+  assert.ok(settledShot[0] !== pulsingShot[0], 'The newly fired point settles to its normal size');
   await pauseShots.click();
   await playShots.waitFor();
   assert.equal(await page.evaluate(() => window.shotIntervals.size), 0, 'Pause clears the interval');
@@ -401,7 +460,7 @@ try {
   const plot = recoil.locator('.recoil-plot').first();
   await plot.hover();
   await page.mouse.wheel(0,-100);
-  await page.waitForFunction(()=>document.querySelector('[aria-label="Reset zoom (reference)"]').textContent==='125%');
+  await page.waitForFunction(()=>document.querySelector('[aria-label="Reset zoom"]').textContent==='120%');
   await resetZoom.click();
   await plot.scrollIntoViewIfNeeded();
   const box = await plot.boundingBox();
@@ -414,18 +473,32 @@ try {
   await resetZoom.click();
   await checkPlot(1);
   await zoomIn.click();
-  assert.equal(await resetZoom.innerText(),'125%');
-  await checkPlot(1.25);
+  assert.equal(await resetZoom.innerText(),'120%');
+  await checkPlot(1.2);
   await zoomOut.click();
   assert.equal(await resetZoom.innerText(),'100%');
   await checkPlot(1);
-  for(let step=0;step<4;step++) await zoomIn.click();
-  assert.equal(await resetZoom.innerText(),'200%');
-  await checkPlot(2);
+  for(let step=0;step<8;step++) await zoomIn.click();
+  assert.equal(await resetZoom.innerText(),'250%');
+  await checkPlot(2.5);
   assert.ok(await zoomIn.isDisabled());
-  for(let step=0;step<7;step++) await zoomOut.click();
-  assert.equal(await resetZoom.innerText(),'25%');
-  await checkPlot(0.25);
+  await plot.hover();
+  await page.mouse.wheel(0,-100);
+  await page.waitForTimeout(100);
+  assert.equal(await resetZoom.innerText(),'250%','Wheel cannot exceed 250%');
+  for(let step=0;step<13;step++) await zoomOut.click();
+  assert.equal(await resetZoom.innerText(),'5%');
+  await checkPlot(0.05);
+  assert.ok(await zoomOut.isDisabled());
+  await plot.hover();
+  await page.mouse.wheel(0,100);
+  await page.waitForTimeout(100);
+  assert.equal(await resetZoom.innerText(),'5%','Wheel cannot go below 5%');
+  await page.mouse.wheel(0,-100);
+  await page.waitForFunction(()=>document.querySelector('[aria-label="Reset zoom"]').textContent==='20%');
+  await plot.hover();
+  await page.mouse.wheel(0,100);
+  await page.waitForFunction(()=>document.querySelector('[aria-label="Reset zoom"]').textContent==='5%');
   assert.ok(await zoomOut.isDisabled());
   await resetZoom.click();
   assert.equal(await resetZoom.innerText(),'100%');
@@ -444,9 +517,9 @@ try {
   await page.getByRole('option',{name:'Player',exact:true}).nth(1).click();
   assert.equal(await recoil.getByText('No qualifying bursts',{exact:true}).count(),3);
   assert.equal(await page.evaluate(() => window.shotIntervals.size), 0, 'Changing player clears the interval');
-  assert.equal(await resetZoom.innerText(),'100%','Changing player fits the new trajectories');
+  assert.equal(await resetZoom.innerText(),'120%','Changing player preserves zoom');
   assert.ok(!(await resetZoom.isDisabled()),'Reference remains available without player bursts');
-  await recoil.getByText('━ Actual',{exact:true}).first().waitFor();
+  await recoil.getByText('━ Compensation reference',{exact:true}).first().waitFor();
   await page.setViewportSize({width:1360,height:940});
   await page.getByRole('button',{name:'Switch to dark mode'}).click();
   await page.getByRole('button',{name:'Filter demos'}).click();

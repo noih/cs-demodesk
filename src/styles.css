@@ -614,6 +614,7 @@ video {
 .rt-DataListLabel { font-size:var(--app-font-caption); color:var(--app-muted); }
 .rt-DataListValue { font-size:var(--app-font-body); }
 
+.bounded-select.rt-SelectTrigger { width:200px; min-width:0; max-width:100%; }
 .recoil-controls .rt-Button,.recoil-controls .rt-IconButton,.recoil-controls .rt-SelectTrigger { height:calc(var(--app-font-body) * 1.5 + 10px); min-height:calc(var(--app-font-body) * 1.5 + 10px); box-sizing:border-box; }
 .recoil-controls .rt-IconButton { width:calc(var(--app-font-body) * 1.5 + 10px); }
 .recoil-plot { cursor:grab; touch-action:none; }

@@ -148,7 +148,7 @@ pub struct DemoData {
     #[serde(default)]
     pub aim: BTreeMap<SteamId, BTreeMap<String, crate::aim::AimStats>>,
     #[serde(default)]
-    pub recoil: BTreeMap<SteamId, BTreeMap<String, Vec<crate::aim::RecoilPoint>>>,
+    pub recoil: BTreeMap<SteamId, BTreeMap<String, Vec<crate::aim::RecoilBurst>>>,
     #[serde(default)]
     pub recoil_reference: BTreeMap<String, Vec<crate::aim::RecoilPoint>>,
 }

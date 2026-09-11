@@ -22,6 +22,7 @@ const EVENTS: &[&str] = &[
     "player_death",
     "player_hurt",
     "weapon_fire",
+    "fire_bullets",
     "player_blind",
     "round_start",
     "round_freeze_end",
