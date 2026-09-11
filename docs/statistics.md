@@ -63,16 +63,29 @@ reaction times, crosshair placement, spotted accuracy or trade opportunities.
 
 ## Recoil
 
-The player trajectory is mean view-angle movement, including tracking and target
-transfers. It is not isolated mouse compensation or a recoil skill score.
+The player trajectory uses `fire_bullets` eye angles (`user_pitch` and
+`user_yaw`) and firing origins, not the recoil-bearing firing angles or bullet
+impacts. Each burst retains its round, start tick and individual shot samples.
+Set a fixed target 10 m ahead of the first view, using 2.54 cm per game unit.
+Subtract the pitch/yaw needed to track it from each actual eye origin, then
+project the remaining compensation angles onto the standard level 10 m plane.
+This normalizes initial orientation, translation and crouch height while
+preserving player aim errors. Coordinates are centimetres, right-positive X
+and up-positive Y; pulling down is negative. Tracking a different target remains
+included, so this is not isolated mouse input or a recoil skill score.
 
-An eligible burst starts at recoil index <0.01, contains at least three shots in
-one round, has gaps <=300 ms and index increments within 0.05 of one. Missing
-angles, weapon changes and discontinuities break the burst. Unwrap yaw between
-samples, align to the first shot, and average each shot index only over bursts
-that reached it. Late shots have fewer samples; never pad them with zeros.
-Coordinates are degrees, right-positive X and up-positive Y. All weapon plots
-share the angular scale.
+An eligible AK-47, M4A4 or M4A1-S burst starts at recoil index <0.01, contains
+at least three shots in one round, has gaps <=300 ms and index increments within
+0.05 of one. Missing eye angles/origins, weapon changes and discontinuities
+break the burst. Rays without a forward plane intersection remain missing.
+Each average point uses only valid samples reaching that shot. Never pad missing shots with zeros. Opposite errors
+can cancel in the average, so it cannot replace individual inspection.
+
+The complete negated calibration is projected once into the standard frame.
+The reference never depends on player origins, burst length or aim errors.
+
+Parsed schema 14 stores per-burst eye angles and origins. Earlier cached
+statistics are invalidated and rebuilt through the normal parsing workflow.
 
 The fixed reference comes from `src/data/recoil-reference.json`. See the
 [calibration SOP](recoil-calibration.md) for capture, evidence and updates.
@@ -82,12 +95,19 @@ standard: sample composition, firing cadence and subtick aim changes made that
 reference vary across matches. `aim_punch_angle` was not available through the
 initial event export; requesting a field does not prove it was decoded.
 
+Under the additive angular recoil model, normalized ideal compensation overlaps
+this one fixed reference across initial pitch, yaw wrap, movement, crouch
+transitions and per-shot averages. This assumes the fixed target and calibrated
+recoil model; it does not establish real hit accuracy. Undefined target directions
+and corrected rays without forward intersections remain missing.
+
 ## Verification
 
 ```powershell
 cargo test -p demodesk-core --lib
 npm run build
 npm run test:replay
+npm run test:recoil
 npm run test:ui
 node --experimental-transform-types --test scripts/test-trends.mjs
 ```

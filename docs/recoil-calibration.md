@@ -3,6 +3,10 @@
 Maintains `src/data/recoil-reference.json`, the fixed angular reference used by
 the recoil chart. Reference data is independent of the selected match demo.
 
+The calibration stores firing angles measured with a fixed view. For the player
+trajectory calculation, coordinate conventions, averaging and limitations, see
+[statistics](statistics.md#recoil).
+
 ## Run
 
 Requirements: Windows, Python 3.10+, Rust/Cargo, Steam signed in, and an HLAE
@@ -86,7 +90,7 @@ Reject the recording if any required condition fails:
 - Angles are finite, every magazine is complete, and all recordings share one
   `patch_version`. Do not drop invalid samples, bridge gaps or pad missing shots.
 
-With eye pitch/yaw fixed at zero, chart coordinates in degrees are
+With eye pitch/yaw fixed at zero, stored calibration coordinates in degrees are
 `X = fire_bullets.angles_y` and `Y = fire_bullets.angles_x`. The measurement uses
 firing direction, not world-space bullet impacts, so distance and player
 translation are not projected into the reference.
@@ -96,8 +100,9 @@ repeatability. Its `maxDeviationDegrees = 0` is not a repeatability result.
 The analyzer can compare multiple historical samples; its 0.01-degree acceptance
 threshold is not a guarantee of measurement accuracy.
 
-The player's match trajectory still includes tracking and view changes while
-moving. It is not isolated recoil compensation or a skill score. The reference
+The player's match trajectory uses eye angles and corrects firing-origin
+changes against the assumed 10 m target. It still includes target tracking.
+It is not isolated recoil compensation or a skill score. The reference
 does not cover moving/jumping fire, interrupted bursts, incomplete recovery or
 M4A1-S without its silencer. Matching standing/crouched recoil does not imply
 identical spread, accuracy or recovery behavior.
@@ -118,7 +123,8 @@ After a game update:
 1. Update HLAE if needed, then run the command above.
 2. Review `git diff -- src/data/recoil-reference.json`: build, coverage and angles.
    Changed angles may be valid; never reshape data to match an old reference.
-3. Run `python scripts/test-recoil-lab.py` and `npm run build`, inspect the chart,
+3. Run `python scripts/test-recoil-lab.py`, `npm run test:recoil` and
+   `npm run build`, inspect the chart,
    archive evidence and commit the accepted reference with the normal code review.
 4. If stance behavior is suspected to have changed, arrange an explicit comparison
    experiment instead of assuming the original result applies to the new build.
