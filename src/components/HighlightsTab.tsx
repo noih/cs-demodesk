@@ -60,7 +60,7 @@ export function HighlightsTab({ meta, parsed, status, onRendered, onSetup }: { m
     <Box>
       <Flex gap="4" align="center" wrap="wrap" mb="3">
         <Select.Root value={playerFilter} onValueChange={setPlayerFilter}>
-          <Select.Trigger style={{ minWidth: 200 }} />
+          <Select.Trigger className="bounded-select" title={playerFilter === 'all' ? t('highlights.allPlayers') : displayPlayerName(parsed.stats.find(p => p.steamid === playerFilter)?.name)} />
           <Select.Content>
             <Select.Item value="all">{t('highlights.allPlayers')}</Select.Item>
             {parsed.stats.map((p) => (

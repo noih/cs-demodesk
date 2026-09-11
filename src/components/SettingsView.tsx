@@ -278,7 +278,7 @@ export function SettingsView({ onChanged, toolsRequest = 0, toolsTarget = 'rende
                 {t('settings.language')}
               </Text>
               <Select.Root value={form.language ?? 'auto'} onValueChange={(v) => set({ language: v === 'auto' ? null : v })}>
-                <Select.Trigger style={{ minWidth: 160 }} />
+                <Select.Trigger className="bounded-select" />
                 <Select.Content>
                   <Select.Item value="auto">{t('settings.languageAuto')}</Select.Item>
                   {LANGUAGES.map((l) => (

@@ -173,15 +173,15 @@ export function ChartsTab({ parsed }: { parsed: ParsedDemo }) {
           <EChart option={bars} height={Math.max(260, parsed.stats.length * 30 + 60)} />
         </Card>
         <Card style={{ minWidth: 0 }}>
-          <Flex justify="between" align="center" mb="2" gap="2" wrap="wrap">
+          <Flex direction="column" mb="2" gap="2">
             <Heading data-text-role="subtitle" size="3">{t('charts.radarTitle')}</Heading>
-            <Flex gap="2">
+            <Flex gap="2" style={{ width: '100%' }}>
               {[
                 [radarA, setRadarA],
                 [radarB, setRadarB],
               ].map(([v, set], i) => (
                 <Select.Root key={i} value={v as string} onValueChange={set as (v: string) => void}>
-                  <Select.Trigger />
+                  <Select.Trigger className="bounded-select" style={{ flex: 1, width: 0 }} title={displayPlayerName(parsed.stats.find(p => p.steamid === v)?.name)} />
                   <Select.Content>
                     {parsed.stats.map((p) => (
                       <Select.Item key={p.steamid} value={p.steamid}>
