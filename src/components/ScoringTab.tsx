@@ -37,7 +37,7 @@ export function ScoringTab({meta,parsed,assessment,busy,step,error,job,queuePosi
     {!busy && job?.status==='error' && <Text role="alert" color="red">{t('scoring.failed')}{job.step && ` · ${t(`scoring.steps.${job.step}`)}`}: {job.error}</Text>}
     {(error || historyError) && <Text color="red" role="alert">{t('scoring.failed')}: {error || historyError}</Text>}
     </Flex>
-    {hasRecords && <div style={{overflowX: 'auto', maxWidth: '100%'}}><Table.Root variant="surface" layout="fixed" aria-label={t('scoring.title')}>
+    {hasRecords && <div style={{overflowX: 'auto', maxWidth: '100%'}}><Table.Root variant="surface" layout="auto" aria-label={t('scoring.title')}>
       <Table.Header><Table.Row>
         <Table.ColumnHeaderCell width="22%">{t('common.player')}</Table.ColumnHeaderCell>
         <Table.ColumnHeaderCell>{t('scoring.behavior')}</Table.ColumnHeaderCell>
