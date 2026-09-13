@@ -15,10 +15,12 @@ semver = "1"
 anyhow = "1"
 ahash = "0.8"
 sha1_smol = "1"
+sha2 = "0.10"
 chrono = { version = "0.4", features = ["serde"] }
 ureq = { version = "3", features = ["json", "platform-verifier"] }
 zip = { version = "8", default-features = false, features = ["deflate"] }
 tempfile = "3"
+flate2 = "1"
 
 [target.'cfg(windows)'.dependencies]
 winreg = "0.56"

@@ -6,3 +6,4 @@ pub mod prop_controller;
 pub mod read_bits;
 pub mod sendtables;
 pub mod stringtables;
+pub mod animation_strings;

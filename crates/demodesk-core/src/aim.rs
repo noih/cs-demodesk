@@ -22,7 +22,7 @@ fn weapon(name: &str) -> &str { name.strip_prefix("weapon_").unwrap_or(name) }
 fn damage_weapon(name: &str) -> &str {
     match name { "usp_silencer" => "hkp2000", "m4a1_silencer" => "m4a1", _ => name }
 }
-fn group(name: &str) -> Option<&'static str> {
+pub(crate) fn group(name: &str) -> Option<&'static str> {
     match name {
         "ak47" | "m4a1" | "m4a1_silencer" | "famas" | "galilar" | "aug" | "sg556" => Some("rifles"),
         "awp" => Some("awp"),

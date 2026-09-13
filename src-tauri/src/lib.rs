@@ -57,6 +57,7 @@ struct SettingsResponse {
     restart_required: bool,
     /// size of the stored parse results (demodesk-data/parsed)
     parsed_bytes: u64,
+    anomaly_bytes: u64,
     /// size of the rendered videos (demodesk-data/clips)
     clips_bytes: u64,
     /// size of the extracted radar images (demodesk-data/radar)
@@ -72,10 +73,10 @@ struct DemoResponse {
 }
 
 fn settings_response(engine: &Engine, directory: &DataDirectory) -> SettingsResponse {
-    let (parsed_bytes, clips_bytes, radar_bytes) = engine.storage_bytes();
+    let (parsed_bytes, clips_bytes, radar_bytes, anomaly_bytes) = engine.storage_bytes();
     let selected = directory.selected();
     let restart_required = selected.as_ref().unwrap_or(&directory.default) != &directory.active;
-    SettingsResponse { data_dir_override: selected, default_data_dir: directory.default.clone(), restart_required, settings: engine.settings(), detected: engine.detected(), doctor: engine.doctor(), setup: engine.setup_state(), data_dir: engine.data_dir().to_path_buf(), parsed_bytes, clips_bytes, radar_bytes }
+    SettingsResponse { data_dir_override: selected, default_data_dir: directory.default.clone(), restart_required, settings: engine.settings(), detected: engine.detected(), doctor: engine.doctor(), setup: engine.setup_state(), data_dir: engine.data_dir().to_path_buf(), parsed_bytes, clips_bytes, radar_bytes, anomaly_bytes }
 }
 
 /// Every engine call does file I/O (settings, parse results, job records) or
@@ -179,6 +180,21 @@ async fn get_demo(engine: State<'_, Eng>, id: String) -> CmdResult<DemoResponse>
 }
 
 #[tauri::command]
+async fn scoring_history(engine: State<'_, Eng>, id: String) -> CmdResult<std::collections::BTreeMap<String, Vec<demodesk_core::scoring::Assessment>>> {
+    blocking(&engine, move |e| e.scoring_match_history(&id).map_err(err)).await
+}
+
+#[tauri::command]
+async fn score_match(engine: State<'_, Eng>, id: String, force: bool) -> CmdResult<demodesk_core::scoring::queue::Job> {
+    blocking(&engine, move |e| e.enqueue_analysis(&id, force).map_err(err)).await
+}
+
+#[tauri::command]
+async fn analysis_jobs(engine: State<'_, Eng>) -> CmdResult<Vec<demodesk_core::scoring::queue::Job>> {
+    blocking(&engine, |e| Ok(e.analysis_jobs())).await
+}
+
+#[tauri::command]
 async fn get_kills(engine: State<'_, Eng>, id: String) -> CmdResult<Vec<KillEvent>> {
     blocking(&engine, move |e| e.parsed(&id).map(|p| p.kills.clone()).ok_or_else(|| "demo not parsed".into())).await
 }
@@ -218,6 +234,11 @@ async fn clear_analysis(engine: State<'_, Eng>, id: String) -> CmdResult<()> {
 }
 
 #[tauri::command]
+async fn clear_anomaly_data(engine: State<'_, Eng>) -> CmdResult<u64> {
+    blocking(&engine, |e| e.clear_anomaly_data().map_err(err)).await
+}
+
+#[tauri::command]
 async fn clear_all_analysis(engine: State<'_, Eng>) -> CmdResult<u64> {
     blocking(&engine, |e| e.clear_all_analysis().map_err(err)).await
 }
@@ -225,6 +246,15 @@ async fn clear_all_analysis(engine: State<'_, Eng>) -> CmdResult<u64> {
 #[tauri::command]
 async fn remove_demo(engine: State<'_, Eng>, id: String) -> CmdResult<()> {
     blocking(&engine, move |e| e.remove_demo(&id).map_err(err)).await
+}
+
+#[tauri::command]
+async fn analysis_clips(engine: State<'_, Eng>, demo_id: String, selection: demodesk_core::scoring::clips::Selection) -> CmdResult<Vec<demodesk_core::scoring::clips::RuleClips>> {
+    blocking(&engine, move |e| e.analysis_clips(&demo_id, &selection).map_err(err)).await
+}
+#[tauri::command]
+async fn start_analysis_render(engine: State<'_, Eng>, demo_id: String, selection: demodesk_core::scoring::clips::Selection, options: RenderOptions) -> CmdResult<Vec<RenderJob>> {
+    blocking(&engine, move |e| e.enqueue_analysis_render(&demo_id, selection, options).map_err(err)).await
 }
 
 #[tauri::command]
@@ -337,14 +367,20 @@ pub fn run() {
             register_demo,
             parse_demo,
             get_demo,
+            score_match,
+            analysis_jobs,
+            scoring_history,
             get_kills,
             get_replay,
             get_map_assets,
             clear_radar,
             clear_analysis,
             clear_all_analysis,
+            clear_anomaly_data,
             remove_demo,
             start_render,
+            analysis_clips,
+            start_analysis_render,
             list_jobs,
             cancel_job,
             delete_job,

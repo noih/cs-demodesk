@@ -79,6 +79,7 @@ pub struct FirstPassParser<'a> {
     pub only_header: bool,
     pub prop_infos: Vec<PropInfo>,
     pub header: AHashMap<String, String>,
+    pub server_infos: Vec<csgoproto::CsvcMsgServerInfo>,
     pub is_multithreadable: bool,
     pub needs_velocity: bool,
     pub sendtable_message: Option<CDemoSendTables>,
@@ -150,6 +151,7 @@ impl<'a> FirstPassParser<'a> {
             wanted_prop_ids: vec![],
             prop_infos: vec![],
             header: AHashMap::default(),
+            server_infos: vec![],
             list_props: inputs.list_props,
         }
     }

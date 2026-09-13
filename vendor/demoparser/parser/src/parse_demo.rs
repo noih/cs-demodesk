@@ -32,6 +32,7 @@ pub struct DemoOutput {
     pub chat_messages: Vec<ChatMessageRecord>,
     pub convars: AHashMap<String, String>,
     pub header: Option<AHashMap<String, String>>,
+    pub server_infos: Vec<csgoproto::CsvcMsgServerInfo>,
     pub player_md: Vec<PlayerEndMetaData>,
     /// Live player roster from CCSPlayerController entities (final per-player state,
     /// deduplicated by steamid). Populated even when the end-of-match scoreboard message
@@ -345,6 +346,7 @@ impl<'a> Parser<'a> {
                 convars: output.convars,
                 df: output.df,
                 header: Some(first_pass_output.header),
+            server_infos: first_pass_output.server_infos,
                 game_events_counter: output.game_events_counter,
                 projectiles: output.projectiles,
                 voice_data: output.voice_data,
@@ -421,6 +423,7 @@ impl<'a> Parser<'a> {
             convars,
             df: all_dfs_combined,
             header: Some(first_pass_output.header),
+            server_infos: first_pass_output.server_infos,
             game_events_counter: all_game_events,
             projectiles,
             voice_data,

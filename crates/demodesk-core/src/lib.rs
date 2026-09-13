@@ -3,6 +3,8 @@
 
 pub mod detector;
 pub mod engine;
+pub mod error;
+pub use error::ErrorCode;
 pub mod radar;
 pub mod model;
 pub mod parser;
@@ -18,3 +20,7 @@ mod demo_readiness;
 pub mod aim;
 
 pub mod updates;
+
+pub mod scoring;
+
+pub mod analysis;

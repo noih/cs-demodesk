@@ -193,6 +193,7 @@ pub fn parse_userinfo(bytes: &[u8]) -> Result<UserInfo, DemoParserError> {
 impl<'a> SecondPassParser<'a> {
     pub fn update_string_table(&mut self, bytes: &[u8]) -> Result<(), DemoParserError> {
         let table = CsvcMsgUpdateStringTable::decode(bytes).map_err(|_| DemoParserError::MalformedMessage)?;
+        if self.analysis_changes.is_some() { self.animation_strings.update(&table)?; }
         match self.string_tables.get(table.table_id() as usize) {
             Some(st) => self.parse_string_table(
                 table.string_data().to_vec(),
@@ -211,6 +212,7 @@ impl<'a> SecondPassParser<'a> {
     }
     pub fn parse_create_stringtable(&mut self, bytes: &[u8]) -> Result<(), DemoParserError> {
         let table = CsvcMsgCreateStringTable::decode(bytes).map_err(|_| DemoParserError::MalformedMessage)?;
+        if self.analysis_changes.is_some() { self.animation_strings.create(&table)?; }
         let bytes = match table.data_compressed() {
             true => snap::raw::Decoder::new()
                 .decompress_vec(table.string_data())

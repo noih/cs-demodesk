@@ -1,9 +1,10 @@
+import { AnalysisQueueList } from './AnalysisQueueList.tsx';
 import { Tooltip } from '@radix-ui/themes';
 import { Spinner } from './Spinner.tsx';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Badge, Button, Dialog, Flex, IconButton, Text } from '@radix-ui/themes';
+import { Badge, Button, Dialog, Flex, IconButton, Tabs, Text } from '@radix-ui/themes';
 import { useTranslation } from 'react-i18next';
-import { api, errorText, type DemoMeta, type RenderJob } from '../api.ts';
+import { api, errorText, type AnalysisJob, type DemoMeta, type RenderJob } from '../api.ts';
 import { fmtDateTime, translateRenderStage } from '../i18n/index.ts';
 
 type ClipInfo = { titles: Map<string, string>; error?: string };
@@ -13,6 +14,7 @@ function QueueClips({ job, loadClips }: { job: RenderJob; loadClips: LoadClips }
   const ref = useRef<HTMLDivElement>(null);
   const [info, setInfo] = useState<ClipInfo>();
   useEffect(() => {
+    if(job.analysisClips)return;
     const element = ref.current;
     if (!element) return;
     let alive = true;
@@ -23,11 +25,11 @@ function QueueClips({ job, loadClips }: { job: RenderJob; loadClips: LoadClips }
     }, { root: element.closest('.queue-list') });
     observer.observe(element);
     return () => { alive = false; observer.disconnect(); };
-  }, [job.demoId, loadClips]);
+  }, [job.demoId, job.analysisClips, loadClips]);
   return <div ref={ref} className="queue-clips">
     {info?.error && <Text color="red">{info.error}</Text>}
-    {!info && <Spinner />}
-    <ul>{job.highlightIds.map(id => <li key={id}>{info?.titles.get(id) ?? id}</li>)}</ul>
+    {!info && !job.analysisClips && <Spinner />}
+    <ul>{job.highlightIds.map(id => <li key={id}>{job.analysisClips?.highlights.find(h=>h.id===id)?.title ?? info?.titles.get(id) ?? id}</li>)}</ul>
   </div>;
 }
 
@@ -61,16 +63,35 @@ function QueueList({ jobs, demos, onSelect }: { jobs: RenderJob[]; demos: DemoMe
     </section>;
   }) : <Text>{t('ui.queueEmpty')}</Text>}</div>;
 }
-export function QueueDialog({ jobs, demos, onSelect }: { jobs: RenderJob[]; demos: DemoMeta[]; onSelect: (id: string) => void }) {
+export function QueueDialog({ jobs, analysisJobs, demos, onSelect, onChanged }: {
+  jobs: RenderJob[]; analysisJobs: AnalysisJob[]; demos: DemoMeta[];
+  onSelect: (id: string, tab: 'renders' | 'scoring') => void; onChanged: () => Promise<void>;
+}) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
-
   const active = jobs.filter(j => j.status === 'running' || j.status === 'queued');
+  const analysisActive = analysisJobs.filter(j => j.status === 'running' || j.status === 'queued');
+  const failed = analysisJobs.filter(j => j.status === 'error').length;
+  const allActive = [...active, ...analysisActive];
+  const select = (id: string, tab: 'renders' | 'scoring') => { onSelect(id, tab); setOpen(false); };
 
   return <Dialog.Root open={open} onOpenChange={setOpen}>
-    <Tooltip delayDuration={150} content={t('ui.queue')}><Dialog.Trigger>{active.length ? <Button variant="soft" color="gray" className="queue-trigger"><span className="queue-dot" />{t('ui.queueCount', { running: active.filter(j => j.status === 'running').length, queued: active.filter(j => j.status === 'queued').length })}</Button> : <IconButton variant="ghost" className="queue-trigger" aria-label={t('ui.queue')} ><i aria-hidden="true" className="bi bi-list-task app-icon" /></IconButton>}</Dialog.Trigger></Tooltip>
-    <Dialog.Content maxWidth="720px" aria-describedby={undefined}><Dialog.Title>{t('ui.queue')}</Dialog.Title>
-      <QueueList jobs={active} demos={demos} onSelect={id => { onSelect(id); setOpen(false); }} />
+    <Tooltip delayDuration={150} content={t('ui.queue')}><Dialog.Trigger>
+      {allActive.length || failed ? <Button variant="soft" color="gray" className="queue-trigger" aria-label={t('ui.queue')}>
+        <span className="queue-dot" />{t('ui.queueCount', { running: allActive.filter(j => j.status === 'running').length, queued: allActive.filter(j => j.status === 'queued').length })}
+        {failed > 0 && <Badge color="red">{t('scoring.queue.errors', {count: failed})}</Badge>}
+      </Button> : <IconButton variant="ghost" className="queue-trigger" aria-label={t('ui.queue')}><i aria-hidden="true" className="bi bi-list-task app-icon" /></IconButton>}
+    </Dialog.Trigger></Tooltip>
+    <Dialog.Content maxWidth="720px" aria-describedby={undefined}>
+      <Dialog.Title>{t('ui.queue')}</Dialog.Title>
+      <Tabs.Root defaultValue="renders">
+        <Tabs.List>
+          <Tabs.Trigger value="renders">{t('ui.queueVideo')}{active.length > 0 && <Badge ml="2">{active.length}</Badge>}</Tabs.Trigger>
+          <Tabs.Trigger value="scoring">{t('ui.queueAnalysis')}{analysisActive.length > 0 && <Badge ml="2">{analysisActive.length}</Badge>}{failed > 0 && <Badge ml="2" color="red">{t('scoring.queue.errors', {count: failed})}</Badge>}</Tabs.Trigger>
+        </Tabs.List>
+        <Tabs.Content value="scoring"><AnalysisQueueList jobs={analysisJobs} demos={demos} onChanged={onChanged} onSelect={id => select(id, 'scoring')} /></Tabs.Content>
+        <Tabs.Content value="renders"><QueueList jobs={active} demos={demos} onSelect={id => select(id, 'renders')} /></Tabs.Content>
+      </Tabs.Root>
       <Flex justify="end" mt="4"><Dialog.Close><Button variant="soft">{t('common.close')}</Button></Dialog.Close></Flex>
     </Dialog.Content>
   </Dialog.Root>;

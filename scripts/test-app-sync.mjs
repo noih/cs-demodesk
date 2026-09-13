@@ -17,6 +17,7 @@ function fixture(t, overrides = {}) {
     status: async () => { calls.status++; return { ok: true }; },
     demos: async () => { calls.demos++; return []; },
     jobs: async () => { calls.jobs++; return []; },
+    analysisJobs: async () => [],
     ...overrides,
   };
   const snapshots = [], events = [], errors = [];
@@ -187,4 +188,15 @@ test('a failed follow-up reports failure even if the first scan succeeded', asyn
   assert.equal(await result, false);
   assert.equal(f.snapshots.length, 1);
   assert.equal(f.errors.length, 1);
+});
+
+test('analysis queue events beat stale snapshots and stale revisions', async t => {
+  const slow=deferred();
+  const f=fixture(t,{analysisJobs:()=>slow.promise});
+  const refreshed=f.sync.refresh();await f.tick(300);
+  f.emit({type:'analysis-job-changed',job:{id:'a',sequence:1,revision:3,status:'done'}});
+  f.emit({type:'analysis-job-changed',job:{id:'a',sequence:1,revision:1,status:'queued'}});
+  f.emit({type:'analysis-job-changed',job:{id:'b',sequence:2,revision:0,status:'queued'}});
+  slow.resolve([{id:'a',sequence:1,revision:2,status:'running'}]);await refreshed;
+  assert.deepEqual(f.snapshots[0].analysisJobs.map(j=>[j.id,j.status]),[['b','queued'],['a','done']]);
 });

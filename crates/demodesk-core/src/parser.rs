@@ -87,6 +87,96 @@ impl DemoParser {
         })
     }
 
+    pub(crate) fn scene_frames(&self, bytes: &[u8], first_tick: i32, last_tick: i32, step: i32) -> Result<Vec<crate::analysis::scene::SceneFrame>> {
+        self.collect_scene_frames(bytes,first_tick,last_tick,step,false)
+    }
+    pub fn player_tracking_frames(&self, bytes: &[u8], first_tick:i32,last_tick:i32,step:i32) -> Result<Vec<crate::analysis::scene::SceneFrame>> {
+        anyhow::ensure!(first_tick>=0 && last_tick>=first_tick && step>0,"invalid tracking interval");
+        self.collect_scene_frames(bytes,first_tick,last_tick,step,true)
+    }
+    fn collect_scene_frames(&self,bytes:&[u8],first_tick:i32,last_tick:i32,step:i32,tracking_only:bool) -> Result<Vec<crate::analysis::scene::SceneFrame>> {
+        let mut frames=Vec::new();
+        self.visit_scene_frames(bytes,first_tick,last_tick,step,tracking_only,|frame|{frames.push(frame);Ok(())})?;
+        Ok(frames)
+    }
+    /// Retains only the final packet state for the current tick; the consumer owns its history.
+    pub fn visit_scene_frames(&self,bytes:&[u8],first_tick:i32,last_tick:i32,step:i32,tracking_only:bool,mut visit:impl FnMut(crate::analysis::scene::SceneFrame)->Result<()>) -> Result<()> {
+        anyhow::ensure!(first_tick>=0 && last_tick>=first_tick && step>0,"invalid scene interval");
+        let inputs = self.inputs(&[], &[], &[], vec![i32::MIN])?;
+        let mut first = FirstPassParser::new(&inputs);
+        let output = first.parse_demo(bytes, true).map_err(|e| anyhow!("scene schema: {e:?}"))?;
+        let mut second = parser::second_pass::parser_settings::SecondPassParser::new(output,parser::first_pass::parser::HEADER_ENDS_AT_BYTE,true,None).map_err(|e| anyhow!("scene parser: {e:?}"))?;
+        second.capture_pose_fields = !tracking_only;
+        let mut pending:Option<crate::analysis::scene::SceneFrame>=None;
+        let mut failure=None;
+        second.start_with_observer(bytes, |p| {
+            if pending.as_ref().is_some_and(|frame|p.tick>frame.tick) {
+                if let Err(error)=visit(pending.take().unwrap()){failure=Some(error);return false;}
+            }
+            if p.tick > last_tick { return false; }
+            if p.tick >= first_tick && (p.tick-first_tick)%step == 0 {
+                pending=Some(crate::analysis::scene::capture(p,tracking_only));
+            }
+            true
+        }).map_err(|e| anyhow!("scene packets: {e:?}"))?;
+        if let Some(error)=failure{return Err(error);}
+        if let Some(frame)=pending{visit(frame)?;}
+        Ok(())
+    }
+    /// Separate, explicitly requested scoring preparation; normal demo parsing is unchanged.
+    pub fn write_match_state(&self, bytes: &[u8], output: impl std::io::Write) -> Result<()> {
+        let inputs = self.inputs(&[], &[], &["all".into()], vec![i32::MIN])?;
+        let mut first = FirstPassParser::new(&inputs);
+        let parsed = first
+            .parse_demo(bytes, true)
+            .map_err(|e| anyhow!("analysis schema: {e:?}"))?;
+        let tick_rate = crate::analysis::server_tick_rate(&parsed.server_infos)?;
+        let mut writer = crate::analysis::compact::Writer::new(
+            output,
+            crate::analysis::demo_source(bytes)?,
+            tick_rate,
+        )?;
+        let mut second = parser::second_pass::parser_settings::SecondPassParser::new(
+            parsed,
+            parser::first_pass::parser::HEADER_ENDS_AT_BYTE,
+            true,
+            None,
+        )
+        .map_err(|e| anyhow!("analysis parser: {e:?}"))?;
+        second.capture_pose_fields = true;
+        second.analysis_changes = Some(Default::default());
+        let mut failure = None;
+        second
+            .start_with_observer(bytes, |p| {
+                if let Err(error) = writer.push(p) {
+                    failure = Some(error);
+                    return false;
+                }
+                true
+            })
+            .map_err(|e| anyhow!("analysis packets: {e:?}"))?;
+        if let Some(error) = failure {
+            return Err(error);
+        }
+        writer.events(&second.game_events)?;
+        writer.finish()?;
+        Ok(())
+    }
+    pub fn server_info(&self, bytes: &[u8]) -> Result<Vec<csgoproto::CsvcMsgServerInfo>> {
+        let inputs = self.inputs(&[], &[], &[], vec![])?;
+        let mut first = FirstPassParser::new(&inputs);
+        Ok(first.parse_demo(bytes, true).map_err(|e| anyhow!("server info: {e:?}"))?.server_infos)
+    }
+    /// Property names actually advertised by this demo's send tables.
+    pub fn property_names(&self, bytes: &[u8]) -> Result<Vec<String>> {
+        let mut inputs = self.inputs(&[], &[], &[], vec![])?;
+        inputs.list_props = true;
+        let mut first = FirstPassParser::new(&inputs);
+        let out = first.parse_demo(bytes, true).map_err(|e| anyhow!("properties: {e:?}"))?;
+        let mut names: Vec<_> = out.prop_controller.name_to_id.keys().cloned().collect();
+        names.sort();
+        Ok(names)
+    }
     pub fn header(&self, bytes: &[u8]) -> Result<HashMap<String, String>> {
         let inputs = self.inputs(&[], &[], &[], vec![])?;
         let mut first = FirstPassParser::new(&inputs);
@@ -127,6 +217,7 @@ impl DemoParser {
         let header = self.header(bytes)?;
         let out = self.events(bytes, &strings(EVENTS), &strings(PLAYER_EXTRA), &strings(OTHER_EXTRA))?;
 
+        let tick_rate = crate::analysis::server_tick_rate(&out.server_infos)?;
         let mut players: Vec<PlayerInfo> = if out.player_md.is_empty() { &out.roster } else { &out.player_md }
             .iter()
             .filter_map(|p| {
@@ -180,8 +271,8 @@ impl DemoParser {
 
         let damage = damage_from_events(groups.get("player_hurt").map(|v| v.as_slice()).unwrap_or(&[]), &rounds);
 
-        let recoil = crate::aim::recoil(&out.game_events, &rounds, 64.0);
-        let aim = crate::aim::compute(&out.game_events, &rounds, 64.0);
+        let recoil = crate::aim::recoil(&out.game_events, &rounds, tick_rate);
+        let aim = crate::aim::compute(&out.game_events, &rounds, tick_rate);
         let activity = activity_from_events(&out.game_events, &rounds);
         let round_metrics = rounds.iter().map(|r| {
             let window = std::slice::from_ref(r);
@@ -201,7 +292,7 @@ impl DemoParser {
                 path: path.to_string_lossy().to_string(),
                 map_name: header.get("map_name").cloned().unwrap_or_default(),
                 server_name: header.get("server_name").cloned().unwrap_or_default(),
-                tick_rate: 64.0,
+                tick_rate,
                 players,
             },
             kills,
@@ -272,6 +363,7 @@ fn col_len(v: &VarVec) -> usize {
         VarVec::U64(v) => v.len(),
         VarVec::String(v) => v.len(),
         VarVec::StringVec(v) => v.len(),
+        VarVec::XYZVec(v) => v.len(),
         _ => 0,
     }
 }
@@ -294,6 +386,13 @@ impl<'a> Row<'a> {
         }
     }
 
+    /// Missing vectors stay missing; do not replace absent positions with zero.
+    pub fn vec3(&self, key: &str) -> Option<[f64; 3]> {
+        match self.col(key)? {
+            (VarVec::XYZVec(v), i) => v.get(i).copied().flatten().map(|p| p.map(f64::from)),
+            _ => None,
+        }
+    }
     pub fn flag(&self, key: &str) -> bool {
         self.num(key).map(|v| v != 0.0).unwrap_or(false)
     }
@@ -666,5 +765,19 @@ mod activity_tests {
         let a = &stats["a"];
         assert_eq!((a.shots,a.flashes,a.hes,a.enemies_flashed,a.teammates_flashed),(1,1,1,2,1));
         assert!((a.enemy_blind_seconds - 4.05).abs() < 0.0001);
+    }
+}
+
+#[cfg(test)]
+mod vector_rows_tests {
+    use super::*;
+    #[test]
+    fn position_vectors_preserve_fractional_values_and_missing_samples() {
+        let column = VarVec::XYZVec(vec![Some([1.25,-2.5,3.75]),None]);
+        assert_eq!(col_len(&column),2);
+        let rows = Rows { cols:vec![column], index:HashMap::from([("position".into(),0)]), order:vec![0,1] };
+        let values: Vec<_> = rows.iter().map(|r|r.vec3("position")).collect();
+        assert_eq!(values,vec![Some([1.25,-2.5,3.75]),None]);
+        assert_eq!(rows.iter().next().unwrap().vec3("absent"),None);
     }
 }

@@ -20,10 +20,25 @@ const NSERIALBITS: u32 = 17;
 const STOP_READING_SYMBOL: u8 = 39;
 const HUFFMAN_CODE_MAXLEN: u32 = 17;
 
+/// These arrays need their sendtable indices; the statistics property map keeps one scalar per ID.
+pub fn is_pose_field(name: &str) -> bool {
+    (name.starts_with("CCSPlayerPawn.") && matches!(name.rsplit('.').next(), Some(
+        "m_fFlags" | "m_nLastJumpTick" | "m_flLastJumpFrac" | "m_MoveType" | "m_nActualMoveType"
+        | "m_flWaterLevel" | "m_nWaterLevel" | "m_nLadderSurfacePropIndex")))
+        || name.contains("PoseRecipe") || matches!(name.rsplit('.').next(),
+        Some("m_vecExternalGraphIds" | "m_vecExternalClipIds" | "m_vecSecondarySkeletons" | "m_vecSecondarySkeletonSlotIDs"))
+}
+
+/// Decode only the sendtable-qualified GameTick_t representation; never alter legacy properties.
+fn analysis_game_tick(raw: u32) -> i32 { ((raw >> 1) as i32) ^ -((raw & 1) as i32) }
+
 #[derive(Debug, Clone)]
 pub struct Entity {
     pub cls_id: u32,
     pub entity_id: i32,
+    pub serial: u32,
+    pub pose_fields: AHashMap<Vec<i32>, (String, Variant)>,
+    pub pose_array_lengths: AHashMap<Vec<i32>, (String, u32)>,
     pub props: AHashMap<u32, Variant>,
     pub entity_type: EntityType,
 }
@@ -77,12 +92,14 @@ impl<'a> SecondPassParser<'a> {
 
             match cmd {
                 EntityCmd::Delete => {
+                    if let Some(changes) = &mut self.analysis_changes { changes.lifecycle.insert(entity_id); }
                     self.projectiles.remove(&entity_id);
                     if let Some(entry) = self.entities.get_mut(entity_id as usize) {
                         *entry = None;
                     }
                 }
                 EntityCmd::CreateAndUpdate => {
+                    if let Some(changes) = &mut self.analysis_changes { changes.lifecycle.insert(entity_id); }
                     self.create_new_entity(&mut bitreader, &entity_id, &mut events_to_emit)?;
                     self.update_entity(&mut bitreader, entity_id, false, &mut events_to_emit, is_fullpacket)?;
                 }
@@ -276,6 +293,42 @@ impl<'a> SecondPassParser<'a> {
                     &entity_id,
                 );
             }
+            if self.capture_pose_fields {
+                let pose_value = match field {
+                    Field::Value(value) => Some(value),
+                    Field::Vector(vector) => match vector.field_enum.as_ref() { Field::Value(value) => Some(value), _ => None },
+                    _ => None,
+                };
+                if let Some(value) = pose_value.filter(|value| value.analysis_name.is_some() || is_pose_field(&value.full_name)) {
+                    let analysis_name = value.analysis_name.as_deref().unwrap_or(&value.full_name);
+                    let indices = path.path[..=path.last as usize].to_vec();
+                    if matches!(field, Field::Vector(_)) {
+                        if let Variant::U32(length) = &result {
+                            entity.pose_array_lengths.insert(indices.clone(), (analysis_name.to_owned(), *length));
+                            entity.pose_array_lengths.retain(|key, _| !key.starts_with(&indices) || key.len() <= indices.len()
+                                || key[indices.len()] >= 0 && (key[indices.len()] as u32) < *length);
+                            entity.pose_fields.retain(|key, (name, _)| {
+                                let keep = !key.starts_with(&indices) || key.len() <= indices.len()
+                                    || key[indices.len()] >= 0 && (key[indices.len()] as u32) < *length;
+                                if !keep {
+                                    if let Some(changes) = &mut self.analysis_changes {
+                                        changes.pose_removals.push((entity_id, key.clone(), name.clone()));
+                                    }
+                                }
+                                keep
+                            });
+                        }
+                    }
+                    let signed_tick = match (&result, value.analysis_signed_tick) {
+                        (Variant::U32(raw), true) => Some(Variant::I32(analysis_game_tick(*raw))),
+                        _ => None,
+                    };
+                    capture_analysis_value(entity, entity_id, indices, analysis_name, signed_tick.as_ref().unwrap_or(&result), self.analysis_changes.as_mut());
+                }
+            }
+            if let (Some(changes), Some(fi)) = (&mut self.analysis_changes, field_info) {
+                if fi.should_parse { changes.properties.insert((entity_id, fi.prop_id)); }
+            }
             SecondPassParser::insert_field(entity, result, field_info);
         }
         Ok(n_updates)
@@ -332,8 +385,8 @@ impl<'a> SecondPassParser<'a> {
         // already equals num_classes + 1 (see first_pass::parser::parse_class_info).
         let cls_bits = (self.cls_by_id.len() as f32).log2().ceil() as u32;
         let cls_id: u32 = bitreader.read_nbits(cls_bits)?;
-        // Both of these are not used. Don't think they are interesting for the parser
-        let _serial = bitreader.read_nbits(NSERIALBITS)?;
+        // The serial distinguishes entity-index reuse across lifetimes.
+        let serial = bitreader.read_nbits(NSERIALBITS)?;
         let _unknown = bitreader.read_varint();
         let entity_type = self.check_entity_type(&cls_id)?;
         match entity_type {
@@ -346,6 +399,9 @@ impl<'a> SecondPassParser<'a> {
         };
         let entity = Entity {
             entity_id: *entity_id,
+            serial,
+            pose_fields: AHashMap::default(),
+            pose_array_lengths: AHashMap::default(),
             cls_id,
             props: AHashMap::with_capacity(0),
             entity_type,
@@ -361,9 +417,16 @@ impl<'a> SecondPassParser<'a> {
             Some(entry) => *entry = Some(entity),
             None => return Err(DemoParserError::VectorResizeFailure),
         };
-        // Insert baselines
-        if let Some(baseline_bytes) = self.baselines.get(&cls_id) {
-            let b = &baseline_bytes.clone();
+        // Analysis uses the current wire dictionary: legacy string-table updates
+        // can omit baselines for the first instance of a newly introduced class.
+        // Preserve the existing statistics parser when generic capture is disabled.
+        let baseline = if self.analysis_changes.is_some() {
+            self.animation_strings.instance_baseline(cls_id)
+        } else {
+            self.baselines.get(&cls_id).map(Vec::as_slice)
+        };
+        if let Some(baseline_bytes) = baseline {
+            let b = baseline_bytes.to_vec();
             let mut br = Bitreader::new(&b);
             self.update_entity(&mut br, *entity_id, true, &mut vec![], false)?;
         }
@@ -437,4 +500,66 @@ fn is_grenade_prop(full_name: &str) -> bool {
         }
     }
     false
+}
+
+// Capture before insert_field: distinct wire paths can share one legacy statistics ID.
+fn capture_analysis_value(
+    entity: &mut Entity, entity_id: i32, indices: Vec<i32>, name: &str,
+    result: &Variant, changes: Option<&mut crate::second_pass::parser_settings::AnalysisChanges>,
+) {
+    if let Some(changes) = changes { changes.poses.insert((entity_id, indices.clone())); }
+    entity.pose_fields.insert(indices, (name.to_owned(), result.clone()));
+}
+
+#[cfg(test)]
+mod analysis_owner_tests {
+    use super::*;
+    use crate::first_pass::{prop_controller::PropController, sendtables::ValueField};
+    use crate::second_pass::{decoder::Decoder, parser_settings::AnalysisChanges};
+
+    #[test]
+    fn wire_owned_vectors_survive_legacy_property_collision() {
+        let mut controller = PropController::new(vec![], vec![], Default::default(), Default::default(), false, &[], false);
+        let mut velocity = ValueField::new(Decoder::NoscaleDecoder, "m_vecZ");
+        velocity.send_node = "m_vecVelocity".into();
+        controller.handle_prop("CCSPlayerPawn.m_vecZ", &mut velocity, vec![186]);
+        let mut view = ValueField::new(Decoder::NoscaleDecoder, "m_vecZ");
+        view.send_node = "m_vecViewOffset".into();
+        controller.handle_prop("CCSPlayerPawn.m_vecZ", &mut view, vec![211]);
+        assert_eq!(velocity.prop_id, view.prop_id);
+        assert_eq!(velocity.full_name, view.full_name);
+        assert_eq!(velocity.analysis_name.as_deref(), Some("CCSPlayerPawn.m_vecVelocity.m_vecZ"));
+        assert_eq!(view.analysis_name.as_deref(), Some("CCSPlayerPawn.m_vecViewOffset.m_vecZ"));
+        let mut entity = Entity {
+            cls_id: 0, entity_id: 7, serial: 1, entity_type: EntityType::Normal,
+            pose_fields: Default::default(), pose_array_lengths: Default::default(), props: Default::default(),
+        };
+        let mut changes = AnalysisChanges::default();
+        for (field, path, number) in [(&view, 211, 64.0), (&velocity, 186, -120.0)] {
+            let result = Variant::F32(number);
+            capture_analysis_value(&mut entity, 7, vec![path], field.analysis_name.as_deref().unwrap(), &result, Some(&mut changes));
+            SecondPassParser::insert_field(&mut entity, result, Some(FieldInfo {
+                decoder: field.decoder, should_parse: true, prop_id: field.prop_id,
+            }));
+        }
+        assert_eq!(entity.props.get(&view.prop_id), Some(&Variant::F32(-120.0)));
+        assert_eq!(entity.pose_fields.get(&vec![211]).unwrap().1, Variant::F32(64.0));
+        assert_eq!(entity.pose_fields.get(&vec![186]).unwrap().1, Variant::F32(-120.0));
+        assert_eq!(changes.poses.len(), 2);
+    }
+}
+
+#[cfg(test)]
+mod movement_wire_tests {
+    use super::*;
+    #[test]
+    fn analysis_movement_preserves_signed_tick_and_exact_field_ownership() {
+        assert_eq!(analysis_game_tick(7268),3634);
+        assert_eq!(analysis_game_tick(1),-1);
+        assert_eq!(analysis_game_tick(0),0);
+        assert_eq!(analysis_game_tick(u32::MAX),i32::MIN);
+        assert!(is_pose_field("CCSPlayerPawn.CCSPlayer_MovementServices.m_nLastJumpTick"));
+        assert!(is_pose_field("CCSPlayerPawn.m_fFlags"));
+        assert!(!is_pose_field("CCSPlayerController.m_fFlags"));
+    }
 }

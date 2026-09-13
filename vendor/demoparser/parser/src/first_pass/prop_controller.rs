@@ -14,6 +14,8 @@ pub const SPECTATOR_TEAM_NUM: u32 = 1;
 pub const BUTTONS_BASEID: u32 = 100000;
 pub const FIRE_POSITIONS_ID: u32 = 700000000;
 pub const FIRE_BURNING_ID: u32 = 700000100;
+pub const SMOKE_VOXELS_ID: u32 = 700100000;
+pub const SMOKE_VOXELS_LIMIT: u32 = 65536;
 pub const NORMAL_PROP_BASEID: u32 = 1000;
 pub const WEAPON_SKIN_NAME: u32 = 420420420;
 pub const WEAPON_ORIGINGAL_OWNER_ID: u32 = 6942000;
@@ -450,6 +452,12 @@ impl PropController {
     }
     pub fn handle_prop(&mut self, full_name: &str, f: &mut ValueField, path: Vec<i32>) {
         f.full_name = full_name.to_string();
+        // The legacy statistics name omits send_node and aliases these two vectors.
+        // Analysis retains their recorded owner separately, without changing basic property IDs.
+        f.analysis_name = if matches!(f.send_node.as_str(), "m_vecViewOffset" | "m_vecVelocity")
+            && matches!(f.name.as_str(), "m_vecX" | "m_vecY" | "m_vecZ") {
+            full_name.rsplit_once('.').map(|(owner, leaf)| format!("{owner}.{}.{leaf}", f.send_node))
+        } else { None };
 
         let prop_name = split_weapon_prefix_from_prop_name(full_name);
 
@@ -460,8 +468,8 @@ impl PropController {
         self.path_to_name.insert(a, prop_name.to_string());
         let grenade_or_weapon = is_grenade_or_weapon(full_name);
 
-        if prop_name == "m_firePositions" || prop_name == "m_bFireIsBurning" {
-            f.prop_id = if prop_name == "m_firePositions" { FIRE_POSITIONS_ID } else { FIRE_BURNING_ID };
+        if prop_name == "m_firePositions" || prop_name == "m_bFireIsBurning" || prop_name == "m_VoxelFrameData" {
+            f.prop_id = match prop_name.as_str() { "m_firePositions" => FIRE_POSITIONS_ID, "m_bFireIsBurning" => FIRE_BURNING_ID, _ => SMOKE_VOXELS_ID };
             if !self.name_to_id.contains_key(&prop_name) {
                 self.name_to_id.insert(prop_name.clone(), f.prop_id);
                 self.id_to_name.insert(f.prop_id, prop_name.clone());

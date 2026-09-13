@@ -89,3 +89,55 @@ To manually test the missing-WebView2 native prompt without uninstalling Runtime
 cargo test -p demodesk --lib webview_runtime::tests::missing_runtime_install_guidance -- --ignored
 The prompt uses the Windows user interface language (Traditional/Simplified Chinese, Japanese, Korean, Russian, or English; other languages fall back to English). Choose No to exit, or Yes to open Microsoft's official download page.
 See [Video encoding](../docs/video-encoding.md) for quality defaults, size limits, and FFmpeg regression checks.
+
+
+Shared scoring analysis tools and source/version requirements are documented in
+[analysis-data.md](../docs/analysis-data.md). Run their synthetic checks with:
+
+```powershell
+node --test scripts/test-analysis-contract.mjs scripts/test-analysis-geometry.mjs scripts/test-analysis-attachments.mjs scripts/test-attachment-geometry.mjs scripts/test-analysis-hitboxes.mjs scripts/test-crosshair-input.mjs
+```
+
+Use isolated ignored output directories for real captures and scoring integration
+checks; `scoring_app_check` parses only the explicitly supplied demo and disables
+Steam replay scanning in its isolated store. The app's rule remains diagnostic
+until source qualification and independent calibration pass.
+
+
+State-change journals are the preferred analysis export (`analysis_journal`), not
+per-tick JSON snapshots. See [journal format and measurements](../docs/analysis-data.md#正式資料方向起始狀態變更紀錄).
+Additional checks: `node --test scripts/test-analysis-journal.mjs scripts/test-analysis-manifest.mjs`.
+
+`build-crosshair-input.mjs LOG TRACKING.ndjson CONTEXT DATA_DIRECTORY RESOLUTION`
+now publishes one shared body-measurement delta journal, consumed directly by the
+native scoring path. It refuses to replace an existing journal. The JSON scene input
+is retained only for legacy measurement comparisons. See `docs/analysis-data.md`.
+
+New body journals are streamed as lossless `.ndjson.gz` files. `--captures MANIFEST`
+accepts ordered hash-pinned capture segments and scans the scene once. Use
+`capture-analysis.ps1` for controlled, checkpointed offline captures; it requires
+explicit tool paths and attachment names and will not attach to an existing game.
+Precision experiment commands and limits are in `docs/analysis-data.md`.
+
+Capture logs now stream directly to gzip; legacy plain checkpoints remain readable.
+Run `./scripts/test-analysis-capture.ps1` for atomic checkpoint publication and
+`node scripts/check-analysis-run.mjs BODY.ndjson.gz CONTEXT.json NEW_SUMMARY.json`
+for private-data-free coverage counts. Whole-match measurements and limitations
+are recorded in `docs/analysis-data.md`.
+
+Whole-match credit analysis is manual; normal demo auto-analysis is unchanged.
+See [analysis performance](../docs/analysis-performance.md) for the compact
+contract, cold/warm measurements, input-size accounting and remaining limits.
+`analysis_compact` validates lossless generic conversion; `scoring_app_check`
+exercises one match call, latest-result reuse and a full-match retry that atomically replaces every player’s previous result.
+Do not loop `score_player(..., true)` as a performance benchmark.
+
+The native `scoring_app_check` acceptance gate now fails when no measured samples
+reach the rules, when a separately prepared body journal is used, or when the
+30 s preparation / 30 s all-player analysis budgets are exceeded. Generic bytes
+are reported; the current roughly 35 MB baseline is accepted and the 10 MB
+optimization target is deferred. App scoring always uses the native match source;
+legacy journals remain offline diagnostic inputs and cannot override App scoring.
+`analysis_pose_probe DEMO NEW_OUTPUT_JSON [LAST_TICK]` audits the recorded animation
+dictionaries, and `analysis_compact --inspect FILE` reports their round-trip digest.
+These dictionary audits do not validate reconstructed body coordinates.

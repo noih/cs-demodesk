@@ -1141,6 +1141,10 @@ impl<'a> SecondPassParser<'a> {
             data: msg.is_kill.map(Variant::Bool),
         });
 
+        fields.extend(bullet_hit_context(&msg, |controller| {
+            self.find_user_by_controller_id(controller).and_then(|player| player.steamid)
+        }));
+
         let ge = GameEvent {
             name: "player_bullet_hit".to_string(),
             fields,
@@ -1536,5 +1540,39 @@ impl Serialize for GameEvent {
             map.serialize_entry(&field.name, &field.data)?;
         }
         map.end()
+    }
+}
+
+// GE_PlayerBulletHit uses zero-based player slots; controller entity indices are slot + 1.
+// Resolve against packet-time metadata so reconnects and swapped slots cannot reuse later identities.
+fn bullet_hit_context(msg: &CMsgPlayerBulletHit, resolve: impl Fn(i32) -> Option<u64>) -> Vec<EventField> {
+    let identity = |slot: Option<i32>| slot.filter(|slot| *slot >= 0)
+        .and_then(|slot| slot.checked_add(1)).and_then(&resolve)
+        .filter(|steam| *steam != 0).map(|steam| Variant::String(steam.to_string()));
+    vec![
+        EventField {name:"through_smoke".into(),data:msg.through_smoke.map(Variant::Bool)},
+        EventField {name:"attacker_steamid".into(),data:identity(msg.attacker_slot)},
+        EventField {name:"user_steamid".into(),data:identity(msg.victim_slot)},
+    ]
+}
+
+#[cfg(test)]
+mod bullet_hit_context_tests {
+    use super::*;
+    #[test]
+    fn bullet_hit_preserves_optional_smoke_and_packet_time_slot_identities() {
+        let mut msg = CMsgPlayerBulletHit {attacker_slot:Some(0),victim_slot:Some(2),through_smoke:Some(false),..Default::default()};
+        let fields = bullet_hit_context(&msg, |controller| match controller {1=>Some(101),3=>Some(303),_=>None});
+        assert_eq!(fields[0].data,Some(Variant::Bool(false)));
+        assert_eq!(fields[1].data,Some(Variant::String("101".into())));
+        assert_eq!(fields[2].data,Some(Variant::String("303".into())));
+        msg.through_smoke=Some(true);
+        msg.attacker_slot=Some(-1);msg.victim_slot=Some(i32::MAX);
+        let fields=bullet_hit_context(&msg, |_| panic!("invalid slots must not resolve"));
+        assert_eq!(fields[0].data,Some(Variant::Bool(true)));
+        assert_eq!(fields[1].data,None);assert_eq!(fields[2].data,None);
+        msg.through_smoke=None;msg.attacker_slot=None;msg.victim_slot=Some(2);
+        let fields=bullet_hit_context(&msg, |_| None);
+        assert_eq!(fields[0].data,None);assert_eq!(fields[1].data,None);assert_eq!(fields[2].data,None);
     }
 }

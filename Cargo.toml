@@ -13,6 +13,10 @@ license = "AGPL-3.0-only"
 [profile.dev.package."*"]
 opt-level = 2
 
+# Native whole-match animation and scoring also run inside the workspace core.
+[profile.dev.package.demodesk-core]
+opt-level = 3
+
 [profile.release]
 opt-level = 3
 lto = "thin"

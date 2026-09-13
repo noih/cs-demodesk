@@ -358,6 +358,7 @@ export function SettingsView({ onChanged, toolsRequest = 0, toolsTarget = 'rende
               )}
               <Grid columns="minmax(0, 1fr) max-content max-content max-content" gapX="3" gapY="3" align="center">
                 <StorageRow label={t('settings.parsedDir')} what={t('settings.clearParsedWhat')} path={`${data.dataDir}\\parsed`} bytes={data.parsedBytes} confirm={t('settings.clearParsedConfirm')} onClear={clear(t('settings.clearParsedWhat'), api.clearAllAnalysis)} />
+                <StorageRow label={t('settings.anomalyDir')} what={t('settings.anomalyDir')} path={`${data.dataDir}\\analysis`} bytes={data.anomalyBytes} confirm={t('settings.clearAnomalyConfirm')} onClear={clear(t('settings.anomalyDir'), api.clearAnomalyData)} />
                 <StorageRow label={t('settings.clipsDir')} what={t('settings.clearClipsWhat')} path={`${data.dataDir}\\clips`} bytes={data.clipsBytes} confirm={t('settings.clearClipsConfirm')} onClear={clear(t('settings.clearClipsWhat'), api.clearAllClips)} />
                 <StorageRow label={t('settings.radarDir')} what={t('settings.clearRadarWhat')} path={`${data.dataDir}\\radar`} bytes={data.radarBytes} confirm={t('settings.clearRadarConfirm')} onClear={clear(t('settings.clearRadarWhat'), api.clearRadar)} />
               </Grid>

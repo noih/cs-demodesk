@@ -23,6 +23,8 @@ use std::sync::{Arc, Mutex};
 #[serde(tag = "type", rename_all = "kebab-case")]
 pub enum Event {
     DemoChanged { demo: DemoMeta },
+    AnalysisJobChanged { job: crate::scoring::queue::Job },
+    ScoringProgress { id: String, step: u8 },
     JobChanged { job: RenderJob },
     SetupLog { line: String },
     SetupFinished { tool: SetupTool, ok: bool, error: Option<String> },
@@ -80,6 +82,9 @@ pub struct Engine {
     replay_lock: Mutex<()>,
     /// Serializes radar extraction (one Source2Viewer-CLI at a time).
     radar_lock: Mutex<()>,
+    // ponytail: one scoring worker; use per-demo locks if concurrent scoring becomes necessary.
+    scoring_lock: Mutex<()>,
+    analysis_queue: Mutex<crate::scoring::queue::Queue>,
     active_job: Mutex<Option<(String, Arc<AtomicBool>)>>,
     render_worker_running: AtomicBool,
     setup_running: AtomicBool,
@@ -90,11 +95,17 @@ pub struct Engine {
 impl Engine {
     pub fn new(data_dir: PathBuf, notify: Arc<dyn Notify>) -> Result<Arc<Self>> {
         let store = Store::open(data_dir.clone())?;
+        // Analysis jobs belong only to this process; remove the former on-disk queue.
+        if let Err(error)=std::fs::remove_file(data_dir.join("analysis-jobs.json")) {
+            if error.kind()!=std::io::ErrorKind::NotFound {eprintln!("cannot remove old analysis queue: {error}");}
+        }
+
         // Jobs that were running when the app died are not running any more.
         for mut job in store.list_jobs() {
             if matches!(job.status, JobStatus::Running | JobStatus::Queued) {
                 job.status = JobStatus::Error;
                 job.error = Some("app was closed while the job was running".into());
+                job.error_code = Some(crate::ErrorCode::AppClosed);
                 job.finished_at = Some(now());
                 let _ = store.save_job(&job);
             }
@@ -102,7 +113,7 @@ impl Engine {
         let registered_demos = store.registered_demos()?;
         let engine = Arc::new(Self {
             store,
-            data_dir,
+            data_dir: data_dir.clone(),
             notify,
             demos: Mutex::new(HashMap::new()),
             registered_demos: Mutex::new(registered_demos),
@@ -111,6 +122,8 @@ impl Engine {
             render_queue: Mutex::new(VecDeque::new()),
             replay_lock: Mutex::new(()),
             radar_lock: Mutex::new(()),
+            scoring_lock: Mutex::new(()),
+            analysis_queue: Mutex::new(crate::scoring::queue::Queue::default()),
             active_job: Mutex::new(None),
             render_worker_running: AtomicBool::new(false),
             setup_running: AtomicBool::new(false),
@@ -120,6 +133,225 @@ impl Engine {
         // Nothing can be recording yet, so an old plugin install is a leftover.
         engine.clean_leftovers();
         Ok(engine)
+    }
+
+    pub fn analysis_jobs(&self) -> Vec<crate::scoring::queue::Job> {
+        self.analysis_queue.lock().unwrap().jobs.iter().rev().cloned().collect()
+    }
+
+    pub fn enqueue_analysis(self: &Arc<Self>, id:&str, force:bool) -> Result<crate::scoring::queue::Job> {
+        let (meta, parsed)=self.get_demo(id).ok_or_else(||anyhow!("demo not found"))?;
+        anyhow::ensure!(parsed.is_some(),"demo not parsed");
+        let mut queue=self.analysis_queue.lock().unwrap();
+        let job=queue.enqueue(&meta.id,force);
+        self.notify.notify(Event::AnalysisJobChanged {job:job.clone()});
+        if !queue.worker_running {
+            queue.worker_running=true;
+            let engine=self.clone();
+            if let Err(error)=std::thread::Builder::new().name("analysis-worker".into()).spawn(move||engine.run_analysis_queue()) {
+                queue.worker_running=false;
+                for entry in queue.jobs.iter_mut().filter(|j|j.status==crate::scoring::queue::Status::Queued) {
+                    entry.status=crate::scoring::queue::Status::Error;entry.error=Some(format!("Cannot start analysis worker: {error}"));entry.finished_at=Some(now());entry.revision+=1;
+                    self.notify.notify(Event::AnalysisJobChanged {job:entry.clone()});
+                }
+                return Err(error.into());
+            }
+        }
+        Ok(job)
+    }
+
+    fn analysis_progress(&self, demo_id:&str, step:u8) {
+        let mut queue=self.analysis_queue.lock().unwrap();
+        if let Some(job)=queue.jobs.iter_mut().find(|j|j.demo_id==demo_id && j.status==crate::scoring::queue::Status::Running) {
+            job.step=Some(step);job.revision+=1;
+            let job=job.clone();
+            self.notify.notify(Event::AnalysisJobChanged {job});
+        }
+    }
+
+    fn run_analysis_queue(self:Arc<Self>) {
+        loop {
+            let job={
+                let mut queue=self.analysis_queue.lock().unwrap();
+                let Some(job)=queue.claim() else {queue.worker_running=false;return;};
+                self.notify.notify(Event::AnalysisJobChanged {job:job.clone()});
+                job
+            };
+            let result=std::panic::catch_unwind(std::panic::AssertUnwindSafe(||self.score_match(&job.demo_id,job.force)))
+                .unwrap_or_else(|_|Err(anyhow!("Analysis worker stopped unexpectedly. Retry the analysis.")));
+            // A panic must not poison later independent jobs.
+            self.scoring_lock.clear_poison();
+            let mut queue=self.analysis_queue.lock().unwrap();
+            let stored=queue.jobs.iter_mut().find(|j|j.id==job.id).unwrap();
+            stored.finished_at=Some(now());stored.revision+=1;
+            match result {
+                Ok(_)=>{stored.status=crate::scoring::queue::Status::Done;stored.error=None;},
+                Err(error)=>{stored.status=crate::scoring::queue::Status::Error;stored.error=Some(format!("{error:#}"));}
+            }
+            let job=queue.jobs.iter().find(|j|j.id==job.id).unwrap().clone();
+            self.notify.notify(Event::AnalysisJobChanged {job});
+        }
+    }
+
+    /// History remains readable even if its source demo is missing or has changed.
+    pub fn scoring_history(&self, id: &str, player_id: &str) -> Result<Vec<crate::scoring::Assessment>> {
+        crate::scoring::history::list(&self.data_dir, id, player_id)
+    }
+
+    pub fn scoring_match_history(&self, id: &str) -> Result<std::collections::BTreeMap<String, Vec<crate::scoring::Assessment>>> {
+        crate::scoring::history::list_match(&self.data_dir, id)
+    }
+
+    /// Explicit scoring only. Basic demo auto-analysis never enters this path.
+    pub fn score_match(
+        &self,
+        id: &str,
+        force: bool,
+    ) -> Result<crate::scoring::history::MatchResponse> {
+        use crate::scoring::{self, Assessment};
+        use std::io::Read;
+        use std::time::Instant;
+        let _guard = self
+            .scoring_lock
+            .lock()
+            .map_err(|_| anyhow!("analysis worker lock failed"))?;
+        let progress = |step| {
+            self.analysis_progress(id, step);
+            self.notify.notify(Event::ScoringProgress { id: id.into(), step });
+        };
+        progress(1);
+        let started = Instant::now();
+        let (meta, parsed) = self.get_demo(id).ok_or_else(|| anyhow!("demo not found"))?;
+        let parsed = parsed.ok_or_else(|| anyhow!("demo not parsed"))?;
+        let players: Vec<_> = parsed
+            .info
+            .players
+            .iter()
+            .map(|p| p.steamid.clone())
+            .collect();
+        anyhow::ensure!(!players.is_empty(), "demo has no players");
+        let mut options = std::fs::OpenOptions::new();
+        options.read(true);
+        #[cfg(windows)]
+        {
+            use std::os::windows::fs::OpenOptionsExt;
+            options.share_mode(1);
+        }
+        let mut source_file = options.open(&meta.path)?;
+        let metadata = source_file.metadata()?;
+        let modified = metadata
+            .modified()?
+            .duration_since(std::time::UNIX_EPOCH)?
+            .as_millis() as f64;
+        anyhow::ensure!(
+            meta.same_file(metadata.len(), modified),
+            "demo changed; parse it again before scoring"
+        );
+        anyhow::ensure!(
+            crate::demo_readiness::is_complete(&mut source_file)?,
+            "incomplete scoring source"
+        );
+        use std::io::Seek;
+        source_file.rewind()?;
+        let mut bytes = Vec::new();
+        source_file.read_to_end(&mut bytes)?;
+        let fingerprint = format!("sha1:{}", sha1_smol::Sha1::from(bytes.as_slice()).digest());
+        let mut histories = self.scoring_match_history(id)?;
+        histories.retain(|player, _| players.contains(player));
+        for player in &players { histories.entry(player.clone()).or_default(); }
+        if !force
+            && histories.values().all(|records| {
+                records.iter().any(|r| {
+                    r.demo_fingerprint == fingerprint
+                        && r.ruleset_version == scoring::RULESET_VERSION
+                })
+            })
+        {
+            let provenance = &histories.values().flat_map(|records| records.iter())
+                .find(|r| r.demo_fingerprint == fingerprint && r.ruleset_version == scoring::RULESET_VERSION)
+                .expect("all players have matching history").input_provenance;
+            let generic_bytes = provenance["shared"]["bytes"].as_u64().unwrap_or(0);
+            let diagnostic_bytes = provenance["diagnosticBytes"].as_u64().unwrap_or(0);
+            return Ok(scoring::history::MatchResponse {
+                source_fingerprint: fingerprint,
+                players: histories,
+                preparation_seconds: started.elapsed().as_secs_f64(),
+                analysis_seconds: 0.0,
+                shared_bytes: generic_bytes + diagnostic_bytes,
+                generic_bytes,
+                diagnostic_bytes,
+            });
+        }
+        let (path, shared_bytes) =
+            crate::analysis::compact::prepare(&self.parser, &bytes, &self.data_dir, &fingerprint)?;
+        drop(bytes);
+        let mut shared_file = options.open(&path)?;
+        let mut shared_hash = sha1_smol::Sha1::new();
+        let mut buffer = [0; 65536];
+        loop {
+            let n = shared_file.read(&mut buffer)?;
+            if n == 0 { break; }
+            shared_hash.update(&buffer[..n]);
+        }
+        let tools = self.tool_paths();
+        let game = tools.cs2_dir.ok_or_else(|| anyhow!("CS2 folder not set"))?;
+        let vrf = tools.vrf_exe.ok_or_else(|| anyhow!("Source 2 Viewer CLI not installed"))?;
+        let native = crate::analysis::native_body::prepare(&path, &self.data_dir, &game, &vrf)?;
+        let header = &native.header;
+        anyhow::ensure!(header.source.demo_fingerprint.as_deref() == Some(&fingerprint), "shared source mismatch");
+        let preparation_seconds = started.elapsed().as_secs_f64();
+        progress(2);
+        let started = Instant::now();
+        let (mut checks, body_coverage) = scoring::native::evaluate(&path, &native, &fingerprint, &players, &parsed.rounds, &parsed.kills)?;
+        let provenance = serde_json::json!({
+            "shared":{"contract":header.contract,"source":header.source,"availability":header.data,
+                "coverage":native.coverage,"bytes":shared_bytes,"contentFingerprint":format!("sha1:{}", shared_hash.digest())},
+            "diagnosticBytes":0,
+            "statistics":{"mode":"per-rule-occurrences","deduplication":"same-rule-round-target-overlap","crossRuleCounts":"independent"},
+            "native":{
+                "producer":"native-animgraph2-3", "coverage":body_coverage,
+                "resourceContentId":native.assets.resource_content_id,
+                "sharedAssetBytes":native.assets.total_bytes,"clientSha256":native.client_sha256,
+                "assetPrecision":"VRF DATA/MDAT text; tested maximum raw clip component error 8.35e-7; network state lossless",
+                "qualification":"partial task reconstruction; historical asset compatibility and independent rule calibration unqualified",
+                "unknownObstruction":true
+            }
+        });
+        progress(3);
+        let mut records = Vec::new();
+        let created_at = crate::store::now();
+        for player_id in &players {
+            let mut checks = checks
+                .remove(player_id)
+                .ok_or_else(|| anyhow!("missing player checks"))?;
+            let state = scoring::statistics::summarize(&mut checks);
+            records.push(Assessment {
+                schema_version: 2,
+                id: String::new(),
+                created_at: created_at.clone(),
+                demo_id: id.into(),
+                demo_fingerprint: fingerprint.clone(),
+                player_id: player_id.clone(),
+                tick_rate: parsed.info.tick_rate,
+                ruleset_version: scoring::RULESET_VERSION.into(),
+                checks,
+                input_provenance: provenance.clone(),
+                state,
+            });
+        }
+        scoring::history::save_match(&self.data_dir, &mut records)?;
+        for record in records {
+            histories.insert(record.player_id.clone(), vec![record]);
+        }
+        Ok(scoring::history::MatchResponse {
+            source_fingerprint: fingerprint,
+            players: histories,
+            preparation_seconds,
+            analysis_seconds: started.elapsed().as_secs_f64(),
+            shared_bytes,
+            generic_bytes: shared_bytes,
+            diagnostic_bytes: 0,
+        })
     }
 
     // ---- paths / settings ----
@@ -142,8 +374,16 @@ impl Engine {
         Ok(())
     }
     /// Sizes of the disposable folders: (parsed, clips, radar).
-    pub fn storage_bytes(&self) -> (u64, u64, u64) {
-        (self.store.parsed_bytes(), self.store.clips_bytes(), self.store.radar_bytes())
+    pub fn storage_bytes(&self) -> (u64, u64, u64, u64) {
+        (self.store.parsed_bytes(), self.store.clips_bytes(), self.store.radar_bytes(), self.store.anomaly_bytes())
+    }
+    pub fn clear_anomaly_data(&self) -> Result<u64> {
+        let _guard = self.scoring_lock.try_lock().map_err(|_| anyhow!("analysis is running"))?;
+        let queue = self.analysis_queue.lock().unwrap();
+        anyhow::ensure!(!queue.jobs.iter().any(|job| matches!(job.status,
+            crate::scoring::queue::Status::Queued | crate::scoring::queue::Status::Running)),
+            "analysis is queued or running");
+        self.store.clear_anomaly_data()
     }
     pub fn clear_radar(&self) -> u64 {
         self.store.clear_radar()
@@ -684,6 +924,49 @@ impl Engine {
         Ok(job)
     }
 
+    pub fn analysis_clips(&self, demo_id: &str, selection: &crate::scoring::clips::Selection) -> Result<Vec<crate::scoring::clips::RuleClips>> {
+        let (_, parsed)=self.get_demo(demo_id).ok_or_else(||anyhow!("demo not found"))?;
+        let parsed=parsed.ok_or_else(||anyhow!("demo not parsed"))?;
+        let record=self.scoring_history(demo_id,&selection.player_id)?.into_iter().find(|r|r.id==selection.assessment_id).ok_or_else(||anyhow!("analysis record not found"))?;
+        let end=parsed.rounds.iter().map(|r|r.end_tick.max(r.officially_ended_tick)).max().ok_or_else(||anyhow!("demo timeline unavailable"))?;
+        crate::scoring::clips::build(&record,&parsed.info,end,&selection.rule_ids)
+    }
+
+    pub fn enqueue_analysis_render(self: &Arc<Self>, demo_id: &str, selection: crate::scoring::clips::Selection, mut options: RenderOptions) -> Result<Vec<RenderJob>> {
+        let _guard=self.replay_lock.lock().unwrap();
+        let mut groups=self.analysis_clips(demo_id,&selection)?;
+        if options.merge && groups.len() > 1 {
+            let mut combined=groups.remove(0);
+            for group in groups.drain(..) {
+                combined.rule_id.push('+');combined.rule_id.push_str(&group.rule_id);
+                combined.title.push_str(" / ");combined.title.push_str(&group.title);
+                combined.highlights.extend(group.highlights);
+            }
+            groups.push(combined);
+        }
+        let (meta,_)=self.get_demo(demo_id).ok_or_else(||anyhow!("demo not found"))?;
+        check_ascii_path(Path::new(&meta.path))?;
+        options.merge=true;
+        let mut jobs:Vec<RenderJob>=Vec::new();
+        let result=(||->Result<()> {
+            for group in groups {
+                let mut job=self.store.new_job(demo_id,group.highlights.iter().map(|h|h.id.clone()).collect(),options.clone())?;
+                job.analysis_clips=Some(Box::new(group));
+                jobs.push(job);
+                self.store.save_job(jobs.last().unwrap())?;
+            }
+            Ok(())
+        })();
+        if let Err(error)=result {
+            for mut job in jobs {job.status=JobStatus::Error;job.error=Some(format!("Export batch was not queued: {error:#}"));job.finished_at=Some(now());self.persist(&job);}
+            return Err(error);
+        }
+        self.render_queue.lock().unwrap().extend(jobs.iter().map(|j|j.id.clone()));
+        for job in &jobs {self.notify.notify(Event::JobChanged {job:job.clone()});}
+        self.pump();
+        Ok(jobs)
+    }
+
     pub fn cancel_job(&self, id: &str) -> bool {
         {
             let mut q = self.render_queue.lock().unwrap();
@@ -799,11 +1082,19 @@ impl Engine {
         let outcome = self.get_demo(&job.demo_id).ok_or_else(|| anyhow!("demo not found")).and_then(|(meta, parsed)| {
             let parsed = parsed.ok_or_else(|| anyhow!("demo not parsed (parse it again after restarting the app)"))?;
             let wanted: HashSet<&str> = job.highlight_ids.iter().map(|s| s.as_str()).collect();
-            let highlights: Vec<_> = parsed.highlights.iter().filter(|h| wanted.contains(h.id.as_str())).cloned().collect();
+            let highlights = if let Some(clips)=&job.analysis_clips {
+                use std::io::Read;
+                let mut source=std::fs::File::open(&meta.path)?;
+                let mut hash=sha1_smol::Sha1::new();let mut buffer=[0u8;65536];
+                loop {let n=source.read(&mut buffer)?;if n==0 {break;}hash.update(&buffer[..n]);}
+                anyhow::ensure!(format!("sha1:{}",hash.digest())==clips.demo_fingerprint,"demo content changed since analysis; analyze again before exporting");
+                clips.highlights.clone()
+            } else {parsed.highlights.iter().filter(|h| wanted.contains(h.id.as_str())).cloned().collect()};
             render_highlights(RenderJobInput {
                 demo: &parsed.info,
                 demo_path: PathBuf::from(&meta.path),
                 highlights,
+                preserve_merge_order: job.analysis_clips.is_some(),
                 output_dir: self.store.job_dir(&job.id),
                 options: job.options.clone(),
                 tools: self.tool_paths(),
@@ -823,6 +1114,7 @@ impl Engine {
         match outcome {
             Ok(result) => {
                 job.outputs = job_outputs(&result);
+                if let Some(clips)=&job.analysis_clips {for output in &mut job.outputs {if output.is_final {output.title=clips.title.clone();}}}
                 if !job.outputs.is_empty() { job.progress = Some(1.0); }
                 job.status = if job.outputs.is_empty() { JobStatus::Error } else { JobStatus::Done };
                 if job.outputs.is_empty() {
@@ -1208,5 +1500,110 @@ mod tests {
         assert!(restarted.parsed(id).is_none());
         assert_eq!(std::fs::read(&other_replay).unwrap(), b"other demo");
         assert_eq!(std::fs::read(&completed[0].path).unwrap(), source_before);
+    }
+}
+
+#[cfg(test)]
+mod analysis_queue_tests {
+    use super::*;
+    #[derive(Default)]
+    struct Events(Mutex<Vec<(String,crate::scoring::queue::Status)>>);
+    impl Notify for Events {
+        fn notify(&self,event:Event) {
+            if let Event::AnalysisJobChanged {job}=event {self.0.lock().unwrap().push((job.demo_id,job.status));}
+        }
+    }
+    #[test]
+    fn interrupted_render_persists_language_independent_error_code() {
+        let root = tempfile::tempdir().unwrap();
+        let engine = Engine::new(root.path().into(), Arc::new(Events::default())).unwrap();
+        let job = engine.store.new_job("demo",vec!["clip".into()],RenderOptions::default()).unwrap();
+        let reopened = Engine::new(root.path().into(), Arc::new(Events::default())).unwrap();
+        let job = reopened.store.get_job(&job.id).unwrap();
+        assert_eq!(job.status,JobStatus::Error);
+        assert_eq!(job.error_code,Some(crate::ErrorCode::AppClosed));
+        assert_eq!(serde_json::to_value(&job).unwrap()["errorCode"],"app-closed");
+        assert!(job.error.is_some());
+    }
+
+    #[test]
+    fn anomaly_storage_counts_both_folders_and_clears_only_when_idle() {
+        let root = tempfile::tempdir().unwrap();
+        let engine = Engine::new(root.path().into(), Arc::new(Events::default())).unwrap();
+        for name in ["analysis", "behavior-analysis", "parsed", "clips"] {
+            std::fs::create_dir_all(root.path().join(name)).unwrap();
+            std::fs::write(root.path().join(name).join("keep-or-clear"), b"123").unwrap();
+        }
+        assert_eq!(engine.storage_bytes().3, 6);
+        {
+            let _guard = engine.scoring_lock.lock().unwrap();
+            assert!(engine.clear_anomaly_data().is_err());
+        }
+        engine.analysis_queue.lock().unwrap().enqueue("demo", true);
+        assert!(engine.clear_anomaly_data().is_err());
+        assert_eq!(engine.storage_bytes().3, 6);
+        engine.analysis_queue.lock().unwrap().jobs.clear();
+        assert_eq!(engine.clear_anomaly_data().unwrap(), 6);
+        assert_eq!(engine.storage_bytes().3, 0);
+        assert_eq!(engine.clear_anomaly_data().unwrap(), 0);
+        for name in ["parsed", "clips"] {
+            assert!(root.path().join(name).join("keep-or-clear").exists());
+        }
+    }
+
+    #[test]
+    fn anomaly_exports_share_highlight_fifo_and_force_one_video_per_rule() {
+        use serde_json::json;
+        let root=tempfile::tempdir().unwrap();
+        let engine=Engine::new(root.path().into(),Arc::new(Events::default())).unwrap();
+        // Hold the worker without launching CS2; inspect the shared queue and saved jobs.
+        engine.render_worker_running.store(true,Ordering::SeqCst);
+        let (record,info)=crate::scoring::clips::tests::fixture();
+        let mut records=vec![record];crate::scoring::history::save_match(root.path(),&mut records).unwrap();
+        let parsed:ParsedDemo=serde_json::from_value(json!({"info":info,"rounds":[{"round":1,"startTick":0,"freezeEndTick":0,"endTick":6400,"officiallyEndedTick":6400,"reason":"","roster":{}}],"kills":[],"highlights":[],"stats":[],"score":{},"roundSummaries":[],"parsedAt":""})).unwrap();
+        let meta=serde_json::from_value(json!({"id":"demo","name":"test.dem","path":"test.dem","bytes":0,"mtimeMs":0,"createdMs":0,"status":"parsed"})).unwrap();
+        engine.demos.lock().unwrap().insert("demo".into(),DemoEntry {meta,parsed:Some(Arc::new(parsed)),auto_complete:None});
+        let first=engine.enqueue_render("demo",vec!["highlight".into()],RenderOptions::default()).unwrap();
+        let selection=crate::scoring::clips::Selection {player_id:"1".into(),assessment_id:records[0].id.clone(),rule_ids:vec!["jump".into(),"view".into()]};
+        let jobs=engine.enqueue_analysis_render("demo",selection.clone(),RenderOptions {merge:false,..Default::default()}).unwrap();
+        assert_eq!(jobs.len(),2);
+        assert_eq!(*engine.render_queue.lock().unwrap(),VecDeque::from([first.id,jobs[0].id.clone(),jobs[1].id.clone()]));
+        assert!(jobs.iter().all(|j|j.options.merge&&j.status==JobStatus::Queued));
+        assert_eq!(engine.store.get_job(&jobs[0].id).unwrap().analysis_clips.unwrap().highlights.len(),6);
+        assert!(engine.cancel_job(&jobs[0].id));
+        assert_eq!(engine.store.get_job(&jobs[0].id).unwrap().status,JobStatus::Cancelled);
+        assert_eq!(engine.render_queue.lock().unwrap().len(),2);
+        let merged=engine.enqueue_analysis_render("demo",selection,RenderOptions {merge:true,..Default::default()}).unwrap();
+        assert_eq!(merged.len(),1);
+        let snapshot=engine.store.get_job(&merged[0].id).unwrap().analysis_clips.unwrap();
+        let expected:Vec<_>=jobs.iter().flat_map(|j|j.analysis_clips.as_ref().unwrap().highlights.iter().map(|h|(&h.id,h.start_tick,h.end_tick))).collect();
+        assert_eq!(snapshot.highlights.iter().map(|h|(&h.id,h.start_tick,h.end_tick)).collect::<Vec<_>>(),expected);
+        assert_eq!(engine.render_queue.lock().unwrap().back(),Some(&merged[0].id));
+        assert!(merged[0].options.merge);
+    }
+
+    #[test]
+    fn failed_job_does_not_block_next_and_queue_is_session_only() {
+        use crate::scoring::queue::Status;
+        let root=tempfile::tempdir().unwrap();let events=Arc::new(Events::default());
+        let engine=Engine::new(root.path().into(),events.clone()).unwrap();
+        {let mut q=engine.analysis_queue.lock().unwrap();q.enqueue("missing-a",true);q.enqueue("missing-b",true);q.worker_running=true;}
+        engine.clone().run_analysis_queue();
+        let jobs=engine.analysis_jobs();
+        assert_eq!(jobs.len(),2);
+        assert!(jobs.iter().all(|j|j.status==Status::Error && j.error.as_deref().unwrap().contains("demo not found") && j.finished_at.is_some()));
+        let events=events.0.lock().unwrap();
+        let first_failed=events.iter().position(|(id,status)|id=="missing-a"&&*status==Status::Error).unwrap();
+        let next_started=events.iter().position(|(id,status)|id=="missing-b"&&*status==Status::Running).unwrap();
+        assert!(first_failed<next_started);
+        assert!(!engine.analysis_queue.lock().unwrap().worker_running);
+        let queue_file=root.path().join("analysis-jobs.json");
+        assert!(!queue_file.exists());
+        let (record,_)=crate::scoring::clips::tests::fixture();
+        crate::scoring::history::save_match(root.path(),&mut [record]).unwrap();
+        std::fs::write(&queue_file,b"old queue is no longer read").unwrap();
+        let reopened=Engine::new(root.path().into(),Arc::new(Events::default())).unwrap();
+        assert!(reopened.analysis_jobs().is_empty());assert!(!queue_file.exists());
+        assert_eq!(reopened.scoring_history("demo","1").unwrap().len(),1);
     }
 }

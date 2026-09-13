@@ -1,0 +1,20 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {reconstructHitboxes} from './analysis-hitboxes.mjs';
+import {attachmentBoneTransform} from './analysis-attachment-geometry.mjs';
+test('capsule reconstruction preserves reversed endpoints and refuses incompatible resources or absent bones',()=>{
+  const q=Math.SQRT1_2;
+  const bone=attachmentBoneTransform({position:[10,22,30],rotation:[0,0,q,q]}, {offset:[1,0,0],rotation:[0,0,0,1],weights:[1,0,0],rootTransforms:[false,false,false],influences:1,ignoreRotation:false},2);
+  const box={index:0,bone:'spine',min:[1,0,3],max:[1,0,-3],radius:2,shape:2,translationOnly:false};
+  const model={resourceId:'1',contentFingerprint:'sha256:'+'a'.repeat(64),hitboxSets:[{name:'default',hitboxes:[box]}]};
+  const observation={resourceId:'1',setIndex:0,scale:2};
+  const result=reconstructHitboxes(model,observation,()=>bone),capsule=result.capsules[0];
+  for(const [actual,expected] of [[capsule.start,[10,22,36]],[capsule.end,[10,22,24]],[capsule.center,[10,22,30]]]) actual.forEach((v,i)=>assert.ok(Math.abs(v-expected[i])<1e-10));
+  assert.equal(capsule.radius,4);assert.equal(result.compatibility,'unknown');assert.equal(result.eligibleForScoring,false);
+  assert.equal(reconstructHitboxes(model,{...observation,recordedContentFingerprint:model.contentFingerprint},()=>bone).compatibility,'matched');
+  assert.equal(reconstructHitboxes(model,{...observation,recordedContentFingerprint:'sha256:'+'b'.repeat(64)},()=>{throw Error('must not reconstruct');}).status,'unavailable');
+  assert.equal(reconstructHitboxes(model,{...observation,resourceId:'2'},()=>bone).capsules.length,0);
+  assert.equal(reconstructHitboxes(model,{...observation,setIndex:1},()=>bone).status,'unavailable');
+  assert.equal(reconstructHitboxes(model,observation,()=>null).unavailable.length,1);
+  box.translationOnly=true;assert.equal(reconstructHitboxes(model,observation,()=>bone).capsules.length,0);
+});

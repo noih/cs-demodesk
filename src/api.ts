@@ -1,3 +1,4 @@
+import type { ErrorCode } from './errorCodes.ts';
 import { invoke, convertFileSrc } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 
@@ -273,11 +274,15 @@ export interface JobOutput {
   title: string;
   isFinal: boolean;
 }
+export interface AnalysisClipSelection {playerId:string;assessmentId:string;ruleIds:string[]}
+export interface RuleClips {ruleId:string;title:string;demoFingerprint:string;highlights:Highlight[]}
 export interface RenderJob {
+  errorCode?: ErrorCode;
   schemaVersion?: number;
   id: string;
   demoId: string;
   highlightIds: string[];
+  analysisClips?: RuleClips;
   options: RenderOptions;
   status: JobStatus;
   stage?: string;
@@ -326,6 +331,7 @@ export interface SettingsResponse {
   setup: { running: boolean; log: string[] };
   dataDir: string;
   parsedBytes: number;
+  anomalyBytes: number;
   clipsBytes: number;
   radarBytes: number;
 }
@@ -338,11 +344,54 @@ export interface Status {
   version: string;
 }
 
+export type ScoringStep = 1 | 2 | 3;
+
+export interface AnalysisJob {
+  id:string; demoId:string; sequence:number; revision:number; status:'queued'|'running'|'done'|'error';
+  step:ScoringStep|null; error:string|null; createdAt:string; startedAt:string|null; finishedAt:string|null;
+}
+
 export type AppEvent =
+  | { type: 'analysis-job-changed'; job: AnalysisJob }
+  | { type: 'scoring-progress'; id: string; step: ScoringStep }
   | { type: 'demo-changed'; demo: DemoMeta }
   | { type: 'job-changed'; job: RenderJob }
   | { type: 'setup-log'; line: string }
   | { type: 'setup-finished'; tool: 'hlae' | 'ffmpeg' | 'vrf'; ok: boolean; error: string | null };
+
+export type AssessmentState = 'passed' | 'findings' | 'unavailable' | 'failed';
+export interface MatchAssessment {
+  sourceFingerprint: string;
+  players: Record<string, Assessment[]>;
+  preparationSeconds: number;
+  analysisSeconds: number;
+  sharedBytes: number;
+  genericBytes: number;
+  diagnosticBytes: number;
+}
+export interface AnalysisMeasurement {
+  name: string; value: number; unit: string; threshold: number | null;
+}
+export interface BehaviorOccurrence {
+  id: string; round: number; startTick: number; endTick: number;
+  targetId: string; sourceIds: string[]; measurements: AnalysisMeasurement[];
+}
+export interface ScoringFinding {
+  id: string; group: string; round: number; startTick: number; endTick: number;
+  targetId: string; reason: string; measurements: AnalysisMeasurement[];
+}
+export interface BehaviorCheck {
+  definition: { id: string; version: string; name: string; description: string; category: string; parameters: unknown };
+  state: AssessmentState; reason: string; reasonCode: string; evaluatedSamples: number;
+  occurrences: BehaviorOccurrence[]; summary: AnalysisMeasurement[];
+  observations?: ScoringFinding[]; findings?: ScoringFinding[]; diagnostics: unknown;
+}
+export interface Assessment {
+  schemaVersion: number; id: string; createdAt: string; demoId: string; demoFingerprint: string;
+  playerId: string; tickRate: number; rulesetVersion: string; state: AssessmentState;
+  checks: BehaviorCheck[];
+}
+export interface AssessmentHistory { sourceFingerprint: string | null; records: Assessment[] }
 
 // ---- commands ----
 
@@ -361,6 +410,9 @@ export const api = {
   registerDemo: (path: string) => invoke<DemoMeta>('register_demo', { path }),
   parse: (id: string) => invoke<void>('parse_demo', { id }),
   demo: (id: string) => invoke<{ meta: DemoMeta; parsed?: ParsedDemo }>('get_demo', { id }),
+  scoringHistory: (id: string) => invoke<Record<string, Assessment[]>>('scoring_history', { id }),
+  analysisJobs: () => invoke<AnalysisJob[]>('analysis_jobs'),
+  scoreMatch: (id: string, force = true) => invoke<AnalysisJob>('score_match', { id, force }),
   kills: (id: string) => invoke<KillEvent[]>('get_kills', { id }),
   replay: async (id: string): Promise<ReplayData> => {
     const f = await invoke<{ path: string; bytes: number }>('get_replay', { id });
@@ -382,9 +434,12 @@ export const api = {
   mapAssets: (mapName: string) => invoke<MapAssets>('get_map_assets', { mapName }),
   clearRadar: () => invoke<number>('clear_radar'),
   clearAnalysis: (id: string) => invoke<void>('clear_analysis', { id }),
+  clearAnomalyData: () => invoke<number>('clear_anomaly_data'),
   clearAllAnalysis: () => invoke<number>('clear_all_analysis'),
   clearAllClips: () => invoke<number>('clear_all_clips'),
   removeDemo: (id: string) => invoke<void>('remove_demo', { id }),
+  analysisClips: (demoId:string,selection:AnalysisClipSelection)=>invoke<RuleClips[]>('analysis_clips',{demoId,selection}),
+  renderAnalysis: (demoId:string,selection:AnalysisClipSelection,options:RenderOptions)=>invoke<RenderJob[]>('start_analysis_render',{demoId,selection,options}),
   render: (demoId: string, highlightIds: string[], options: RenderOptions) => invoke<RenderJob>('start_render', { demoId, highlightIds, options }),
   jobs: () => invoke<RenderJob[]>('list_jobs'),
   cancel: (id: string) => invoke<boolean>('cancel_job', { id }),

@@ -7,7 +7,7 @@ import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
 import { api, errorText, mb, type ParsedDemo, type RenderJob } from '../api.ts';
 import { LogView } from './LogView.tsx';
-import { fmtDateTime, translateRenderStage } from '../i18n/index.ts';
+import { fmtDateTime, translateError, translateRenderStage } from '../i18n/index.ts';
 
 function initializePreview(video: HTMLVideoElement | null) {
   if (video) video.volume = 0.15;
@@ -26,7 +26,7 @@ function JobCard({ job, parsed, onChanged }: { job: RenderJob; parsed: ParsedDem
   const notify = useNotify();
   const [logOpen, setLogOpen] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
-  const titleOf = (id?: string) => parsed.highlights.find((h) => h.id === id)?.title;
+  const titleOf = (id?: string) => (job.analysisClips?.highlights ?? parsed.highlights).find((h) => h.id === id)?.title;
   const act = (fn: () => Promise<unknown>) => () => void fn().then(onChanged).catch((e) => notify(errorText(e)));
   const active = job.status === 'queued' || job.status === 'running';
   const [now, setNow] = useState(Date.now);
@@ -48,7 +48,7 @@ function JobCard({ job, parsed, onChanged }: { job: RenderJob; parsed: ParsedDem
         </Badge>
         <Heading data-text-role="body-heading" size="3">{fmtDateTime(job.createdAt)}</Heading>
         <Text size="2" color="gray">
-          {t('renders.summary', { n: job.highlightIds.length })} · {job.options.maxSizeMb ? t('renders.sizeLimit', { mb: job.options.maxSizeMb }) : t('renders.noSizeLimit')} · {job.options.height}p{job.options.fps} · {job.options.codec}
+          {job.analysisClips && `${job.analysisClips.title} · `}{t('renders.summary', { n: job.highlightIds.length })} · {job.options.maxSizeMb ? t('renders.sizeLimit', { mb: job.options.maxSizeMb }) : t('renders.noSizeLimit')} · {job.options.height}p{job.options.fps} · {job.options.codec}
         </Text>
         <Box style={{ flex: 1 }} />
         {active && (
@@ -111,9 +111,9 @@ function JobCard({ job, parsed, onChanged }: { job: RenderJob; parsed: ParsedDem
         </Box>
       )}
 
-      {job.error && (
+      {(job.error || job.errorCode) && (
         <Callout.Root color="red" size="1" mt="3">
-          <Callout.Text className="selectable">{job.error}</Callout.Text>
+          <Callout.Text className="selectable">{translateError(job.error, job.errorCode)}</Callout.Text>
         </Callout.Root>
       )}
 

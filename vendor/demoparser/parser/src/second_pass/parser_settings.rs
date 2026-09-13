@@ -51,7 +51,26 @@ impl VelocitySample {
     }
 }
 
+#[derive(Default)]
+pub struct AnalysisChanges {
+    pub properties: AHashSet<(i32, u32)>,
+    pub poses: AHashSet<(i32, Vec<i32>)>,
+    pub pose_removals: Vec<(i32, Vec<i32>, String)>,
+    pub lifecycle: AHashSet<i32>,
+}
+impl AnalysisChanges {
+    pub fn clear(&mut self) {
+        self.properties.clear();
+        self.poses.clear();
+        self.pose_removals.clear();
+        self.lifecycle.clear();
+    }
+}
+
 pub struct SecondPassParser<'a> {
+    /// Enabled only by the independent scoring producer.
+    pub analysis_changes: Option<AnalysisChanges>,
+    pub animation_strings: crate::first_pass::animation_strings::AnimationStrings,
     /// Per-player position history used by `collect_velocity`.
     pub velocity_history: AHashMap<u64, VelocitySample>,
     pub start_end_offset: Option<StartEndOffset>,
@@ -99,6 +118,7 @@ pub struct SecondPassParser<'a> {
     pub parse_projectiles: bool,
     pub parse_grenades: bool,
     pub is_debug_mode: bool,
+    pub capture_pose_fields: bool,
     pub df_per_player: AHashMap<u64, AHashMap<u32, PropColumn>>,
     pub order_by_steamid: bool,
     pub last_tick: i32,
@@ -223,6 +243,7 @@ impl<'a> SecondPassParser<'a> {
             c4_entity_id: None,
             stringtable_players: first_pass_output.stringtable_players,
             is_debug_mode: debug,
+            capture_pose_fields: false,
             projectile_records: vec![],
             parse_all_packets: parse_all_packets,
             wanted_players: first_pass_output.wanted_players.clone(),
@@ -239,6 +260,8 @@ impl<'a> SecondPassParser<'a> {
             tick: -99999,
             players: BTreeMap::default(),
             output: AHashMap::default(),
+            analysis_changes: None,
+            animation_strings: Default::default(),
             game_events: vec![],
             wanted_events: first_pass_output.settings.wanted_events.clone(),
             parse_entities: first_pass_output.settings.parse_ents,

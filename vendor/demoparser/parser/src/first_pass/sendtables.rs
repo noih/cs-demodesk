@@ -151,6 +151,13 @@ impl<'a> FirstPassParser<'a> {
                 || ser.name.contains("Molo")
                 || ser.name.contains("Inc")
                 || ser.name.contains("Infer")
+                || ser.name.contains("Door")
+                || ser.name.contains("Breakable")
+                || ser.name.contains("DynamicProp")
+                || ser.name.contains("PhysicsProp")
+                || ser.name.contains("PhysProp")
+                || ser.name.contains("FuncBrush")
+                || ser.name.contains("MovingToggle")
             {
                 // Assign id to each prop and other metadata things.
                 // When collecting values we use the id as key.
@@ -314,6 +321,10 @@ pub struct ValueField {
     pub should_parse: bool,
     pub prop_id: u32,
     pub full_name: String,
+    pub send_node: String,
+    pub analysis_name: Option<String>,
+    /// Original GameTick_t has signed ZigZag wire encoding; used only by analysis capture.
+    pub analysis_signed_tick: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -362,6 +373,9 @@ impl ValueField {
             prop_id: 0,
             should_parse: false,
             full_name: "".to_string() + name,
+            send_node: String::new(),
+            analysis_name: None,
+            analysis_signed_tick: false,
         }
     }
 }
@@ -484,6 +498,14 @@ pub fn get_propinfo(field: &Field, path: &FieldPath) -> Option<FieldInfo> {
         _ => return None,
     };
 
+    // Preserve smoke byte indices instead of overwriting one scalar for the whole array.
+    if fi.prop_id == crate::first_pass::prop_controller::SMOKE_VOXELS_ID {
+        if path.last == 1 && (0..crate::first_pass::prop_controller::SMOKE_VOXELS_LIMIT as i32).contains(&path.path[1]) {
+            fi.prop_id += path.path[1] as u32;
+        } else {
+            return None;
+        }
+    }
     // Inferno arrays are top-level fixed arrays of 64 cells.
     if fi.prop_id == crate::first_pass::prop_controller::FIRE_POSITIONS_ID || fi.prop_id == crate::first_pass::prop_controller::FIRE_BURNING_ID {
         if path.last == 1 && (0..64).contains(&path.path[1]) {
@@ -556,7 +578,12 @@ fn create_field(
                 Field::Serializer(SerializerField::new(ser))
             }
         }
-        None => Field::Value(ValueField::new(fd.decoder, &fd.var_name)),
+        None => {
+            let mut value = ValueField::new(fd.decoder, &fd.var_name);
+            value.send_node = fd.send_node.clone();
+            value.analysis_signed_tick = fd.var_type == "GameTick_t" && fd.encoder.is_empty();
+            Field::Value(value)
+        },
     };
 
     let element_field = match fd.category {

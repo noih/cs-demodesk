@@ -11,7 +11,7 @@ pub(crate) fn is_complete(file: &mut std::fs::File) -> io::Result<bool> {
     }
 }
 
-fn varint(reader: &mut impl Read, position: &mut u64) -> io::Result<Option<u32>> {
+pub(crate) fn varint(reader: &mut impl Read, position: &mut u64) -> io::Result<Option<u32>> {
     let mut value = 0;
     for shift in (0..35).step_by(7) {
         let mut byte = [0];

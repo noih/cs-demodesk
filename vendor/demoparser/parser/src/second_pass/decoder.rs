@@ -61,14 +61,14 @@ impl<'a> Bitreader<'a> {
             AmmoDecoder => Ok(Variant::U32(self.decode_ammo()?)),
             QanglePresDecoder => Ok(Variant::VecXYZ(self.decode_qangle_variant_pres()?)),
             GameModeRulesDecoder => Ok(Variant::Bool(self.decode_poly()?)),
-            BinaryBlockDecoder => Ok(Variant::String(self.decode_binary_block()?)),
+            BinaryBlockDecoder => Ok(Variant::U32Vec(self.decode_binary_block()?)),
         }
     }
 
-    pub fn decode_binary_block(&mut self) -> Result<String, DemoParserError> {
+    pub fn decode_binary_block(&mut self) -> Result<Vec<u32>, DemoParserError> {
         let n = self.read_varint()? as usize;
         let bytes = self.read_n_bytes(n)?;
-        Ok(String::from_utf8_lossy(&bytes).to_string())
+        Ok(bytes.into_iter().map(u32::from).collect())
     }
 
     pub fn decode_poly(&mut self) -> Result<bool, DemoParserError> {

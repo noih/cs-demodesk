@@ -106,7 +106,7 @@ impl DemoSummary {
 /// Bump when the parse output or the highlight rules change: every stored
 /// result then silently counts as "not parsed" and is re-computed on demand.
 // Version 14 stores eye angles for compensation paths instead of bullet directions.
-pub const PARSED_SCHEMA_VERSION: u32 = 14;
+pub const PARSED_SCHEMA_VERSION: u32 = 15;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -194,6 +194,8 @@ pub struct RenderJob {
     pub id: String,
     pub demo_id: String,
     pub highlight_ids: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub analysis_clips: Option<Box<crate::scoring::clips::RuleClips>>,
     pub options: RenderOptions,
     pub status: JobStatus,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -207,6 +209,8 @@ pub struct RenderJob {
     pub finished_at: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error_code: Option<crate::ErrorCode>,
     #[serde(default)]
     pub outputs: Vec<JobOutput>,
     #[serde(default)]
@@ -379,6 +383,20 @@ impl Store {
     pub fn parsed_bytes(&self) -> u64 {
         dir_size(&self.root.join("parsed"))
     }
+    pub fn anomaly_bytes(&self) -> u64 {
+        dir_size(&self.root.join("analysis")) + dir_size(&self.root.join("behavior-analysis"))
+    }
+    pub fn clear_anomaly_data(&self) -> Result<u64> {
+        let bytes = self.anomaly_bytes();
+        for name in ["analysis", "behavior-analysis"] {
+            match fs::remove_dir_all(self.root.join(name)) {
+                Ok(()) => {},
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {},
+                Err(e) => return Err(e.into()),
+            }
+        }
+        Ok(bytes)
+    }
     /// Drop results whose demo is no longer in any scanned folder.
     pub fn prune_parsed(&self, live: &HashSet<String>) {
         let Ok(rd) = fs::read_dir(self.root.join("parsed")) else { return };
@@ -422,7 +440,7 @@ impl Store {
     }
     pub fn new_job(&self, demo_id: &str, highlight_ids: Vec<String>, options: RenderOptions) -> Result<RenderJob> {
         let id = format!("{}-{}", chrono::Utc::now().format("%Y%m%dT%H%M%S"), &sha1_smol::Sha1::from(format!("{demo_id}{:?}{}", highlight_ids, now()).as_bytes()).digest().to_string()[..4]);
-        let job = RenderJob { schema_version: JOB_SCHEMA_VERSION, id, demo_id: demo_id.to_string(), highlight_ids, options, status: JobStatus::Queued, stage: None, progress: None, created_at: now(), started_at: None, finished_at: None, error: None, outputs: vec![], log: vec![] };
+        let job = RenderJob { schema_version: JOB_SCHEMA_VERSION, id, demo_id: demo_id.to_string(), highlight_ids, analysis_clips: None, options, status: JobStatus::Queued, stage: None, progress: None, created_at: now(), started_at: None, finished_at: None, error: None, error_code: None, outputs: vec![], log: vec![] };
         self.save_job(&job)?;
         Ok(job)
     }
@@ -503,6 +521,8 @@ fn clear_dir(dir: &Path) -> u64 {
 
 #[cfg(test)]
 mod tests {
+
+
     use super::*;
 
     #[test]

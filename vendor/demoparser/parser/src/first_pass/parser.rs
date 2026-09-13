@@ -65,6 +65,7 @@ pub struct FirstPassOutput<'a> {
     pub added_temp_props: Vec<String>,
     pub wanted_players: AHashSet<u64>,
     pub header: AHashMap<String, String>,
+    pub server_infos: Vec<csgoproto::CsvcMsgServerInfo>,
     pub order_by_steamid: bool,
     pub list_props: bool,
 }
@@ -212,6 +213,7 @@ impl<'a> FirstPassParser<'a> {
         Ok(FirstPassOutput {
             order_by_steamid: self.order_by_steamid,
             header: self.header.clone(),
+            server_infos: self.server_infos.clone(),
             fullpacket_offsets: self.fullpacket_offsets.clone(),
             settings: &self.settings,
             baselines: self.baselines.clone(),
@@ -294,6 +296,10 @@ impl<'a> FirstPassParser<'a> {
             let msg_bytes = bitreader.read_n_bytes(size as usize)?;
 
             let ok = match NetMessageType::from(msg_type as i32) {
+                svc_ServerInfo => {
+                    self.server_infos.push(csgoproto::CsvcMsgServerInfo::decode(msg_bytes.as_slice()).map_err(|_| DemoParserError::MalformedMessage)?);
+                    Ok(())
+                },
                 GE_Source1LegacyGameEventList => self.parse_game_event_list(&msg_bytes),
                 svc_CreateStringTable => self.parse_create_stringtable(&msg_bytes),
                 svc_UpdateStringTable => self.update_string_table(&msg_bytes),

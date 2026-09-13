@@ -79,6 +79,12 @@ pub struct SecondPassOutput {
 }
 impl<'a> SecondPassParser<'a> {
     pub fn start(&mut self, demo_bytes: &'a [u8]) -> Result<(), DemoParserError> {
+        self.start_with_observer(demo_bytes, |_| true)
+    }
+
+    /// Observe complete packet states without retaining an additional tick dataframe.
+    /// Returning false stops the pass; the normal parser uses a no-op observer.
+    pub fn start_with_observer(&mut self, demo_bytes: &'a [u8], mut observer: impl FnMut(&Self) -> bool) -> Result<(), DemoParserError> {
         if prof_on() {
             PROF_ENTS_NS.with(|c| c.set(0));
             PROF_COLLECT_NS.with(|c| c.set(0));
@@ -128,6 +134,11 @@ impl<'a> SecondPassParser<'a> {
                 _ => Ok(()),
             };
             ok?;
+            if matches!(frame.demo_cmd, DemPacket | DemSignonPacket) {
+                if !observer(self) { break; }
+                if let Some(changes) = &mut self.analysis_changes { changes.clear(); }
+                self.animation_strings.dirty = false;
+            }
         }
         if prof_on() {
             let ents = PROF_ENTS_NS.with(|c| c.get());
@@ -441,6 +452,7 @@ impl<'a> SecondPassParser<'a> {
 
     pub fn parse_full_packet_stringtables(&mut self, full_packet: &CDemoFullPacket) {
         if let Some(string_table) = &full_packet.string_table {
+            if self.analysis_changes.is_some() { self.animation_strings.snapshot(string_table); }
             for item in &string_table.tables {
                 if item.table_name == Some("instancebaseline".to_string()) {
                     for i in &item.items {
@@ -462,6 +474,7 @@ impl<'a> SecondPassParser<'a> {
     }
     fn clear_stringtables(&mut self) -> Result<(), DemoParserError> {
         self.string_tables = vec![];
+        if self.analysis_changes.is_some() { self.animation_strings.clear(); }
         Ok(())
     }
     pub fn parse_server_info(&mut self, bytes: &[u8]) -> Result<(), DemoParserError> {

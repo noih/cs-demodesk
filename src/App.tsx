@@ -2,7 +2,7 @@ import { NotificationProvider, Toast } from './components/Notifications.tsx';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Button, Flex, IconButton, Popover, Text, Tooltip } from '@radix-ui/themes';
-import { api, errorText, type DemoMeta, type RenderJob, type Status } from './api.ts';
+import { api, errorText, type AnalysisJob, type DemoMeta, type RenderJob, type Status } from './api.ts';
 import { createAppSync } from './appSync.ts';
 import { applyLanguage } from './i18n/index.ts';
 import { StartupGate } from './components/StartupGate.tsx';
@@ -27,6 +27,7 @@ function ReadyApp() {
   const [requestedTab, setRequestedTab] = useState('players');
   const [status, setStatus] = useState<Status>();
   const [demos, setDemos] = useState<DemoMeta[]>([]);
+  const [analysisJobs,setAnalysisJobs]=useState<AnalysisJob[]>([]);
   const [jobs, setJobs] = useState<RenderJob[]>([]);
   const [selectedId, setSelectedId] = useState<string>();
   const [showSettings, setShowSettings] = useState(false);
@@ -45,8 +46,13 @@ function ReadyApp() {
       setStatus(snapshot.status);
       setDemos(snapshot.demos);
       setJobs(snapshot.jobs);
+      setAnalysisJobs(snapshot.analysisJobs);
       setError(undefined);
     }, (ev) => {
+      if (ev.type === 'analysis-job-changed') setAnalysisJobs(list => {
+        const old=list.find(j=>j.id===ev.job.id);
+        return old && old.revision>ev.job.revision ? list : upsert(list,ev.job,j=>j.id).sort((a,b)=>b.sequence-a.sequence);
+      });
       if (ev.type === 'demo-changed') setDemos((list) => upsert(list, ev.demo, (d) => d.id));
       if (ev.type === 'job-changed') setJobs((list) => {
         const next = upsert(list, ev.job, (j) => j.id);
@@ -69,7 +75,7 @@ function ReadyApp() {
       <header className="app-header">
         <div ref={setToolbar} className="header-tools" />
         <Flex align="center" gap="2" ml="auto">
-          <QueueDialog jobs={jobs} demos={demos} onSelect={id => { setSelectedId(id); setShowSettings(false); setRequestedTab('renders'); setSelectionRequest(n => n + 1); }} />
+          <QueueDialog jobs={jobs} analysisJobs={analysisJobs} demos={demos} onChanged={refresh} onSelect={(id, tab) => { setSelectedId(id); setShowSettings(false); setRequestedTab(tab); setSelectionRequest(n => n + 1); }} />
           <Tooltip delayDuration={150} content={t(theme.appearance === 'dark' ? 'ui.light' : 'ui.dark')}><IconButton variant="ghost" aria-label={t(theme.appearance === 'dark' ? 'ui.light' : 'ui.dark')} onClick={theme.toggle}>{theme.appearance === 'dark' ? <i aria-hidden="true" className="bi bi-sun app-icon"  /> : <i aria-hidden="true" className="bi bi-moon app-icon" />}</IconButton></Tooltip>
           <Popover.Root open={fontSizeOpen} onOpenChange={setFontSizeOpen}>
             <Tooltip delayDuration={150} content={t('ui.fontSize')}><Popover.Trigger><Button variant="ghost" aria-label={t('ui.fontSize')}>Aa</Button></Popover.Trigger></Tooltip>
@@ -108,7 +114,7 @@ function ReadyApp() {
         {showSettings ? (
           <SettingsView onChanged={refresh} toolsRequest={toolsRequest} toolsTarget={toolsTarget} />
         ) : selected ? (
-          <DemoView onSetup={showTools} requestedTab={requestedTab} selectionRequest={selectionRequest} key={selected.id} meta={selected} jobs={jobs.filter((j) => j.demoId === selected.id)} status={status} onChanged={refresh} onRemoved={() => setSelectedId(undefined)} />
+          <DemoView analysisJobs={analysisJobs} onSetup={showTools} requestedTab={requestedTab} selectionRequest={selectionRequest} key={selected.id} meta={selected} jobs={jobs.filter((j) => j.demoId === selected.id)} status={status} onChanged={refresh} onRemoved={() => setSelectedId(undefined)} />
         ) : (
           <Flex align="center" justify="center" style={{ height: '100%' }}>
             <Flex direction="column" align="center">

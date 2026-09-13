@@ -200,6 +200,7 @@ pub struct RenderJobInput<'a> {
     pub demo: &'a DemoInfo,
     pub demo_path: PathBuf,
     pub highlights: Vec<Highlight>,
+    pub preserve_merge_order: bool,
     pub output_dir: PathBuf,
     pub options: RenderOptions,
     pub tools: ToolPaths,
@@ -214,7 +215,7 @@ fn safe_name(s: &str) -> String {
 }
 
 pub fn render_highlights(input: RenderJobInput) -> Result<RenderResult> {
-    let RenderJobInput { demo, demo_path, mut highlights, output_dir, options: o, tools, cancel, log, stage, progress } = input;
+    let RenderJobInput { demo, demo_path, mut highlights, preserve_merge_order, output_dir, options: o, tools, cancel, log, stage, progress } = input;
     let (Some(cs2_dir), Some(cs2_exe), Some(hlae_exe), Some(hlae_dll), Some(ffmpeg_exe)) = (tools.cs2_dir, tools.cs2_exe, tools.hlae_exe, tools.hlae_dll, tools.ffmpeg_exe) else {
         return Err(anyhow!("environment not ready — check the settings page"));
     };
@@ -228,6 +229,7 @@ pub fn render_highlights(input: RenderJobInput) -> Result<RenderResult> {
     if highlights.is_empty() {
         return Err(anyhow!("nothing to render"));
     }
+    let merge_order: Vec<_> = if preserve_merge_order { highlights.iter().map(|h| h.id.clone()).collect() } else { vec![] };
     // Render in demo order so the game only seeks forward.
     highlights.sort_by_key(|h| h.start_tick);
     std::fs::create_dir_all(&output_dir)?;
@@ -313,6 +315,10 @@ pub fn render_highlights(input: RenderJobInput) -> Result<RenderResult> {
         // One video: the size limit applies to the joined file; the per-clip files are intermediates.
         let merged = output_dir.join(format!("highlights.{}", o.container));
         stage("encoding: merging");
+        // Record chronologically, then restore rule groups for the final video.
+        if preserve_merge_order {
+            muxed = merge_order.iter().filter_map(|id| result.clips.iter().find(|c| c.highlight_id == *id).and_then(|c| c.file.clone())).collect();
+        }
         concat_clips(ffmpeg, &muxed, &merged)?;
         stage("encoding: fitting");
         let merged = fit_to_size(merged, log, &mut |p| progress(muxing_end + (0.99 - muxing_end) * p))?;

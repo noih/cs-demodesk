@@ -454,8 +454,9 @@ video {
 .match-score>div+div { border-left:1px solid var(--app-border); }
 .match-score small { display:block; font:var(--app-font-caption) var(--code-font-family); text-transform:uppercase; letter-spacing:.12em; color:var(--app-subtle); }
 .match-score strong { font:700 var(--app-font-title) var(--code-font-family); }
-.demo-tabs { margin-top:12px; padding-bottom:6px; gap:4px; border-bottom:1px solid var(--app-border); box-shadow:none; flex-shrink:0; }
-.demo-tabs .rt-TabsTrigger { flex:1; min-width:0; height:42px; font-size:var(--app-font-body); border-radius:4px; color:var(--app-muted); transition:background-color .15s,color .15s; }
+.demo-tabs-bar { container-type:inline-size; font-size:var(--app-font-body); flex-shrink:0; min-width:0; margin-top:12px; }
+.demo-tabs { width:100%; margin-top:0; padding-bottom:6px; gap:4px; border-bottom:1px solid var(--app-border); box-shadow:none; flex-shrink:0; }
+.demo-tabs .rt-TabsTrigger { flex:1 0 auto; min-width:max-content; white-space:nowrap; height:42px; font-size:var(--app-font-body); border-radius:4px; color:var(--app-muted); transition:background-color .15s,color .15s; }
 .demo-tabs .rt-TabsTriggerInner { width:100%; justify-content:center; }
 .demo-tabs .app-icon { margin-right:7px; }
 .demo-tabs .rt-TabsTrigger:hover { background:var(--app-raised); color:var(--app-text); }
@@ -709,3 +710,9 @@ video {
 
 .replay-drawing-toolbar .rt-IconButton[aria-pressed="true"],
 .replay-drawing-tools .rt-IconButton:not([aria-pressed]):not(:disabled) { background: var(--app-accent); color: var(--app-accentText); box-shadow: none; }
+
+@container (max-width: 50em) {
+  .demo-tabs .demo-tab-label, .demo-tabs .rt-Badge { display:none; }
+  .demo-tabs .rt-TabsTrigger { flex:1 1 0; min-width:0; padding-inline:8px; }
+  .demo-tabs .app-icon { margin-right:0; }
+}

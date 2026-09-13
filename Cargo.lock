@@ -803,6 +803,7 @@ dependencies = [
  "cc",
  "chrono",
  "csgoproto",
+ "flate2",
  "parser",
  "prost",
  "semver",

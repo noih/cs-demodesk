@@ -23,7 +23,7 @@ try {
     const demos = Array.from({ length: 1000 }, (_, i) => ({ id: 'demo-' + i, name: 'match_' + i + '.dem', path: 'E:/replays/' + i + '.dem', bytes: 214800000, createdMs: new Date(2026, 8, 8, 17, 0).getTime() - i * 60000, mtimeMs: new Date(2026, 8, 8, 17, i % 60).getTime(), status: 'parsed', mapName: i % 2 ? 'Inferno' : 'Mirage', summary: { rounds: 22, kills: 100, highlights: 1, scoreA: 13, scoreB: 9, players: ['Player'] } }));
     const options = { width: 1920, height: 1080, fps: 60, codec: 'h264', hud: true, crosshair: true, radar: true, killFeed: true, viewmodel: true, tracers: true, maxSizeMb: 20, trueView: true };
     const jobTime = Date.now();
-    const jobs = Array.from({ length: 100 }, (_, i) => ({ id: 'job-' + i, demoId: i === 1 ? 'demo-999' : 'demo-0', highlightIds: ['highlight-1'], options, status: i === 0 ? 'running' : i === 1 ? 'queued' : 'done', stage: i === 0 ? 'recording 1/2' : '', progress: i === 0 ? 0.35 : undefined, createdAt: new Date(jobTime - 45000).toISOString(), startedAt: i === 1 ? undefined : new Date(jobTime - 40000).toISOString(), finishedAt: i > 1 ? new Date(jobTime - 10000).toISOString() : undefined, outputs: i < 2 ? [] : Array.from({length:i===2?3:1},(_,j)=>({ file: 'E:/clips/' + i + '-' + j + '.mp4', bytes: 18400000, title: 'Round 08', highlightId: 'highlight-1', isFinal: j===2 })), log: ['recording'] }));
+    const jobs = Array.from({ length: 100 }, (_, i) => ({ id: 'job-' + i, demoId: i === 1 ? 'demo-999' : 'demo-0', highlightIds: ['highlight-1'], options, status: i === 0 ? 'running' : i === 1 ? 'queued' : 'done', stage: i === 0 ? 'recording 1/2' : '', progress: i === 0 ? 0.35 : undefined, createdAt: new Date(jobTime - 45000).toISOString(), startedAt: i === 1 ? undefined : new Date(jobTime - 40000).toISOString(), finishedAt: i > 1 ? new Date(jobTime - 10000).toISOString() : undefined, outputs: i < 2 ? [] : Array.from({length:i===2?3:1},(_,j)=>({ file: 'E:/clips/' + i + '-' + j + '.mp4', bytes: 18400000, title: 'Round 08', highlightId: 'highlight-1', isFinal: j===2 })), errorCode:i===2?'app-closed':undefined,error:i===2?'backend diagnostic changed':undefined,log: ['recording'] }));
     const testPlayerNames = JSON.parse(localStorage.getItem('test.playerNames') || 'null');
     const player = {steamid:'1',name:testPlayerNames?.[0] ?? 'Player',team:'A',kills:20,deaths:10,assists:3,openingKills:4,openingDeaths:2,flashAssists:1,roundsPlayed:22,roundsSurvived:12,kast:77.3,tradeKills:2,tradedDeaths:1,heDamage:20,fireDamage:10,opponents:{'2':3},aim:{all:{shots:100,hits:25,headHits:5,headEligibleHits:20,firstShots:10,firstHits:4,sprayShots:30,sprayHits:9}},activity:{shots:100,flashes:2,smokes:3,hes:2,fires:1,enemiesFlashed:3,teammatesFlashed:1,enemyBlindSeconds:7},clutches:[{round:8,side:'CT',versus:2,kills:2,outcome:'won'}],headshots:10,headshotPct:50,kd:2,multiKills:{'2k':2,'3k':1,'4k':0,'5k':0},clutchesWon:1,damage:2000,utilityDamage:30,friendlyDamage:0,adr:90,highlights:1,bestScore:8};
     const ray = ([x,y], i) => ({ tick: 100 + i * 6, origin: [0,0,64], viewYaw: Math.atan2(x,1000) * 180 / Math.PI, viewPitch: Math.atan2(y,Math.hypot(1000,x)) * 180 / Math.PI });
@@ -33,6 +33,9 @@ try {
     ]};
     const status = { missingRenderTools:[],ok:true,problems:[],dataDir:'E:/data',activeRender:'job-0',version:'test' };
     window.testCalls = [];
+    window.scoreHistory=JSON.parse(localStorage.getItem("test.scoreHistory") || "null");
+    window.analysisJobs=[];
+    window.analysisStep=(job,step)=>{Object.assign(job,{step,revision:job.revision+1});window.emitTestEvent({type:'analysis-job-changed',job:{...job}});};
     const callbacks = new Map();
     const listeners = new Map();
     let callbackId = 0;
@@ -50,14 +53,61 @@ try {
       if(cmd==='run_setup')return true;
       if(cmd==='check_for_updates'){if(window.failUpdate)throw new Error('offline');return {status:'available',version:'1.0.10'};}
       if(cmd==='open_url'){window.openedUrl=args.url;return;}
+      if(cmd==='open_path'){window.openedPath=args.path;return;}
       if(cmd==='get_status')return window.missingTools ? {...status,ok:false,missingRenderTools:window.missingRenderTools ?? ['HLAE','ffmpeg']} : status;
-      if(cmd==='get_settings')return { settings:{language:'en',replayFolders:[],scanGameReplays:true},doctor:{ok:true,problems:[],paths:window.toolPaths || {}},detected:{},setup:{running:false,log:[]},dataDir:'E:/data',defaultDataDir:'E:/data',parsedBytes:0,clipsBytes:0,radarBytes:0 };
+      if(cmd==='get_settings')return { settings:{language:'en',replayFolders:[],scanGameReplays:true},doctor:{ok:true,problems:[],paths:window.toolPaths || {}},detected:{},setup:{running:false,log:[]},dataDir:'E:/data',defaultDataDir:'E:/data',parsedBytes:0,anomalyBytes:0,clipsBytes:0,radarBytes:0 };
       if(cmd==='list_demos'){if(window.holdRefresh)await new Promise(resolve=>window.releaseRefresh=resolve);return demos;}
       if(cmd==='list_jobs')return window.queueJobs ?? (window.showQueuedOnCurrentDemo ? jobs.map(j=>j.status==='queued'?{...j,demoId:'demo-0'}:j) : jobs);
+      if(cmd==='analysis_clips'&&window.holdClipPreview)await new Promise(resolve=>(window.releaseClipPreviews??=[]).push(resolve));
+      if(cmd==='analysis_clips')return args.selection.ruleIds.map(ruleId=>({ruleId,title:'Opponent — '+ruleId,demoFingerprint:'source-current',highlights:[{id:'clip-'+ruleId,player:{steamid:args.selection.playerId,name:'Opponent'},round:1,startTick:0,endTick:320,anchorTick:64,score:0,tags:[ruleId],title:'Opponent — '+ruleId,kills:[],breakdown:{}}]}));
+      if(cmd==='start_analysis_render'){
+        if(window.failExport)throw Error('Cannot queue export');
+        const exports=args.selection.ruleIds.map((ruleId,index)=>({id:'analysis-video-'+index,demoId:args.demoId,highlightIds:['clip-'+ruleId],analysisClips:{ruleId,title:'Opponent — '+ruleId,demoFingerprint:'source-current',highlights:[{id:'clip-'+ruleId,title:'Opponent — '+ruleId}]},options:{...args.options,merge:true},status:'queued',createdAt:new Date().toISOString(),outputs:[],log:[]}));
+        window.queueJobs=[...(window.queueJobs??jobs),...exports];
+        exports.forEach(job=>window.emitTestEvent({type:'job-changed',job}));return exports;
+      }
+      if(cmd==='analysis_jobs')return window.analysisJobs.map(job=>({...job}));
+      if(cmd==='scoring_history')return Object.fromEntries(Object.entries(window.scoreHistory??{}).filter(([key])=>key.startsWith(args.id+':')).map(([key,records])=>[key.slice(args.id.length+1),records]));
+      if(cmd==='score_player')throw Error('Per-player scoring must not be invoked');
+      if(cmd==='score_match') {
+        window.scoreCalls=(window.scoreCalls ?? 0)+1;
+        if(window.failScore)throw Error('Source demo unavailable');
+        const active=window.analysisJobs.find(job=>job.demoId===args.id&&['running','queued'].includes(job.status));
+        if(active)return {...active};
+        const job={id:'analysis-'+window.scoreCalls,demoId:args.id,sequence:window.scoreCalls,revision:0,status:'queued',step:null,error:null,createdAt:new Date().toISOString(),startedAt:null,finishedAt:null};
+        window.analysisJobs.push(job);
+        const emit=()=>window.emitTestEvent({type:'analysis-job-changed',job:{...job}});
+        emit();
+        const complete=()=>{
+        job.status='running';job.startedAt=new Date().toISOString();window.analysisStep(job,1);
+        window.releaseScore=()=>{
+        if(window.failWorker){Object.assign(job,{status:'error',error:'Cannot read source demo',finishedAt:new Date().toISOString(),revision:job.revision+1});emit();return;}
+
+        const history=window.scoreHistory ??= {};
+        const players={};
+        for(const playerId of ['1','2']) {
+          const key=args.id+':'+playerId;
+          const records=history[key] ??= [];
+          const index=records[0] ? Number(records[0].id.split('-').at(-1))+1 : 0;
+          const occurrence={id:'event-'+playerId,round:1,startTick:64+index*64,endTick:128+index*64,targetId:'1',sourceIds:['raw-a','raw-b'],measurements:[{name:'speed',value:3.123456,unit:'deg/s',threshold:null},{name:'speed',value:4.123456,unit:'deg/s',threshold:null}]};
+          const makeCheck = (id,name) => ({definition:{id,version:'test-2',name,description:'Test behavior',category:'aim',parameters:{}},state:playerId==='1'?'passed':'findings',reason:'Observed behavior',reasonCode:'experimentalMeasurements',evaluatedSamples:64,summary:[{name:'shots',value:64,unit:'',threshold:null},{name:'hitRate',value:0.875,unit:'ratio',threshold:null}],occurrences:playerId==='1'?[]:[occurrence],diagnostics:null});
+          const contextCheck = (id,metric) => ({...makeCheck(id,id),state:playerId==='1'?'unavailable':'findings',reasonCode:'shotPathsMissing',summary:playerId==='1'?[]:[{name:metric,value:1,unit:'shots',threshold:null},{name:'unclassifiedShots',value:63,unit:'shots',threshold:null}],occurrences:playerId==='1'?[]:[{...occurrence,id:'context-'+id,measurements:[{name:metric,value:1,unit:'shots',threshold:null}]}]});
+          records.length=0;
+          records.unshift({schemaVersion:2,id:'assessment-'+index,createdAt:new Date(1750000000000+index*1000).toISOString(),demoId:args.id,demoFingerprint:'source-current',playerId,tickRate:64,rulesetVersion:'test-2',state:playerId==='1'?'passed':'findings',checks:[contextCheck('smoke-hit-rate','smokeHits'),contextCheck('penetration-hit-rate','penetrationHits'),makeCheck('aim-snap','Instant acquisition'),makeCheck('aim-linear-acquisition','Rapid straight turn'),{...makeCheck('globally-empty','Empty behavior'),state:'passed',occurrences:[],summary:[]},{definition:{id:'view-angle-oscillation',version:'test-2',name:'View-angle oscillation',description:'View behavior',category:'view',parameters:{}},state:'unavailable',reason:'Missing view data',reasonCode:'viewMissing',evaluatedSamples:0,summary:[],occurrences:[],diagnostics:null}]});
+          players[playerId]=records;
+        }
+        Object.assign(job,{status:'done',step:3,finishedAt:new Date().toISOString(),revision:job.revision+1});emit();
+        };
+        if(!window.holdScore)window.releaseScore();
+        };
+        window.startScore=complete;
+        if(!window.holdQueued)complete();
+        return {...job};
+      }
       if(cmd==='get_demo' && window.emptyParsed)return {meta:demos.find(d=>d.id===args.id)};
       if(cmd==='get_demo' && window.failDemo)throw Error('Cannot read demo');
       if(cmd==='get_demo' && window.holdDemo)await new Promise(resolve=>window.releaseDemo=resolve);
-      if(cmd==='get_demo')return { meta:demos.find(d=>d.id===args.id),parsed:{recoilReference:{ak47:[{x:0,y:0,samples:4},{x:-1,y:-1,samples:4},{x:-2,y:-3,samples:4},{x:-2,y:-4,samples:2}]},info:{mapName:demos.find(d=>d.id===args.id).mapName,tickRate:64,players:[]},parsedAt:'2026-09-08',score:{A:13,B:9},rounds:[],roundSummaries:[{round:1,winner:'A',killsA:5,killsB:2,players:{'1':{kills:5,deaths:2,damage:450,awp:1,flashed:2,cash:800},'2':{kills:2,deaths:5,damage:220,awp:0,flashed:0,cash:300}}}],stats:[player,{...player,steamid:'2',name:testPlayerNames?.[1] ?? 'Player',team:'B',recoil:{},opponents:{'1':1}}],highlights:[{id:'highlight-1',player:{steamid:'1',name:'Player'},round:8,startTick:640,endTick:1280,score:8,tags:['3k'],title:'Player — 3 kills · R8',kills:[],breakdown:{}}]}};
+      if(cmd==='get_demo')return { meta:demos.find(d=>d.id===args.id),parsed:{recoilReference:{ak47:[{x:0,y:0,samples:4},{x:-1,y:-1,samples:4},{x:-2,y:-3,samples:4},{x:-2,y:-4,samples:2}]},info:{mapName:demos.find(d=>d.id===args.id).mapName,tickRate:64,players:[{steamid:'1',name:'Player',teamNumber:3},{steamid:'2',name:'Opponent',teamNumber:2}]},parsedAt:'2026-09-08',score:{A:13,B:9},rounds:[],roundSummaries:[{round:1,winner:'A',killsA:5,killsB:2,players:{'1':{kills:5,deaths:2,damage:450,awp:1,flashed:2,cash:800},'2':{kills:2,deaths:5,damage:220,awp:0,flashed:0,cash:300}}}],stats:[player,{...player,steamid:'2',name:testPlayerNames?.[1] ?? 'Player',team:'B',recoil:{},opponents:{'1':1}}],highlights:[{id:'highlight-1',player:{steamid:'1',name:'Player'},round:8,startTick:640,endTick:1280,score:8,tags:['3k'],title:'Player — 3 kills · R8',kills:[],breakdown:{}}]}};
       if(cmd==='plugin:event|listen') { if(window.holdListener)await new Promise(resolve => window.releaseListener = resolve); await new Promise(resolve => setTimeout(resolve, 10)); listeners.set(args.handler, args.handler); return args.handler; }
       if(cmd==='plugin:event|unlisten') { listeners.delete(args.eventId); return; }
       throw Error('Unexpected command '+cmd);
@@ -127,13 +177,15 @@ try {
   const viewport=page.viewportSize();
   await page.setViewportSize({width:900,height:940});
   await videoTab.scrollIntoViewIfNeeded();
-  assert.ok(await videoTab.evaluate(el=>{const outer=el.getBoundingClientRect();return [...el.querySelector('.rt-TabsTriggerInner').children].every(child=>{const r=child.getBoundingClientRect();return r.left>=outer.left && r.right<=outer.right;});}), 'Queued and running badges fit together at narrow widths');
+  assert.ok(await videoTab.evaluate(el=>{const outer=el.getBoundingClientRect();return [...el.querySelector('.rt-TabsTriggerInner').children].filter(child=>child.getBoundingClientRect().width>0).every(child=>{const r=child.getBoundingClientRect();return r.left>=outer.left && r.right<=outer.right;});}), 'Visible icon fits the compact video tab');
   await page.setViewportSize(viewport);
   await page.evaluate(()=>{window.showQueuedOnCurrentDemo=false;});
   await page.locator('.header-tools .bi-arrow-clockwise').locator('..').click();
   await videoTab.locator('.rt-TabsTriggerInner .bi-hourglass-split').waitFor({state:'detached'});
   await page.locator('.notification-viewport').getByRole('button',{name:'Close',exact:true}).click();
   await page.locator('.job-card').first().waitFor();
+  await page.getByText('Job interrupted because the app was closed',{exact:true}).waitFor();
+  assert.equal(await page.getByText('backend diagnostic changed',{exact:true}).count(),0,'Error code selects translation regardless of backend diagnostic wording');
   const progressBar = page.getByRole('progressbar', {name:'Overall progress (estimated)'});
   assert.equal(await progressBar.getAttribute('aria-valuenow'), '35');
   assert.ok(!(await page.locator('.job-card').first().innerText()).includes('Elapsed'), 'Running timer has no redundant prefix');
@@ -194,8 +246,8 @@ try {
   await page.keyboard.press('Escape');
   assert.ok(await page.getByRole('tab').evaluateAll(tabs=>tabs.every(tab=>{
     const style=getComputedStyle(tab);
-    return style.flexGrow==='1' && style.flexBasis==='auto' && style.minWidth==='max-content';
-  })), 'Tabs fit their contents and share extra space');
+    return style.flexGrow==='1' && tab.scrollWidth<=tab.clientWidth+1;
+  })), 'Tabs adapt to font size and share available space without clipping');
   const plainCursors = await page.locator('button:not(:disabled):not([data-disabled]):not([aria-disabled="true"])').evaluateAll(buttons => buttons
     .filter(button => getComputedStyle(button).cursor !== 'pointer')
     .map(button => button.getAttribute('aria-label') || button.textContent.trim()));
@@ -556,6 +608,12 @@ try {
   await page.keyboard.press('Escape');
   await page.locator('.queue-trigger').click();
 
+  assert.equal(await page.locator('.queue-trigger').count(), 1, 'One shared queue entry');
+  assert.match(await page.getByRole('dialog').getByRole('tab').first().innerText(), /^Video export/);
+  assert.equal(await page.getByRole('dialog').getByRole('tab').first().getAttribute('data-state'), 'active');
+  await page.getByRole('dialog').getByRole('tab', {name:/^Anomaly analysis/}).click();
+  await page.getByRole('dialog').getByText('No jobs', {exact:true}).waitFor();
+  await page.getByRole('dialog').getByRole('tab', {name:/^Video export/}).click();
   await page.locator('.queue-clips').getByText('Player — 3 kills · R8').first().waitFor();
   await page.getByRole('button',{name:'Open demo',exact:true}).last().click();
   await page.locator('.demo-item.active').waitFor();
@@ -573,6 +631,9 @@ try {
   await page.getByRole('button',{name:'Settings',exact:true}).click();
   await page.getByText('Language',{exact:true}).waitFor();
   const settingsPage = page.locator('.settings-page');
+  assert.equal(await settingsPage.getByText('Anomaly data', {exact:true}).count(), 1);
+  await settingsPage.getByText('Anomaly data', {exact:true}).locator('xpath=following-sibling::button[1]').click();
+  assert.equal(await page.evaluate(()=>window.openedPath.replaceAll('\\','/')), 'E:/data/analysis');
   const directoryInput = settingsPage.getByLabel('Data directory', {exact:true});
   const originalDark = (await page.locator('.radix-themes').first().getAttribute('class')).split(' ').includes('dark');
   for (const mode of ['light','dark']) {
@@ -955,6 +1016,178 @@ try {
   assert.ok((await selectorLayout()).every(r=>r.x>=0 && r.x+r.width<=900),'Player selectors fit within narrow windows');
   assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
   await page.evaluate(()=>localStorage.removeItem('test.playerNames'));
+  await page.getByRole('tab',{name:'Match anomalies',exact:true}).click();
+  const scorePanel=page.getByRole('tabpanel');
+  const scoreButton=scorePanel.locator('button[aria-busy]');
+  await scoreButton.waitFor();
+  assert.equal(await scorePanel.getByText(/upper right|Use Analyze/).count(),0,'No analysis instructions');
+  assert.equal(await page.getByRole('button',{name:'Analyze',exact:true}).count(),1,'Analysis action only appears inside the anomaly tab');
+  assert.equal(await page.evaluate(()=>window.scoreCalls ?? 0),0,'Opening demo and scoring tab never starts scoring');
+  const scoreRow = id => scorePanel.locator('[data-player-id="'+id+'"]');
+  const behaviorCount = (id,rule='aim-snap') => scoreRow(id).locator('[data-rule-count="'+rule+'"]');
+  assert.equal(await scorePanel.getByRole('combobox',{name:'Player',exact:true}).count(),0,'No player selector hides the roster');
+  assert.equal(await scorePanel.getByRole('table').count(),0,'No empty roster table before analysis');
+  assert.equal(await scorePanel.getByRole('button',{name:'Details',exact:true}).count(),0,'No disabled details buttons without data');
+  const scoringListenerBaseline=await page.evaluate(()=>window.testListenerCount());
+  await page.evaluate(()=>{window.holdScore=true;window.holdQueued=true;});
+  await scoreButton.click();
+  await scorePanel.getByRole('status').filter({hasText:'Waiting'}).waitFor();
+  await page.locator('.queue-trigger').click();
+  await page.getByRole('dialog').getByRole('tab', {name:/^Anomaly analysis/}).click();
+  await page.getByRole('dialog').getByText(/Waiting.*1/).waitFor();
+  await page.getByRole('dialog').getByRole('button',{name:'Close',exact:true}).click();
+  await page.evaluate(()=>{window.holdQueued=false;window.startScore();});
+  assert.equal(await scoreButton.isDisabled(),true,'Duplicate match requests are disabled');
+  await scorePanel.getByRole('status').filter({hasText:'Step 1 / 3'}).waitFor();
+  await page.evaluate(()=>window.emitTestEvent({type:'analysis-job-changed',job:{...window.analysisJobs[0],id:'other-job',demoId:'another-demo',step:3}}));
+  assert.ok((await scorePanel.getByRole('status').innerText()).includes('Step 1 / 3'),'Other demos do not change progress');
+  await page.evaluate(()=>window.analysisStep(window.analysisJobs[0],2));
+  await scorePanel.getByRole('status').filter({hasText:'Step 2 / 3'}).waitFor();
+  const activeAnalysisId=await page.evaluate(()=>window.analysisJobs[0].id);
+  await page.locator('.demo-item').nth(1).click();
+  await page.locator('.queue-trigger').click();
+  await page.getByRole('dialog').getByRole('tab', {name:/^Anomaly analysis/}).click();
+  await page.getByRole('dialog').locator('[data-analysis-job="'+activeAnalysisId+'"]').getByRole('button',{name:'Open demo',exact:true}).click();
+  await scorePanel.getByRole('status').filter({hasText:'Step 2 / 3'}).waitFor();
+  assert.equal(await scoreButton.isDisabled(),true,'Returning to a running demo preserves its job');
+
+  assert.equal(await scorePanel.locator('ol').count(),0,'Progress has no redundant step list');
+  assert.equal(await scorePanel.getByText(/Elapsed:/).count(),0,'Progress has no elapsed timer');
+  await page.getByRole('tab',{name:'Players',exact:true}).click();
+  await page.getByRole('tab',{name:'Match anomalies',exact:true}).click();
+  await scorePanel.getByRole('status').filter({hasText:'Step 2 / 3'}).waitFor();
+  await page.evaluate(()=>window.analysisStep(window.analysisJobs[0],3));
+  await scorePanel.getByRole('status').filter({hasText:'Step 3 / 3'}).waitFor();
+  await page.evaluate(()=>{window.holdScore=false;window.releaseScore();});
+  await page.waitForFunction(count=>window.testListenerCount()===count,scoringListenerBaseline);
+  await scoreRow('1').waitFor();
+  assert.equal(await scoreRow('1').locator('[data-rule-count]').count(),0,'No empty behavior labels');
+  await behaviorCount('2').filter({hasText:/^1$/}).waitFor();
+  assert.equal(await behaviorCount('2','aim-linear-acquisition').innerText(),'1','Independent aligned rule columns');
+  assert.equal(await behaviorCount('1','aim-linear-acquisition').count(),0,'Unobserved behavior is omitted per player');
+  assert.equal(await scorePanel.getByRole('columnheader').count(),3,'Only player, observed behaviors, and details');
+  assert.equal(await scorePanel.getByRole('columnheader',{name:'Empty behavior',exact:true}).count(),0,'Globally empty rules are omitted');
+  assert.equal(await scorePanel.locator('[data-rule-count="view-angle-oscillation"]').count(),0,'Unavailable rule is not an event column');
+  assert.equal(await scorePanel.getByText('No occurrences',{exact:true}).count(),0,'No repetitive empty-result list');
+  assert.equal(await scorePanel.getByText(/Counts show observed behavior|Analysis history|Source demo not verified|different demo content/).count(),0,'Main matrix has no redundant explanation or source warnings');
+  assert.equal(await page.getByRole('dialog').count(),0,'Details are initially closed');
+  assert.equal(await page.evaluate(()=>window.scoreCalls),1,'One request evaluates the whole match');
+  await page.setViewportSize({width:1360,height:940});
+  if(process.env.UI_SCREENSHOT_DIR) await scorePanel.screenshot({path:process.env.UI_SCREENSHOT_DIR+'/scoring-matrix.png'});
+  const detailsButton = id => scoreRow(id).getByRole('button',{name:'Details',exact:true});
+  assert.equal(await behaviorCount('2','smoke-hit-rate').innerText(),'1','Confirmed path hits remain positive counts');
+  await detailsButton('2').click();
+  const analysisDialog=page.getByRole('dialog');
+  await analysisDialog.getByRole('heading',{name:'Opponent · Analysis details',exact:true}).waitFor();
+  assert.equal(await analysisDialog.locator('select').count(),0,'No analysis history select');
+  assert.equal(await analysisDialog.getByText(/Counts show observed behavior|Analysis history|Source demo not verified|different demo content/).count(),0,'No explanation, history label, or source warnings');
+  const smokeDetails=analysisDialog.locator('[data-check-id="smoke-hit-rate"]');
+  await smokeDetails.getByText('Confirmed hits are counted; complete paths for missed shots are unavailable, so hit rate cannot yet be calculated.',{exact:true}).waitFor();
+  assert.equal(await smokeDetails.getByText(/ratio|%/).count(),0,'Confirmed smoke hits never fabricate an unknown percentage');
+  if(process.env.UI_SCREENSHOT_DIR) await analysisDialog.screenshot({path:process.env.UI_SCREENSHOT_DIR+'/scoring-dialog.png'});
+
+  await analysisDialog.getByText(/Ticks: 64–128/).first().waitFor();
+  await analysisDialog.getByText('Acquisition speed: 3.1235 deg/s',{exact:true}).first().waitFor();
+  await analysisDialog.getByText('Acquisition speed: 4.1235 deg/s',{exact:true}).first().waitFor();
+  await analysisDialog.getByText('Shots: 64',{exact:true}).first().waitFor();
+  await analysisDialog.getByRole('heading',{name:'Data status',exact:true}).waitFor();
+  assert.equal(await analysisDialog.locator('[data-occurrence-id]').count(),4,'Original evidence stays separate per rule');
+  assert.equal(await page.evaluate(()=>window.scoreCalls),1,'Opening dialog never recalculates');
+  await page.keyboard.press('Escape');
+  await analysisDialog.waitFor({state:'hidden'});
+  assert.equal(await detailsButton('2').evaluate(el=>el===document.activeElement),true,'Escape restores trigger focus');
+  await detailsButton('1').click();
+  await analysisDialog.getByText('Shots: 64',{exact:true}).first().waitFor();
+  assert.equal(await analysisDialog.locator('[data-occurrence-id]').count(),0,'Player with no observations still has measured summary');
+  await analysisDialog.getByRole('button',{name:'Close',exact:true}).click();
+  await analysisDialog.waitFor({state:'hidden'});
+  assert.equal(await scoreRow('1').getByRole('button',{name:'Export',exact:true}).count(),0,'No export action without occurrences');
+  await scoreRow('2').getByRole('button',{name:'Export',exact:true}).click();
+  const behaviorExport=page.getByRole('dialog');
+  assert.equal(await behaviorExport.locator('button[aria-pressed]').count(),4,'Only observed rules can be exported');
+  assert.equal(await behaviorExport.getByRole('button',{name:'Export',exact:true}).isDisabled(),true);
+  await behaviorExport.evaluate(el=>Promise.all(el.getAnimations().map(animation=>animation.finished)));
+  const exportBounds=await behaviorExport.boundingBox();
+  await page.evaluate(()=>window.holdClipPreview=true);
+  await behaviorExport.getByRole('button',{name:/Instant acquisition/}).click();
+  await page.waitForFunction(()=>window.releaseClipPreviews?.length>0);
+  const loadingBounds=await behaviorExport.boundingBox();
+  assert.ok(Math.abs(loadingBounds.y-exportBounds.y)<1 && Math.abs(loadingBounds.height-exportBounds.height)<1,'Rule preview loading must not move or resize the dialog');
+  await page.evaluate(()=>{window.holdClipPreview=false;window.releaseClipPreviews.splice(0).forEach(resolve=>resolve());});
+
+  await behaviorExport.getByRole('button',{name:/Rapid straight turn/}).click();
+  await page.waitForFunction(()=>document.querySelectorAll('[role=dialog] button[aria-pressed=true]').length===2);
+  assert.equal(await behaviorExport.locator('[data-export-rule]').count(),0,'Selected rules do not add round or interval descriptions');
+  await page.waitForFunction(()=>!document.querySelector('[role=dialog] [aria-busy=true]'));
+  const settledBounds=await behaviorExport.boundingBox();
+  assert.ok(Math.abs(settledBounds.y-exportBounds.y)<1 && Math.abs(settledBounds.height-exportBounds.height)<1,'Resolved rule preview must retain dialog position and height');
+  const mergeRules=behaviorExport.getByRole('switch',{name:'Merge different rules',exact:true});
+  assert.equal(await mergeRules.isChecked(),false,'Different rules stay separate by default');
+  await page.evaluate(()=>window.failExport=true);
+  await behaviorExport.getByRole('button',{name:'Export',exact:true}).click();
+  await behaviorExport.getByRole('alert').filter({hasText:'Cannot queue export'}).waitFor();
+  assert.equal(await behaviorExport.getByRole('button',{name:/Instant acquisition/}).getAttribute('aria-pressed'),'true','Failed enqueue retains selection');
+  assert.equal(await page.evaluate(()=>window.testCalls.findLast(call=>call.cmd==='start_analysis_render').args.options.merge),false);
+  await mergeRules.click();
+  await page.evaluate(()=>window.failExport=false);
+  await behaviorExport.getByRole('button',{name:'Export',exact:true}).click();
+  await behaviorExport.waitFor({state:'hidden'});
+  const exportRequest=await page.evaluate(()=>window.testCalls.findLast(call=>call.cmd==='start_analysis_render').args);
+  assert.equal(exportRequest.selection.playerId,'2');
+  assert.deepEqual(exportRequest.selection.ruleIds,['aim-snap','aim-linear-acquisition']);
+  assert.equal(exportRequest.options.merge,true);
+  await page.getByRole('tab',{name:'Match anomalies',exact:true}).click();
+  await page.setViewportSize({width:760,height:940});
+  assert.ok(await scorePanel.getByRole('table').evaluate(el=>el.scrollWidth<=el.clientWidth),'Behavior labels wrap without horizontal scrolling');
+  await scoreButton.click();
+  await page.waitForFunction(()=>window.scoreHistory && Object.values(window.scoreHistory).every(records=>records.length===1 && records[0].id==='assessment-1'));
+  await detailsButton('2').click();
+  assert.equal(await analysisDialog.locator('select').count(),0,'No history selector is exposed');
+  await analysisDialog.getByText(/Ticks: 128–192/).first().waitFor();
+  assert.equal(await analysisDialog.getByText(/Ticks: 64–128/).count(),0,'Dialog shows only the latest result');
+  if(process.env.UI_SCREENSHOT_DIR) await analysisDialog.screenshot({path:process.env.UI_SCREENSHOT_DIR+'/scoring-dialog.png'});
+  await analysisDialog.getByRole('button',{name:'Close',exact:true}).click();
+  await page.evaluate(()=>window.failWorker=true);
+  await scoreButton.click();
+  await scorePanel.getByRole('alert').filter({hasText:'Cannot read source demo'}).waitFor();
+  await page.locator('.queue-trigger').click();
+  await page.getByRole('dialog').getByRole('tab', {name:/^Anomaly analysis/}).click();
+  const failedJob=page.getByRole('dialog').locator('[data-analysis-job]').filter({hasText:'Cannot read source demo'});
+  await failedJob.waitFor();
+  await page.evaluate(()=>window.failWorker=false);
+  await failedJob.getByRole('button',{name:'Retry',exact:true}).click();
+  await page.getByRole('dialog').locator('[data-analysis-job]').first().getByText('Completed',{exact:true}).waitFor();
+  await page.getByRole('dialog').getByRole('button',{name:'Close',exact:true}).click();
+  await page.evaluate(()=>window.failScore=true);
+  await scoreButton.click();
+  await scorePanel.getByRole('alert').filter({hasText:'Source demo unavailable'}).waitFor();
+  await behaviorCount('2').filter({hasText:/^1$/}).waitFor();
+  await page.getByRole('tab',{name:'Players',exact:true}).click();
+  await page.getByRole('tab',{name:'Match anomalies',exact:true}).click();
+  await behaviorCount('2').filter({hasText:/^1$/}).waitFor();
+  await page.evaluate(()=>{localStorage.setItem('test.scoreHistory',JSON.stringify(window.scoreHistory));});
+  await page.reload();
+  await page.locator('.demo-item').first().click();
+  await page.getByRole('tab',{name:'Match anomalies',exact:true}).click();
+  await scoreRow('1').waitFor();
+  assert.equal(await scoreRow('1').locator('[data-rule-count]').count(),0,'No empty behavior labels');
+  await behaviorCount('2').filter({hasText:/^1$/}).waitFor();
+  await scorePanel.getByRole('button',{name:'Reanalyze',exact:true}).waitFor();
+  assert.equal(await scorePanel.getByText('Completed',{exact:true}).count(),0,'Saved results need no completed label');
+  await page.evaluate(()=>{localStorage.removeItem('test.scoreHistory');});
+  assert.equal(await page.evaluate(()=>window.scoreCalls ?? 0),0,'Reloading never starts analysis');
+  assert.equal(await page.evaluate(()=>window.analysisJobs.length),0,'Restart retains results but clears the analysis queue');
+  await page.setViewportSize({width:760,height:940});
+  const demoTabs=page.locator('.demo-tabs').getByRole('tab');
+  assert.equal(await demoTabs.count(),6);
+  assert.ok(await page.locator('.demo-tabs .demo-tab-label').evaluateAll(labels=>labels.every(label=>getComputedStyle(label).display==='none')),'Narrow tabs show icons only');
+  assert.ok(await demoTabs.evaluateAll(tabs=>tabs.every(tab=>tab.getAttribute('aria-label')&&tab.title)),'Icon tabs retain accessible names and hover titles');
+  assert.ok(await page.locator('.demo-tabs').evaluate(el=>el.scrollWidth<=el.clientWidth+1),'Icon tabs fit without horizontal overflow');
+  await demoTabs.first().click();
+  await demoTabs.first().press('End');
+  await page.waitForFunction(()=>document.querySelector('.demo-tabs [role=tab]:last-child').getAttribute('aria-selected')==='true');
+  await page.setViewportSize({width:2200,height:940});
+  assert.ok(await page.locator('.demo-tabs .demo-tab-label').evaluateAll(labels=>labels.every(label=>getComputedStyle(label).display!=='none')),'Wide tabs restore their labels');
   assert.deepEqual(errors,[]);
   console.log('UI checks passed: virtual lists, lazy demo reads, content-sized tabs, themes, charts, filters, queue jump, settings.');
 } finally { await browser.close(); await new Promise(resolve => server.httpServer.close(resolve)); }
