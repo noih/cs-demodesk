@@ -19,6 +19,12 @@ Review match results and player performance across combat, utility and round sit
 
 ![Recoil trajectories for AK-47, M4A4, and M4A1-S](docs/images/en/03-combat-analysis.png)
 
+### Anomaly data (experimental)
+
+Manually analyze all players and export behavior clips. This experimental feature is for reference only. It cannot identify cheats deliberately concealed without statistical anomalies; no anomalies does not mean no cheating.
+
+![Anomaly data (experimental)](docs/images/en/05-anomaly-data.png)
+
 ### Highlight videos
 
 - Highlights (multi-kills, clutches, ninja defuses) are detected and scored automatically

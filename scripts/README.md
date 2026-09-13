@@ -25,6 +25,16 @@ module path. Set `UI_SCREENSHOT_DIR` to an existing folder to save screenshots.
 It tests the production build with mocked Tauri IPC; native dialogs, filesystem
 operations and CS2/FFmpeg recording require a separate installed-app check.
 
+## Documentation screenshots
+
+After `npm run build`, run `node scripts/store-screenshots.mjs <data-directory>/parsed [more-parsed-directories...]`
+with `PLAYWRIGHT_MODULE` set when necessary. The source needs a completed anomaly
+analysis in the sibling `behavior-analysis` directory and enough matches to fill
+the sidebar. Additional source directories are deduplicated by demo path. The script reads caches,
+anonymizes players, and writes five screenshots per language plus a theme comparison
+to ignored `out/store-screenshots/`. Copy only the selected README images into
+`docs/images/<language>/`; keep source caches and diagnostics local.
+
 ## Private test data
 
 Keep real demos, parser exports, screenshots and comparison reports in ignored

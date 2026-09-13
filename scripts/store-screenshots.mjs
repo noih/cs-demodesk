@@ -1,5 +1,6 @@
 import { readFile, readdir, mkdir, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 import { createRequire } from 'node:module';
 import assert from 'node:assert/strict';
 import { preview } from 'vite';
@@ -7,15 +8,23 @@ import { preview } from 'vite';
 // Run after npm run build. Reads local caches without changing application data.
 const require = createRequire(import.meta.url);
 const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
-const source = process.argv[2] || path.join(process.env.LOCALAPPDATA, 'dev.noih.demodesk/demodesk-data/parsed');
+const sources = process.argv.slice(2);
+if (!sources.length) sources.push(path.join(process.env.LOCALAPPDATA, 'dev.noih.demodesk/demodesk-data/parsed'));
+const seenPaths = new Set();
 const output = path.resolve('out/store-screenshots');
 const locales = ['en', 'zh-TW', 'zh-CN', 'ja', 'ko', 'ru'];
 const matches = [];
-for (const file of (await readdir(source)).filter(f => /^[^.]+\.json$/.test(f))) {
+for (const source of sources) for (const file of (await readdir(source)).filter(f => /^[^.]+\.json$/.test(f))) {
   const data = JSON.parse(await readFile(path.join(source, file), 'utf8'));
   if (data.stats?.length === 10 && data.roundSummaries?.length) {
     let sourceStat;
     try { sourceStat = await stat(data.info.path); } catch (error) { if (error.code === 'ENOENT') continue; throw error; }
+    const matchKey = createHash('sha1').update(file.slice(0, -5)).digest('hex');
+    try {
+      data.screenshotAssessments = JSON.parse(await readFile(path.join(source, '../behavior-analysis/matches', matchKey, 'latest.json'), 'utf8'));
+    } catch (error) { if (error.code !== 'ENOENT') throw error; }
+    if (seenPaths.has(data.info.path)) continue;
+    seenPaths.add(data.info.path);
     data.screenshotBytes = sourceStat.size;
     data.screenshotCreatedMs = sourceStat.birthtimeMs || sourceStat.mtimeMs;
     data.screenshotMtimeMs = sourceStat.mtimeMs;
@@ -55,10 +64,20 @@ assert.equal(probe.highlights[0].title,'Falcon — 3K');
 
 const parsed = matches.map(anonymize);
 // Give matches stable anonymous names; the app applies its normal date sorting.
-parsed.sort((a, b) => b.highlights.length - a.highlights.length);
+parsed.sort((a, b) => Number(Boolean(b.screenshotAssessments?.length)) - Number(Boolean(a.screenshotAssessments?.length)) || b.highlights.length - a.highlights.length);
+assert(parsed[0].screenshotAssessments?.length, 'No completed anomaly analysis found for the screenshot matches');
 const demos = parsed.map((d, i) => ({id:String(i), name:`Match-${String(i+1).padStart(2,'0')}.dem`, path:`D:/Demos/Match-${i+1}.dem`, bytes:d.screenshotBytes,
   createdMs:d.screenshotCreatedMs,mtimeMs:d.screenshotMtimeMs,status:'parsed',mapName:d.info.mapName,parsedAt:d.parsedAt,
   summary:{rounds:d.roundSummaries.length,kills:d.kills.length,highlights:d.highlights.length,scoreA:d.score.A,scoreB:d.score.B,players:d.stats.map(p=>p.name)}}));
+const selectedIndex = [...demos].sort((a,b)=>b.createdMs-a.createdMs || a.id.localeCompare(b.id)).findIndex(d=>d.id==='0');
+async function selectMatch(surface) {
+  const first = surface.locator('.demo-item').first();
+  await first.waitFor();
+  const height = await first.evaluate(el=>el.getBoundingClientRect().height);
+  await surface.locator('.demo-scroll').evaluate((el,top)=>{el.scrollTop=top;}, selectedIndex*height);
+  // Virtual rows expose their absolute list offset on the button itself.
+  await surface.locator(`.demo-item[style*="translateY(${selectedIndex*height}px)"]`).evaluate(el=>el.click());
+}
 const server = await preview({preview:{host:'127.0.0.1',port:0}});
 const browser = await chromium.launch({channel:'chrome',headless:true});
 const appVersion = JSON.parse(await readFile('package.json','utf8')).version;
@@ -84,7 +103,8 @@ try {
         if(cmd==='check_for_updates')return {status:'packaged'};
         if(cmd==='get_settings')return {settings:{language:locale},doctor:{ok:true,problems:[],paths:{}},setup:{running:false,log:[]}};
         if(cmd==='list_demos')return demos;
-        if(cmd==='list_jobs')return [];
+        if(cmd==='list_jobs' || cmd==='analysis_jobs')return [];
+        if(cmd==='scoring_history')return Object.fromEntries((parsed[Number(args.id)].screenshotAssessments ?? []).map(record=>[record.playerId,[record]]));
         if(cmd==='get_demo')return {meta:demos.find(d=>d.id===args.id),parsed:parsed[Number(args.id)]};
         if(cmd==='get_kills')return parsed[Number(args.id)].kills;
         if(cmd.startsWith('plugin:event|'))return 1;
@@ -93,10 +113,11 @@ try {
       window.__TAURI_EVENT_PLUGIN_INTERNALS__={unregisterListener:()=>{}};
     }, {parsed,demos,locale,appVersion});
     await page.goto(server.resolvedUrls.local[0]);
-    await page.locator('.demo-item').first().click();
+    await selectMatch(page);
     const tabs=page.locator('.demo-tabs [role=tab]');
     await tabs.first().waitFor();
     await page.evaluate(()=>document.fonts.ready);
+    assert(await page.locator('.demo-scroll').evaluate(el=>el.scrollHeight > el.clientHeight), 'Screenshot match list must fill the sidebar');
     async function capture(name) {
       await page.mouse.move(1910,1070);
       await page.waitForTimeout(1100);
@@ -111,7 +132,14 @@ try {
     await tabs.nth(0).click(); await capture('01-player-statistics');
     await tabs.nth(1).click(); await capture('02-round-trends');
     await page.getByRole('heading',{name:strings.recoil.title,exact:true}).evaluate(el=>{const card=el.closest('.rt-Card');const scroller=el.closest('.tab-body');scroller.scrollTop+=card.getBoundingClientRect().top-scroller.getBoundingClientRect().top;}); await capture('03-combat-analysis');
-    await tabs.nth(2).click(); await page.locator('.tab-body').evaluate(el=>el.scrollTop=0); await capture('04-highlights');
+    await tabs.nth(3).click(); await page.locator('.tab-body').evaluate(el=>el.scrollTop=0); await capture('04-highlights');
+    await tabs.nth(2).click();
+    await page.locator('[data-player-id]').first().waitFor();
+    assert(await page.locator('[data-player-id]').first().evaluate(row => {
+      const table = row.closest('table').getBoundingClientRect();
+      return [...row.querySelectorAll('button')].every(button => button.getBoundingClientRect().right <= table.right + 1);
+    }), 'Analysis actions must fit in the table');
+    await capture('05-anomaly-data');
     if (locale === 'en') {
       await tabs.nth(0).click();
       await page.getByRole('button',{name:'Switch to light mode',exact:true}).click();
@@ -123,7 +151,7 @@ try {
       await page.setContent(`<style>html,body{margin:0;overflow:hidden}iframe{position:absolute;inset:0;width:1920px;height:1080px;border:0}.light{clip-path:polygon(60% 0,100% 0,100% 100%,40% 100%)}.divider{position:absolute;inset:0;background:#eab83d;clip-path:polygon(59.9% 0,60.1% 0,40.1% 100%,39.9% 100%);pointer-events:none}</style><iframe name="dark" src="${server.resolvedUrls.local[0]}"></iframe><iframe class="light" name="light" src="${server.resolvedUrls.local[0]}"></iframe><div class="divider"></div>`);
       for (const name of ['dark','light']) {
         const frame = page.frameLocator(`iframe[name="${name}"]`);
-        await frame.locator('.demo-item').first().evaluate(el=>el.click());
+        await selectMatch(frame);
         await frame.locator('.demo-tabs [role=tab]').first().evaluate(el=>el.click());
         await frame.locator('.rt-TableRoot').first().waitFor();
       }

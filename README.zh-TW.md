@@ -12,6 +12,12 @@ Counter-Strike 2 demo 的 Windows 桌面工具（單一可攜 `.exe`）：從一
 
 ![AK-47、M4A4 與 M4A1-S 的壓槍軌跡](docs/images/zh-TW/03-combat-analysis.png)
 
+### 異常數據（實驗性）
+
+手動分析全場玩家並輸出行為片段。此功能仍屬實驗性，數據僅供參考，無法識別刻意隱藏、未呈現異常的外掛；無異常不代表無作弊。
+
+![異常數據（實驗性）](docs/images/zh-TW/05-anomaly-data.png)
+
 ### 高光影片
 
 - 自動偵測並評分高光片段（多殺、clutch、ninja defuse）
