@@ -284,9 +284,17 @@ fn streaming_matches_batch_oracle_at_every_boundary_and_bounds_long_lock_evidenc
 
 #[test]
 fn straightness_requires_an_intermediate_view_sample() {
-    let two = input(vec![sample(0,-6.0,0.0),sample(1,0.0,0.0),sample(2,0.0,0.0)]);
+    let two = input(vec![
+        sample(0, -6.0, 0.0),
+        sample(1, 0.0, 0.0),
+        sample(2, 0.0, 0.0),
+    ]);
     assert!(run(&two).evidence.is_empty());
-    let three = input(vec![sample(0,-6.0,0.0),sample(1,-3.0,0.0),sample(2,0.0,0.0)]);
+    let three = input(vec![
+        sample(0, -6.0, 0.0),
+        sample(1, -3.0, 0.0),
+        sample(2, 0.0, 0.0),
+    ]);
     assert!(run(&three).evidence.iter().any(|e| e.rapid_acquisition));
     assert!(run(&snap()).evidence.iter().any(|e| e.rapid_acquisition));
 }

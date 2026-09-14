@@ -5,7 +5,7 @@ use parser::second_pass::parser_settings::create_huffman_lookup_table;
 use prost::Message;
 fn main() -> Result<()> {
     let args: Vec<_> = std::env::args().skip(1).collect();
-    ensure!(args.len() == 1, "expected DEMO");
+    ensure!(matches!(args.len(), 1 | 2), "expected DEMO [camera]");
     let bytes = std::fs::read(&args[0])?;
     let huffman = create_huffman_lookup_table();
     let inputs = ParserInputs {
@@ -45,24 +45,33 @@ fn main() -> Result<()> {
     let mut found = vec![];
     for serializer in &message.serializers {
         let owner = sym(serializer.serializer_name_sym).unwrap_or_default();
-        if owner != "CCSPlayerPawn" && owner != "CBodyComponentBaseAnimGraph" {
+        if args.len() == 1 && owner != "CCSPlayerPawn" && owner != "CBodyComponentBaseAnimGraph" {
             continue;
         }
         for (position, index) in serializer.fields_index.iter().enumerate() {
             let field = &message.fields[*index as usize];
             let name = sym(field.var_name_sym).unwrap_or_default();
-            if ![
-                "m_vecX",
-                "m_vecY",
-                "m_vecZ",
-                "m_vecViewOffset",
-                "m_primaryGraphId",
-                "m_hGraphDefinitionAG2",
-                "m_hModel",
-                "m_vecSecondarySkeletons",
-                "m_hSkeletonDefinitionAG2",
-            ]
-            .contains(&name.as_str())
+            let camera = args.get(1).is_some_and(|arg| arg == "camera");
+            if camera
+                && !["fov", "aspect", "screen", "resolution"]
+                    .iter()
+                    .any(|part| name.to_ascii_lowercase().contains(part))
+            {
+                continue;
+            }
+            if !camera
+                && ![
+                    "m_vecX",
+                    "m_vecY",
+                    "m_vecZ",
+                    "m_vecViewOffset",
+                    "m_primaryGraphId",
+                    "m_hGraphDefinitionAG2",
+                    "m_hModel",
+                    "m_vecSecondarySkeletons",
+                    "m_hSkeletonDefinitionAG2",
+                ]
+                .contains(&name.as_str())
             {
                 continue;
             }

@@ -395,7 +395,9 @@ fn measure(
             let ratio = (moved / path).min(1.0);
             let velocity = moved / dt;
             if velocity >= p.snap_speed
-                || (lock - candidate >= 2 && velocity >= p.min_acquisition_speed && ratio >= p.min_straightness)
+                || (lock - candidate >= 2
+                    && velocity >= p.min_acquisition_speed
+                    && ratio >= p.min_straightness)
             {
                 start = candidate;
                 displacement = moved;

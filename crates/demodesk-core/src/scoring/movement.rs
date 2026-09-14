@@ -378,6 +378,10 @@ mod tests {
     use super::*;
     fn player(t: i32) -> PlayerFrame {
         PlayerFrame {
+            simulation_tick: None,
+            hitbox_set: None,
+            hitbox_transforms: vec![],
+            capsules: vec![],
             player_id: "p".into(),
             identity: "pawn".into(),
             identity_key: (1, 2, 3),

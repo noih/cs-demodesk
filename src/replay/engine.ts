@@ -82,6 +82,7 @@ export interface TickState {
   grenades: GrenadeState[];
   effects: Effect[];
   fireCells?: number[][];
+  smokeCells?: number[][];
   shots: Shot[];
   deaths: Death[];
   bomb?: BombState;
@@ -297,6 +298,7 @@ export class Replay {
       players,
       grenades,
       fireCells: data.schemaVersion >= 5 ? a.f ?? [] : undefined,
+      smokeCells: smokeAt(data.smoke, tick),
       effects: acc.effects.filter((f) => f.end > tick),
       shots: acc.shots,
       deaths: acc.deaths,
@@ -419,4 +421,12 @@ export class Clock {
   seek(tick: number) {
     this.tick = Math.min(this.last, Math.max(this.first, tick));
   }
+}
+
+/** Binary lookup also handles seeking backwards; unavailable coverage keeps the fallback. */
+function smokeAt(frames: ReplayData['smoke'], tick:number): number[][] | undefined {
+  if (!frames?.length) return undefined;
+  let lo=0, hi=frames.length;
+  while(lo<hi) { const mid=(lo+hi)>>>1; if(frames[mid]!.t<=tick) lo=mid+1; else hi=mid; }
+  return lo ? frames[lo-1]!.cells ?? undefined : undefined;
 }

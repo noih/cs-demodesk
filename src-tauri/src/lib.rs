@@ -76,30 +76,58 @@ fn settings_response(engine: &Engine, directory: &DataDirectory) -> SettingsResp
     let (parsed_bytes, clips_bytes, radar_bytes, anomaly_bytes) = engine.storage_bytes();
     let selected = directory.selected();
     let restart_required = selected.as_ref().unwrap_or(&directory.default) != &directory.active;
-    SettingsResponse { data_dir_override: selected, default_data_dir: directory.default.clone(), restart_required, settings: engine.settings(), detected: engine.detected(), doctor: engine.doctor(), setup: engine.setup_state(), data_dir: engine.data_dir().to_path_buf(), parsed_bytes, clips_bytes, radar_bytes, anomaly_bytes }
+    SettingsResponse {
+        data_dir_override: selected,
+        default_data_dir: directory.default.clone(),
+        restart_required,
+        settings: engine.settings(),
+        detected: engine.detected(),
+        doctor: engine.doctor(),
+        setup: engine.setup_state(),
+        data_dir: engine.data_dir().to_path_buf(),
+        parsed_bytes,
+        clips_bytes,
+        radar_bytes,
+        anomaly_bytes,
+    }
 }
 
 /// Every engine call does file I/O (settings, parse results, job records) or
 /// more; run it on the blocking pool so the async runtime stays responsive.
-async fn blocking<T: Send + 'static>(engine: &Eng, f: impl FnOnce(&Eng) -> CmdResult<T> + Send + 'static) -> CmdResult<T> {
+async fn blocking<T: Send + 'static>(
+    engine: &Eng,
+    f: impl FnOnce(&Eng) -> CmdResult<T> + Send + 'static,
+) -> CmdResult<T> {
     let engine = engine.clone();
-    tauri::async_runtime::spawn_blocking(move || f(&engine)).await.map_err(err)?
+    tauri::async_runtime::spawn_blocking(move || f(&engine))
+        .await
+        .map_err(err)?
 }
 
 #[tauri::command]
 async fn check_for_updates() -> CmdResult<demodesk_core::updates::Update> {
     tauri::async_runtime::spawn_blocking(|| demodesk_core::updates::check().map_err(err))
-        .await.map_err(err)?
+        .await
+        .map_err(err)?
 }
 fn existing_browse_directory(path: &Path) -> Option<PathBuf> {
-    if !path.is_absolute() { return None; }
-    if path.is_dir() { return Some(path.to_path_buf()); }
-    path.parent().filter(|parent| parent.is_dir()).map(Path::to_path_buf)
+    if !path.is_absolute() {
+        return None;
+    }
+    if path.is_dir() {
+        return Some(path.to_path_buf());
+    }
+    path.parent()
+        .filter(|parent| parent.is_dir())
+        .map(Path::to_path_buf)
 }
 
 #[tauri::command]
 fn browse_directory(app: AppHandle, path: Option<String>) -> CmdResult<PathBuf> {
-    if let Some(directory) = path.as_deref().and_then(|value| existing_browse_directory(Path::new(value.trim()))) {
+    if let Some(directory) = path
+        .as_deref()
+        .and_then(|value| existing_browse_directory(Path::new(value.trim())))
+    {
         return Ok(directory);
     }
     app.path().desktop_dir().map_err(err)
@@ -111,10 +139,24 @@ mod browse_tests {
     fn existing_file_directory_and_missing_path() {
         let exe = std::env::current_exe().unwrap();
         let parent = exe.parent().unwrap();
-        assert_eq!(super::existing_browse_directory(&exe), Some(parent.to_path_buf()));
-        assert_eq!(super::existing_browse_directory(parent), Some(parent.to_path_buf()));
-        assert_eq!(super::existing_browse_directory(&parent.join("missing-browse-test-dir").join("tool.exe")), None);
-        assert_eq!(super::existing_browse_directory(std::path::Path::new("relative.exe")), None);
+        assert_eq!(
+            super::existing_browse_directory(&exe),
+            Some(parent.to_path_buf())
+        );
+        assert_eq!(
+            super::existing_browse_directory(parent),
+            Some(parent.to_path_buf())
+        );
+        assert_eq!(
+            super::existing_browse_directory(
+                &parent.join("missing-browse-test-dir").join("tool.exe")
+            ),
+            None
+        );
+        assert_eq!(
+            super::existing_browse_directory(std::path::Path::new("relative.exe")),
+            None
+        );
     }
 }
 
@@ -123,27 +165,51 @@ async fn get_status(engine: State<'_, Eng>) -> CmdResult<Status> {
     blocking(&engine, |e| {
         let d = e.doctor();
         let mut missing_render_tools = Vec::new();
-        if d.paths.steam_dir.is_none() { missing_render_tools.push("Steam"); }
-        if d.paths.cs2_exe.is_none() { missing_render_tools.push("CS2"); }
-        if d.paths.hlae_exe.is_none() || d.paths.hlae_dll.is_none() { missing_render_tools.push("HLAE"); }
-        if d.paths.ffmpeg_exe.is_none() { missing_render_tools.push("ffmpeg"); }
-        Ok(Status { missing_render_tools, ok: d.ok, problems: d.problems, data_dir: e.data_dir().to_path_buf(), active_render: e.active_job_id(), version: env!("CARGO_PKG_VERSION").into() })
+        if d.paths.steam_dir.is_none() {
+            missing_render_tools.push("Steam");
+        }
+        if d.paths.cs2_exe.is_none() {
+            missing_render_tools.push("CS2");
+        }
+        if d.paths.hlae_exe.is_none() || d.paths.hlae_dll.is_none() {
+            missing_render_tools.push("HLAE");
+        }
+        if d.paths.ffmpeg_exe.is_none() {
+            missing_render_tools.push("ffmpeg");
+        }
+        Ok(Status {
+            missing_render_tools,
+            ok: d.ok,
+            problems: d.problems,
+            data_dir: e.data_dir().to_path_buf(),
+            active_render: e.active_job_id(),
+            version: env!("CARGO_PKG_VERSION").into(),
+        })
     })
     .await
 }
 
 #[tauri::command]
-async fn get_settings(engine: State<'_, Eng>, directory: State<'_, Directory>) -> CmdResult<SettingsResponse> {
+async fn get_settings(
+    engine: State<'_, Eng>,
+    directory: State<'_, Directory>,
+) -> CmdResult<SettingsResponse> {
     let directory = directory.inner().clone();
     blocking(&engine, move |e| Ok(settings_response(e, &directory))).await
 }
 
 #[tauri::command]
-async fn save_settings(engine: State<'_, Eng>, directory: State<'_, Directory>, settings: Settings, data_dir_override: Option<String>) -> CmdResult<SettingsResponse> {
+async fn save_settings(
+    engine: State<'_, Eng>,
+    directory: State<'_, Directory>,
+    settings: Settings,
+    data_dir_override: Option<String>,
+) -> CmdResult<SettingsResponse> {
     let directory = directory.inner().clone();
     blocking(&engine, move |e| {
         let selected = directory.validate(data_dir_override)?;
-        e.save_settings(settings).map_err(|problems| problems.join("\n"))?;
+        e.save_settings(settings)
+            .map_err(|problems| problems.join("\n"))?;
         directory.save(selected)?;
         Ok(settings_response(e, &directory))
     })
@@ -174,29 +240,49 @@ async fn parse_demo(engine: State<'_, Eng>, id: String) -> CmdResult<()> {
 async fn get_demo(engine: State<'_, Eng>, id: String) -> CmdResult<DemoResponse> {
     blocking(&engine, move |e| {
         let (meta, parsed) = e.get_demo(&id).ok_or("demo not found")?;
-        Ok(DemoResponse { meta, parsed: parsed.map(|p| p.without_kills()) })
+        Ok(DemoResponse {
+            meta,
+            parsed: parsed.map(|p| p.without_kills()),
+        })
     })
     .await
 }
 
 #[tauri::command]
-async fn scoring_history(engine: State<'_, Eng>, id: String) -> CmdResult<std::collections::BTreeMap<String, Vec<demodesk_core::scoring::Assessment>>> {
+async fn scoring_history(
+    engine: State<'_, Eng>,
+    id: String,
+) -> CmdResult<std::collections::BTreeMap<String, Vec<demodesk_core::scoring::Assessment>>> {
     blocking(&engine, move |e| e.scoring_match_history(&id).map_err(err)).await
 }
 
 #[tauri::command]
-async fn score_match(engine: State<'_, Eng>, id: String, force: bool) -> CmdResult<demodesk_core::scoring::queue::Job> {
-    blocking(&engine, move |e| e.enqueue_analysis(&id, force).map_err(err)).await
+async fn score_match(
+    engine: State<'_, Eng>,
+    id: String,
+    force: bool,
+) -> CmdResult<demodesk_core::scoring::queue::Job> {
+    blocking(&engine, move |e| {
+        e.enqueue_analysis(&id, force).map_err(err)
+    })
+    .await
 }
 
 #[tauri::command]
-async fn analysis_jobs(engine: State<'_, Eng>) -> CmdResult<Vec<demodesk_core::scoring::queue::Job>> {
+async fn analysis_jobs(
+    engine: State<'_, Eng>,
+) -> CmdResult<Vec<demodesk_core::scoring::queue::Job>> {
     blocking(&engine, |e| Ok(e.analysis_jobs())).await
 }
 
 #[tauri::command]
 async fn get_kills(engine: State<'_, Eng>, id: String) -> CmdResult<Vec<KillEvent>> {
-    blocking(&engine, move |e| e.parsed(&id).map(|p| p.kills.clone()).ok_or_else(|| "demo not parsed".into())).await
+    blocking(&engine, move |e| {
+        e.parsed(&id)
+            .map(|p| p.kills.clone())
+            .ok_or_else(|| "demo not parsed".into())
+    })
+    .await
 }
 
 #[derive(Serialize)]
@@ -234,6 +320,11 @@ async fn clear_analysis(engine: State<'_, Eng>, id: String) -> CmdResult<()> {
 }
 
 #[tauri::command]
+async fn clear_match_anomaly(engine: State<'_, Eng>, id: String) -> CmdResult<()> {
+    blocking(&engine, move |e| e.clear_match_anomaly(&id).map_err(err)).await
+}
+
+#[tauri::command]
 async fn clear_anomaly_data(engine: State<'_, Eng>) -> CmdResult<u64> {
     blocking(&engine, |e| e.clear_anomaly_data().map_err(err)).await
 }
@@ -249,17 +340,42 @@ async fn remove_demo(engine: State<'_, Eng>, id: String) -> CmdResult<()> {
 }
 
 #[tauri::command]
-async fn analysis_clips(engine: State<'_, Eng>, demo_id: String, selection: demodesk_core::scoring::clips::Selection) -> CmdResult<Vec<demodesk_core::scoring::clips::RuleClips>> {
-    blocking(&engine, move |e| e.analysis_clips(&demo_id, &selection).map_err(err)).await
+async fn analysis_clips(
+    engine: State<'_, Eng>,
+    demo_id: String,
+    selection: demodesk_core::scoring::clips::Selection,
+) -> CmdResult<Vec<demodesk_core::scoring::clips::RuleClips>> {
+    blocking(&engine, move |e| {
+        e.analysis_clips(&demo_id, &selection).map_err(err)
+    })
+    .await
 }
 #[tauri::command]
-async fn start_analysis_render(engine: State<'_, Eng>, demo_id: String, selection: demodesk_core::scoring::clips::Selection, options: RenderOptions) -> CmdResult<Vec<RenderJob>> {
-    blocking(&engine, move |e| e.enqueue_analysis_render(&demo_id, selection, options).map_err(err)).await
+async fn start_analysis_render(
+    engine: State<'_, Eng>,
+    demo_id: String,
+    selection: demodesk_core::scoring::clips::Selection,
+    options: RenderOptions,
+) -> CmdResult<Vec<RenderJob>> {
+    blocking(&engine, move |e| {
+        e.enqueue_analysis_render(&demo_id, selection, options)
+            .map_err(err)
+    })
+    .await
 }
 
 #[tauri::command]
-async fn start_render(engine: State<'_, Eng>, demo_id: String, highlight_ids: Vec<String>, options: RenderOptions) -> CmdResult<RenderJob> {
-    blocking(&engine, move |e| e.enqueue_render(&demo_id, highlight_ids, options).map_err(err)).await
+async fn start_render(
+    engine: State<'_, Eng>,
+    demo_id: String,
+    highlight_ids: Vec<String>,
+    options: RenderOptions,
+) -> CmdResult<RenderJob> {
+    blocking(&engine, move |e| {
+        e.enqueue_render(&demo_id, highlight_ids, options)
+            .map_err(err)
+    })
+    .await
 }
 
 #[tauri::command]
@@ -309,8 +425,15 @@ fn get_startup_error(state: State<'_, StartupError>) -> Option<String> {
 }
 
 #[tauri::command]
-fn recover_data_directory(app: AppHandle, directory: State<'_, Directory>, state: State<'_, StartupError>, path: Option<String>) -> CmdResult<()> {
-    if state.0.is_none() { return Err("Recovery is only available before startup.".into()); }
+fn recover_data_directory(
+    app: AppHandle,
+    directory: State<'_, Directory>,
+    state: State<'_, StartupError>,
+    path: Option<String>,
+) -> CmdResult<()> {
+    if state.0.is_none() {
+        return Err("Recovery is only available before startup.".into());
+    }
     directory.save(directory.validate(path)?)?;
     // Deliver Exit so the single-instance plugin releases its lock before relaunch.
     app.request_restart();
@@ -320,7 +443,9 @@ fn recover_data_directory(app: AppHandle, directory: State<'_, Directory>, state
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     #[cfg(windows)]
-    if !webview_runtime::ready() { return; }
+    if !webview_runtime::ready() {
+        return;
+    }
     let builder = tauri::Builder::default();
     // Register first: duplicate launches must exit before opening the data store.
     #[cfg(desktop)]
@@ -338,9 +463,12 @@ pub fn run() {
             let handle = app.handle().clone();
             let config = app.path().app_config_dir()?.join("data-directory.json");
             let default = app.path().app_local_data_dir()?.join("demodesk-data");
-            let directory = Arc::new(DataDirectory::load(config, &default).map_err(std::io::Error::other)?);
+            let directory =
+                Arc::new(DataDirectory::load(config, &default).map_err(std::io::Error::other)?);
             let data_dir = directory.active.clone();
-            let startup = directory.prepare().and_then(|_| Engine::new(data_dir.clone(), Arc::new(TauriNotify(handle.clone()))).map_err(err));
+            let startup = directory.prepare().and_then(|_| {
+                Engine::new(data_dir.clone(), Arc::new(TauriNotify(handle.clone()))).map_err(err)
+            });
             let error = match startup {
                 Ok(engine) => {
                     // Let the webview play videos from the data folder.
@@ -375,6 +503,7 @@ pub fn run() {
             get_map_assets,
             clear_radar,
             clear_analysis,
+            clear_match_anomaly,
             clear_all_analysis,
             clear_anomaly_data,
             remove_demo,

@@ -57,6 +57,7 @@ try {
       if(cmd==='get_status')return window.missingTools ? {...status,ok:false,missingRenderTools:window.missingRenderTools ?? ['HLAE','ffmpeg']} : status;
       if(cmd==='get_settings')return { settings:{language:'en',replayFolders:[],scanGameReplays:true},doctor:{ok:true,problems:[],paths:window.toolPaths || {}},detected:{},setup:{running:false,log:[]},dataDir:'E:/data',defaultDataDir:'E:/data',parsedBytes:0,anomalyBytes:0,clipsBytes:0,radarBytes:0 };
       if(cmd==='list_demos'){if(window.holdRefresh)await new Promise(resolve=>window.releaseRefresh=resolve);return demos;}
+      if(cmd==='delete_job') { window.queueJobs=(window.queueJobs ?? jobs).filter(job=>job.id!==args.id); return; }
       if(cmd==='list_jobs')return window.queueJobs ?? (window.showQueuedOnCurrentDemo ? jobs.map(j=>j.status==='queued'?{...j,demoId:'demo-0'}:j) : jobs);
       if(cmd==='analysis_clips'&&window.holdClipPreview)await new Promise(resolve=>(window.releaseClipPreviews??=[]).push(resolve));
       if(cmd==='analysis_clips')return args.selection.ruleIds.map(ruleId=>({ruleId,title:'Opponent — '+ruleId,demoFingerprint:'source-current',highlights:[{id:'clip-'+ruleId,player:{steamid:args.selection.playerId,name:'Opponent'},round:1,startTick:0,endTick:320,anchorTick:64,score:0,tags:[ruleId],title:'Opponent — '+ruleId,kills:[],breakdown:{}}]}));
@@ -67,6 +68,7 @@ try {
         exports.forEach(job=>window.emitTestEvent({type:'job-changed',job}));return exports;
       }
       if(cmd==='analysis_jobs')return window.analysisJobs.map(job=>({...job}));
+      if(cmd==='clear_match_anomaly') { for(const key of Object.keys(window.scoreHistory ?? {})) if(key.startsWith(args.id+':')) delete window.scoreHistory[key]; window.clearMatchCalls=(window.clearMatchCalls ?? 0)+1; return; }
       if(cmd==='scoring_history')return Object.fromEntries(Object.entries(window.scoreHistory??{}).filter(([key])=>key.startsWith(args.id+':')).map(([key,records])=>[key.slice(args.id.length+1),records]));
       if(cmd==='score_player')throw Error('Per-player scoring must not be invoked');
       if(cmd==='score_match') {
@@ -93,7 +95,7 @@ try {
           const makeCheck = (id,name) => ({definition:{id,version:'test-2',name,description:'Test behavior',category:'aim',parameters:{}},state:playerId==='1'?'passed':'findings',reason:'Observed behavior',reasonCode:'experimentalMeasurements',evaluatedSamples:64,summary:[{name:'shots',value:64,unit:'',threshold:null},{name:'hitRate',value:0.875,unit:'ratio',threshold:null}],occurrences:playerId==='1'?[]:[occurrence],diagnostics:null});
           const contextCheck = (id,metric) => ({...makeCheck(id,id),state:playerId==='1'?'unavailable':'findings',reasonCode:'shotPathsMissing',summary:playerId==='1'?[]:[{name:metric,value:1,unit:'shots',threshold:null},{name:'unclassifiedShots',value:63,unit:'shots',threshold:null}],occurrences:playerId==='1'?[]:[{...occurrence,id:'context-'+id,measurements:[{name:metric,value:1,unit:'shots',threshold:null}]}]});
           records.length=0;
-          records.unshift({schemaVersion:2,id:'assessment-'+index,createdAt:new Date(1750000000000+index*1000).toISOString(),demoId:args.id,demoFingerprint:'source-current',playerId,tickRate:64,rulesetVersion:'test-2',state:playerId==='1'?'passed':'findings',checks:[contextCheck('smoke-hit-rate','smokeHits'),contextCheck('penetration-hit-rate','penetrationHits'),makeCheck('aim-snap','Instant acquisition'),makeCheck('aim-linear-acquisition','Rapid straight turn'),{...makeCheck('globally-empty','Empty behavior'),state:'passed',occurrences:[],summary:[]},{definition:{id:'view-angle-oscillation',version:'test-2',name:'View-angle oscillation',description:'View behavior',category:'view',parameters:{}},state:'unavailable',reason:'Missing view data',reasonCode:'viewMissing',evaluatedSamples:0,summary:[],occurrences:[],diagnostics:null}]});
+          records.unshift({schemaVersion:2,id:'assessment-'+index,createdAt:new Date(1750000000000+index*1000).toISOString(),demoId:args.id,demoFingerprint:'source-current',playerId,tickRate:64,rulesetVersion:'test-2',state:playerId==='1'?'passed':'findings',checks:[{...contextCheck('smoke-hit-rate','smokeHits'),state:playerId==='1'?'passed':'findings',summary:[{name:'smokeHitRate',value:playerId==='1'?0:28,unit:'percent'},{name:'estimatedSmokeHits',value:playerId==='1'?0:14,unit:'shots'},{name:'smokeShots',value:50,unit:'shots'}]},contextCheck('penetration-hit-rate','penetrationHits'),makeCheck('aim-snap','Instant acquisition'),makeCheck('aim-linear-acquisition','Rapid straight turn'),{...makeCheck('globally-empty','Empty behavior'),state:'passed',occurrences:[],summary:[]},{definition:{id:'view-angle-oscillation',version:'test-2',name:'View-angle oscillation',description:'View behavior',category:'view',parameters:{}},state:'unavailable',reason:'Missing view data',reasonCode:'viewMissing',evaluatedSamples:0,summary:[],occurrences:[],diagnostics:null}]});
           players[playerId]=records;
         }
         Object.assign(job,{status:'done',step:3,finishedAt:new Date().toISOString(),revision:job.revision+1});emit();
@@ -1081,22 +1083,35 @@ try {
   await analysisDialog.getByRole('heading',{name:'Opponent · Analysis details',exact:true}).waitFor();
   assert.equal(await analysisDialog.locator('select').count(),0,'No analysis history select');
   assert.equal(await analysisDialog.getByText(/Counts show observed behavior|Analysis history|Source demo not verified|different demo content/).count(),0,'No explanation, history label, or source warnings');
+  assert.equal(await analysisDialog.locator('[data-smoke-estimate]').innerText(),'Smoke hit rate (estimated): 28% · 14／50 shots','Estimate displays its own numerator and denominator');
   const smokeDetails=analysisDialog.locator('[data-check-id="smoke-hit-rate"]');
-  await smokeDetails.getByText('Confirmed hits are counted; complete paths for missed shots are unavailable, so hit rate cannot yet be calculated.',{exact:true}).waitFor();
+  assert.equal(await analysisDialog.locator('[data-check-id][open]').count(),0,'Every behavior starts collapsed');
+  assert.equal(await analysisDialog.locator('[data-occurrence-id]:visible').count(),0,'Evidence is hidden until expanded');
+  await smokeDetails.locator(':scope > summary').click();
+  assert.equal(await smokeDetails.getByText(/cannot yet be calculated|paths of missed shots/).count(),0,'No unimplemented-feature notice');
   assert.equal(await smokeDetails.getByText(/ratio|%/).count(),0,'Confirmed smoke hits never fabricate an unknown percentage');
   if(process.env.UI_SCREENSHOT_DIR) await analysisDialog.screenshot({path:process.env.UI_SCREENSHOT_DIR+'/scoring-dialog.png'});
 
+  for (const summary of await analysisDialog.locator('[data-check-id] > summary').all()) { if (!await summary.evaluate(el=>el.parentElement.open)) await summary.click(); }
   await analysisDialog.getByText(/Ticks: 64–128/).first().waitFor();
+  assert.equal(await analysisDialog.locator('[data-check-id] [data-occurrence-id]').first().evaluate(el=>el.tagName),'TR','Occurrences use compact table rows');
+  const evidenceScroll=analysisDialog.locator('[data-check-id] > div').first();
+  assert.equal(await evidenceScroll.evaluate(el=>getComputedStyle(el).maxHeight),'none','Evidence has no nested vertical scroll area');
+  assert.equal(await analysisDialog.locator('[data-check-id] details').count(),0,'No nested source expanders');
+  assert.ok(await analysisDialog.locator('[data-summary-id]').first().evaluate(el=>Boolean(el.compareDocumentPosition(document.querySelector('[data-check-id]')) & Node.DOCUMENT_POSITION_FOLLOWING)),'Summary precedes behavior details');
   await analysisDialog.getByText('Acquisition speed: 3.1235 deg/s',{exact:true}).first().waitFor();
   await analysisDialog.getByText('Acquisition speed: 4.1235 deg/s',{exact:true}).first().waitFor();
   await analysisDialog.getByText('Shots: 64',{exact:true}).first().waitFor();
-  await analysisDialog.getByRole('heading',{name:'Data status',exact:true}).waitFor();
+  assert.equal(await analysisDialog.getByRole('heading',{name:'Data status',exact:true}).count(),0,'No unavailable-data list');
+  assert.equal(await analysisDialog.getByText('Missing view data',{exact:true}).count(),0,'Unavailable rules are omitted');
   assert.equal(await analysisDialog.locator('[data-occurrence-id]').count(),4,'Original evidence stays separate per rule');
   assert.equal(await page.evaluate(()=>window.scoreCalls),1,'Opening dialog never recalculates');
   await page.keyboard.press('Escape');
   await analysisDialog.waitFor({state:'hidden'});
   assert.equal(await detailsButton('2').evaluate(el=>el===document.activeElement),true,'Escape restores trigger focus');
   await detailsButton('1').click();
+  assert.equal(await analysisDialog.locator('[data-smoke-estimate]').innerText(),'Smoke hit rate (estimated): 0% · 0／50 shots','Eligible misses show a valid zero rate');
+  assert.ok(await analysisDialog.locator('[data-summary-id]:visible').count()>0,'Summary is visible without expanding');
   await analysisDialog.getByText('Shots: 64',{exact:true}).first().waitFor();
   assert.equal(await analysisDialog.locator('[data-occurrence-id]').count(),0,'Player with no observations still has measured summary');
   await analysisDialog.getByRole('button',{name:'Close',exact:true}).click();
@@ -1143,6 +1158,8 @@ try {
   await page.waitForFunction(()=>window.scoreHistory && Object.values(window.scoreHistory).every(records=>records.length===1 && records[0].id==='assessment-1'));
   await detailsButton('2').click();
   assert.equal(await analysisDialog.locator('select').count(),0,'No history selector is exposed');
+  assert.equal(await analysisDialog.locator('[data-check-id][open]').count(),0,'Reopening resets collapsed state');
+  for (const summary of await analysisDialog.locator('[data-check-id] > summary').all()) await summary.click();
   await analysisDialog.getByText(/Ticks: 128–192/).first().waitFor();
   assert.equal(await analysisDialog.getByText(/Ticks: 64–128/).count(),0,'Dialog shows only the latest result');
   if(process.env.UI_SCREENSHOT_DIR) await analysisDialog.screenshot({path:process.env.UI_SCREENSHOT_DIR+'/scoring-dialog.png'});
@@ -1174,6 +1191,33 @@ try {
   await behaviorCount('2').filter({hasText:/^1$/}).waitFor();
   await scorePanel.getByRole('button',{name:'Reanalyze',exact:true}).waitFor();
   assert.equal(await scorePanel.getByText('Completed',{exact:true}).count(),0,'Saved results need no completed label');
+  assert.equal(await scorePanel.getByRole('button',{name:'Delete data',exact:true}).count(),0,'Deletion is centralized in the demo menu');
+  assert.equal(await scoreButton.evaluate(el=>getComputedStyle(el.parentElement).justifyContent),'flex-end','Saved actions align right');
+  await page.locator('.demo-heading').getByRole('button',{name:'More',exact:true}).click();
+  assert.deepEqual(await page.getByRole('menuitem').allTextContents(),['Show in Explorer','Delete videos','Delete anomaly data','Delete all analysis data','Delete demo file'],'Demo menu follows the requested order');
+  assert.equal(await page.getByRole('menuitem',{name:'Delete videos',exact:true}).getAttribute('aria-disabled'),'true','Running videos cannot be deleted');
+  await page.keyboard.press('Escape');
+  await page.evaluate(async()=>{
+    const jobs=await window.__TAURI_INTERNALS__.invoke('list_jobs');
+    window.queueJobs=[jobs.find(j=>j.demoId==='demo-0'&&j.status==='done'),jobs.find(j=>j.demoId!=='demo-0')];
+  });
+  await refreshList();
+  await page.locator('.demo-heading').getByRole('button',{name:'More',exact:true}).click();
+  const historyReads=await page.evaluate(()=>window.testCalls.filter(c=>c.cmd==='scoring_history').length);
+  await page.getByRole('menuitem',{name:'Delete videos',exact:true}).click();
+  await page.waitForFunction(()=>window.queueJobs.length===1 && window.queueJobs[0].demoId!=='demo-0');
+  await page.locator('.demo-heading').getByRole('button',{name:'More',exact:true}).click();
+  await page.getByRole('menuitem',{name:'Delete anomaly data',exact:true}).locator(':scope:not([data-disabled])').waitFor();
+  assert.equal(await page.evaluate(()=>window.testCalls.filter(c=>c.cmd==='scoring_history').length),historyReads,'Deleting videos does not reread anomaly data');
+  assert.equal(await page.getByRole('menuitem',{name:'Delete anomaly data',exact:true}).getAttribute('aria-disabled'),null,'Saved analysis enables deletion');
+  await page.getByRole('menuitem',{name:'Delete anomaly data',exact:true}).click();
+  await scorePanel.getByRole('button',{name:'Analyze',exact:true}).waitFor();
+  assert.equal(await page.evaluate(()=>window.clearMatchCalls),1,'Deletes only match anomaly data');
+  assert.equal(await scorePanel.getByRole('table').count(),0,'Deleted data disappears immediately');
+  await page.locator('.demo-heading').getByRole('button',{name:'More',exact:true}).click();
+  assert.equal(await page.getByRole('menuitem',{name:'Delete anomaly data',exact:true}).getAttribute('aria-disabled'),'true','No analysis disables deletion');
+  await page.keyboard.press('Escape');
+  assert.equal(await scoreButton.evaluate(el=>getComputedStyle(el.parentElement).justifyContent),'flex-start','Empty analysis action aligns left');
   await page.evaluate(()=>{localStorage.removeItem('test.scoreHistory');});
   assert.equal(await page.evaluate(()=>window.scoreCalls ?? 0),0,'Reloading never starts analysis');
   assert.equal(await page.evaluate(()=>window.analysisJobs.length),0,'Restart retains results but clears the analysis queue');

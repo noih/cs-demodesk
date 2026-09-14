@@ -1,5 +1,5 @@
-use crate::first_pass::prop_controller::ITEM_PURCHASE_DEF_IDX;
 use crate::first_pass::prop_controller::is_grenade_or_weapon;
+use crate::first_pass::prop_controller::ITEM_PURCHASE_DEF_IDX;
 use crate::first_pass::read_bits::Bitreader;
 use crate::first_pass::read_bits::DemoParserError;
 use crate::first_pass::sendtables::find_field;
@@ -22,15 +22,34 @@ const HUFFMAN_CODE_MAXLEN: u32 = 17;
 
 /// These arrays need their sendtable indices; the statistics property map keeps one scalar per ID.
 pub fn is_pose_field(name: &str) -> bool {
-    (name.starts_with("CCSPlayerPawn.") && matches!(name.rsplit('.').next(), Some(
-        "m_fFlags" | "m_nLastJumpTick" | "m_flLastJumpFrac" | "m_MoveType" | "m_nActualMoveType"
-        | "m_flWaterLevel" | "m_nWaterLevel" | "m_nLadderSurfacePropIndex")))
-        || name.contains("PoseRecipe") || matches!(name.rsplit('.').next(),
-        Some("m_vecExternalGraphIds" | "m_vecExternalClipIds" | "m_vecSecondarySkeletons" | "m_vecSecondarySkeletonSlotIDs"))
+    (name.starts_with("CCSPlayerPawn.")
+        && matches!(
+            name.rsplit('.').next(),
+            Some(
+                "m_fFlags"
+                    | "m_nLastJumpTick"
+                    | "m_flLastJumpFrac"
+                    | "m_MoveType"
+                    | "m_nActualMoveType"
+                    | "m_flWaterLevel"
+                    | "m_nWaterLevel"
+                    | "m_nLadderSurfacePropIndex"
+            )
+        ))
+        || name.contains("PoseRecipe")
+        || matches!(
+            name.rsplit('.').next(),
+            Some("m_vecExternalGraphIds" | "m_vecExternalClipIds" | "m_vecSecondarySkeletons" | "m_vecSecondarySkeletonSlotIDs"
+                | "m_nNextPrimaryAttackTick" | "m_flNextPrimaryAttackTickRatio"
+                | "m_nNextSecondaryAttackTick" | "m_flNextSecondaryAttackTickRatio"
+                | "m_nPostponeFireReadyTicks" | "m_flPostponeFireReadyFrac")
+        )
 }
 
 /// Decode only the sendtable-qualified GameTick_t representation; never alter legacy properties.
-fn analysis_game_tick(raw: u32) -> i32 { ((raw >> 1) as i32) ^ -((raw & 1) as i32) }
+fn analysis_game_tick(raw: u32) -> i32 {
+    ((raw >> 1) as i32) ^ -((raw & 1) as i32)
+}
 
 #[derive(Debug, Clone)]
 pub struct Entity {
@@ -92,14 +111,18 @@ impl<'a> SecondPassParser<'a> {
 
             match cmd {
                 EntityCmd::Delete => {
-                    if let Some(changes) = &mut self.analysis_changes { changes.lifecycle.insert(entity_id); }
+                    if let Some(changes) = &mut self.analysis_changes {
+                        changes.lifecycle.insert(entity_id);
+                    }
                     self.projectiles.remove(&entity_id);
                     if let Some(entry) = self.entities.get_mut(entity_id as usize) {
                         *entry = None;
                     }
                 }
                 EntityCmd::CreateAndUpdate => {
-                    if let Some(changes) = &mut self.analysis_changes { changes.lifecycle.insert(entity_id); }
+                    if let Some(changes) = &mut self.analysis_changes {
+                        changes.lifecycle.insert(entity_id);
+                    }
                     self.create_new_entity(&mut bitreader, &entity_id, &mut events_to_emit)?;
                     self.update_entity(&mut bitreader, entity_id, false, &mut events_to_emit, is_fullpacket)?;
                 }
@@ -264,7 +287,25 @@ impl<'a> SecondPassParser<'a> {
             let field = find_field(&path, &class.serializer)?;
             let field_info = get_propinfo(&field, path);
             let decoder = get_decoder_from_field(field)?;
-            let result = bitreader.decode(&decoder, self.qf_mapper)?;
+            let (result, raw_network_time) = if self.capture_pose_fields
+                && decoder == crate::second_pass::decoder::Decoder::FloatSimulationTimeDecoder
+            {
+                let (legacy, raw) = decode_analysis_network_time(bitreader)?;
+                (legacy, Some(raw))
+            } else {
+                (bitreader.decode(&decoder, self.qf_mapper)?, None)
+            };
+            if let (Some(raw), Field::Value(value)) = (raw_network_time, field) {
+                // Preserve the encoded integer before the legacy time conversion rounds it.
+                // simulationTimeSerializer encodes trunc(f32(seconds * 64) + 0.5);
+                // server rewind records use that same integer, independently of packet time.
+                capture_analysis_value(
+                    entity, entity_id, path.path[..=path.last as usize].to_vec(),
+                    &format!("rawNetworkTime/{}", value.full_name), &Variant::U32(raw),
+                    self.analysis_changes.as_mut(),
+                );
+            }
+
 
             // listen_to_props()
             if self.list_props {
@@ -276,7 +317,16 @@ impl<'a> SecondPassParser<'a> {
             }
             // Custom events
             if !is_baseline {
-                SecondPassParser::listen_for_events(entity, &result, field, field_info, &self.prop_controller, &self.prop_controller.special_ids, is_fullpacket, events_to_emit);
+                SecondPassParser::listen_for_events(
+                    entity,
+                    &result,
+                    field,
+                    field_info,
+                    &self.prop_controller,
+                    &self.prop_controller.special_ids,
+                    is_fullpacket,
+                    events_to_emit,
+                );
             }
             // Debug
             if self.is_debug_mode {
@@ -296,7 +346,10 @@ impl<'a> SecondPassParser<'a> {
             if self.capture_pose_fields {
                 let pose_value = match field {
                     Field::Value(value) => Some(value),
-                    Field::Vector(vector) => match vector.field_enum.as_ref() { Field::Value(value) => Some(value), _ => None },
+                    Field::Vector(vector) => match vector.field_enum.as_ref() {
+                        Field::Value(value) => Some(value),
+                        _ => None,
+                    },
                     _ => None,
                 };
                 if let Some(value) = pose_value.filter(|value| value.analysis_name.is_some() || is_pose_field(&value.full_name)) {
@@ -305,10 +358,12 @@ impl<'a> SecondPassParser<'a> {
                     if matches!(field, Field::Vector(_)) {
                         if let Variant::U32(length) = &result {
                             entity.pose_array_lengths.insert(indices.clone(), (analysis_name.to_owned(), *length));
-                            entity.pose_array_lengths.retain(|key, _| !key.starts_with(&indices) || key.len() <= indices.len()
-                                || key[indices.len()] >= 0 && (key[indices.len()] as u32) < *length);
+                            entity.pose_array_lengths.retain(|key, _| {
+                                !key.starts_with(&indices) || key.len() <= indices.len() || key[indices.len()] >= 0 && (key[indices.len()] as u32) < *length
+                            });
                             entity.pose_fields.retain(|key, (name, _)| {
-                                let keep = !key.starts_with(&indices) || key.len() <= indices.len()
+                                let keep = !key.starts_with(&indices)
+                                    || key.len() <= indices.len()
                                     || key[indices.len()] >= 0 && (key[indices.len()] as u32) < *length;
                                 if !keep {
                                     if let Some(changes) = &mut self.analysis_changes {
@@ -323,11 +378,20 @@ impl<'a> SecondPassParser<'a> {
                         (Variant::U32(raw), true) => Some(Variant::I32(analysis_game_tick(*raw))),
                         _ => None,
                     };
-                    capture_analysis_value(entity, entity_id, indices, analysis_name, signed_tick.as_ref().unwrap_or(&result), self.analysis_changes.as_mut());
+                    capture_analysis_value(
+                        entity,
+                        entity_id,
+                        indices,
+                        analysis_name,
+                        signed_tick.as_ref().unwrap_or(&result),
+                        self.analysis_changes.as_mut(),
+                    );
                 }
             }
             if let (Some(changes), Some(fi)) = (&mut self.analysis_changes, field_info) {
-                if fi.should_parse { changes.properties.insert((entity_id, fi.prop_id)); }
+                if fi.should_parse {
+                    changes.properties.insert((entity_id, fi.prop_id));
+                }
             }
             SecondPassParser::insert_field(entity, result, field_info);
         }
@@ -448,7 +512,8 @@ impl<'a> SecondPassParser<'a> {
             _ => {}
         }
         let is_projectile_prop =
-            (class.name == "CInferno" || class.name.contains("Projectile") || class.name.contains("Grenade") || class.name.contains("Flash")) && !class.name.contains("Player");
+            (class.name == "CInferno" || class.name.contains("Projectile") || class.name.contains("Grenade") || class.name.contains("Flash"))
+                && !class.name.contains("Player");
         if is_projectile_prop {
             return Ok(EntityType::Projectile);
         }
@@ -502,17 +567,36 @@ fn is_grenade_prop(full_name: &str) -> bool {
     false
 }
 
+fn decode_analysis_network_time(reader: &mut Bitreader<'_>) -> Result<(Variant, u32), DemoParserError> {
+    let (legacy, raw) = reader.decode_simul_time_with_raw()?;
+    Ok((Variant::F32(legacy), raw))
+}
+
 // Capture before insert_field: distinct wire paths can share one legacy statistics ID.
 fn capture_analysis_value(
-    entity: &mut Entity, entity_id: i32, indices: Vec<i32>, name: &str,
-    result: &Variant, changes: Option<&mut crate::second_pass::parser_settings::AnalysisChanges>,
+    entity: &mut Entity,
+    entity_id: i32,
+    indices: Vec<i32>,
+    name: &str,
+    result: &Variant,
+    changes: Option<&mut crate::second_pass::parser_settings::AnalysisChanges>,
 ) {
-    if let Some(changes) = changes { changes.poses.insert((entity_id, indices.clone())); }
+    if let Some(changes) = changes {
+        changes.poses.insert((entity_id, indices.clone()));
+    }
     entity.pose_fields.insert(indices, (name.to_owned(), result.clone()));
 }
 
 #[cfg(test)]
 mod analysis_owner_tests {
+    #[test]
+    fn raw_network_time_survives_legacy_float_rounding() {
+        let bytes=[0x81,0x80,0x80,0x10];
+        let (legacy,raw)=super::decode_analysis_network_time(&mut crate::first_pass::read_bits::Bitreader::new(&bytes)).unwrap();
+        assert_eq!(raw,33_554_433);
+        assert_eq!(legacy,crate::second_pass::variants::Variant::F32(raw as f32*(1.0/30.0)));
+        assert_ne!(raw as f32 as u32,raw);
+    }
     use super::*;
     use crate::first_pass::{prop_controller::PropController, sendtables::ValueField};
     use crate::second_pass::{decoder::Decoder, parser_settings::AnalysisChanges};
@@ -531,16 +615,27 @@ mod analysis_owner_tests {
         assert_eq!(velocity.analysis_name.as_deref(), Some("CCSPlayerPawn.m_vecVelocity.m_vecZ"));
         assert_eq!(view.analysis_name.as_deref(), Some("CCSPlayerPawn.m_vecViewOffset.m_vecZ"));
         let mut entity = Entity {
-            cls_id: 0, entity_id: 7, serial: 1, entity_type: EntityType::Normal,
-            pose_fields: Default::default(), pose_array_lengths: Default::default(), props: Default::default(),
+            cls_id: 0,
+            entity_id: 7,
+            serial: 1,
+            entity_type: EntityType::Normal,
+            pose_fields: Default::default(),
+            pose_array_lengths: Default::default(),
+            props: Default::default(),
         };
         let mut changes = AnalysisChanges::default();
         for (field, path, number) in [(&view, 211, 64.0), (&velocity, 186, -120.0)] {
             let result = Variant::F32(number);
             capture_analysis_value(&mut entity, 7, vec![path], field.analysis_name.as_deref().unwrap(), &result, Some(&mut changes));
-            SecondPassParser::insert_field(&mut entity, result, Some(FieldInfo {
-                decoder: field.decoder, should_parse: true, prop_id: field.prop_id,
-            }));
+            SecondPassParser::insert_field(
+                &mut entity,
+                result,
+                Some(FieldInfo {
+                    decoder: field.decoder,
+                    should_parse: true,
+                    prop_id: field.prop_id,
+                }),
+            );
         }
         assert_eq!(entity.props.get(&view.prop_id), Some(&Variant::F32(-120.0)));
         assert_eq!(entity.pose_fields.get(&vec![211]).unwrap().1, Variant::F32(64.0));
@@ -554,10 +649,10 @@ mod movement_wire_tests {
     use super::*;
     #[test]
     fn analysis_movement_preserves_signed_tick_and_exact_field_ownership() {
-        assert_eq!(analysis_game_tick(7268),3634);
-        assert_eq!(analysis_game_tick(1),-1);
-        assert_eq!(analysis_game_tick(0),0);
-        assert_eq!(analysis_game_tick(u32::MAX),i32::MIN);
+        assert_eq!(analysis_game_tick(7268), 3634);
+        assert_eq!(analysis_game_tick(1), -1);
+        assert_eq!(analysis_game_tick(0), 0);
+        assert_eq!(analysis_game_tick(u32::MAX), i32::MIN);
         assert!(is_pose_field("CCSPlayerPawn.CCSPlayer_MovementServices.m_nLastJumpTick"));
         assert!(is_pose_field("CCSPlayerPawn.m_fFlags"));
         assert!(!is_pose_field("CCSPlayerController.m_fFlags"));

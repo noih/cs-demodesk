@@ -164,6 +164,7 @@ export interface ReplayData {
   weapons: string[];
   frames: ReplayFrame[];
   events: ReplayEvent[];
+  smoke?: {t:number; cells:number[][] | null}[];
 }
 export const FLAG = { alive: 1, helmet: 2, defuser: 4, blind: 8, bomb: 16, scoped: 32, ducking: 64, walking: 128, defusing: 256 } as const;
 export const GRENADE_KINDS = ['smoke', 'flash', 'he', 'molotov', 'decoy'] as const;
@@ -433,6 +434,7 @@ export const api = {
   },
   mapAssets: (mapName: string) => invoke<MapAssets>('get_map_assets', { mapName }),
   clearRadar: () => invoke<number>('clear_radar'),
+  clearMatchAnomaly: (id: string) => invoke<void>('clear_match_anomaly', { id }),
   clearAnalysis: (id: string) => invoke<void>('clear_analysis', { id }),
   clearAnomalyData: () => invoke<number>('clear_anomaly_data'),
   clearAllAnalysis: () => invoke<number>('clear_all_analysis'),

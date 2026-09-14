@@ -3,7 +3,7 @@ import { Spinner } from './Spinner.tsx';
 import { useEffect, useRef, useState } from 'react';
 import { Badge, Box, Button, Callout, DropdownMenu, Flex, Heading, IconButton, Tabs, Text, Tooltip } from '@radix-ui/themes';
 import { Trans, useTranslation } from 'react-i18next';
-import { api, errorText, mb, type AnalysisJob, type DemoMeta, type ParsedDemo, type RenderJob, type Status } from '../api.ts';
+import { api, errorText, mb, type AnalysisJob, type Assessment, type DemoMeta, type ParsedDemo, type RenderJob, type Status } from '../api.ts';
 import { fmtDate } from '../i18n/index.ts';
 import { HighlightsTab } from './HighlightsTab.tsx';
 import { ScoringTab } from './ScoringTab.tsx';
@@ -23,9 +23,23 @@ export function DemoView({ analysisJobs, meta, jobs, status, onChanged, onRemove
   useEffect(() => { setTab(requestedTab); }, [requestedTab, selectionRequest]);
   const tabScrollRef = useRef<HTMLDivElement>(null);
   const [confirmRemove, setConfirmRemove] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [dataRevision, setDataRevision] = useState(0);
+  const [analysisRecords, setAnalysisRecords] = useState<Record<string, Assessment[]>>();
+  const [historyError, setHistoryError] = useState<string>();
   const [loadError, setLoadError] = useState<string>();
 
   const analysisJob=analysisJobs.filter(job=>job.demoId===meta.id).sort((a,b)=>b.sequence-a.sequence)[0];
+  useEffect(() => {
+    let alive = true;
+    setAnalysisRecords(undefined);
+    setHistoryError(undefined);
+    void api.scoringHistory(meta.id).then(records => {
+      if (alive) setAnalysisRecords(records);
+    }).catch(error => { if (alive) setHistoryError(errorText(error)); });
+    return () => { alive = false; };
+  }, [meta.id, meta.parsedAt, analysisJob?.finishedAt, dataRevision]);
+  const hasAnalysis = Object.values(analysisRecords ?? {}).some(records => records.length > 0);
   const [submitting,setSubmitting]=useState(false);
   const [scoringError,setScoringError]=useState<string>();
   const scoringBusy=submitting || analysisJob?.status==='queued' || analysisJob?.status==='running';
@@ -53,9 +67,24 @@ export function DemoView({ analysisJobs, meta, jobs, status, onChanged, onRemove
   }, [meta.id, meta.status, meta.parsedAt]);
 
   const run = (fn: () => Promise<unknown>) => () =>
-    void fn()
-      .then(onChanged)
-      .catch((e) => notify(errorText(e)));
+    void fn().then(onChanged).catch(error => notify(errorText(error)));
+  const deleteData = (fn: () => Promise<unknown>, analysisChanged = true) => () => {
+    if (deleting) return;
+    setDeleting(true);
+    void (async () => {
+      try {
+        await fn();
+        if (analysisChanged) {
+          setDataRevision(value => value + 1);
+          setScoringError(undefined);
+        }
+      } catch (error) { notify(errorText(error)); }
+      finally {
+        try { await onChanged(); } catch (error) { notify(errorText(error)); }
+        setDeleting(false);
+      }
+    })();
+  };
   const reparse = async () => {
     if (parsing) return;
     setParseRequested(true);
@@ -116,11 +145,15 @@ export function DemoView({ analysisJobs, meta, jobs, status, onChanged, onRemove
               </DropdownMenu.Trigger>
               <DropdownMenu.Content align="end">
                 <DropdownMenu.Item onSelect={() => void api.reveal(meta.path)}>{t('common.openInExplorer')}</DropdownMenu.Item>
-                <DropdownMenu.Item disabled={meta.status !== 'parsed'} onSelect={run(() => api.clearAnalysis(meta.id))}>
+                <DropdownMenu.Item disabled={deleting || jobs.length === 0 || runningJobs > 0 || queuedJobs > 0} onSelect={deleteData(async () => {
+                  for (const job of jobs) await api.deleteJob(job.id);
+                }, false)}>{t('demoView.deleteVideos')}</DropdownMenu.Item>
+                <DropdownMenu.Item disabled={!hasAnalysis || deleting || scoringBusy || parsing} onSelect={deleteData(() => api.clearMatchAnomaly(meta.id))}>{t('demoView.deleteAnomaly')}</DropdownMenu.Item>
+                <DropdownMenu.Item disabled={deleting || parsing || scoringBusy || runningJobs > 0 || queuedJobs > 0 || meta.status !== 'parsed'} onSelect={deleteData(() => api.clearAnalysis(meta.id))}>
                   {t('demoView.clearAnalysis')}
                 </DropdownMenu.Item>
                 <DropdownMenu.Separator />
-                <DropdownMenu.Item color="red" disabled={meta.status === 'parsing'} onSelect={() => setConfirmRemove(true)}>
+                <DropdownMenu.Item color="red" disabled={deleting || parsing} onSelect={() => setConfirmRemove(true)}>
                   {t('demoView.deleteDemo')}
                 </DropdownMenu.Item>
               </DropdownMenu.Content>
@@ -210,7 +243,7 @@ export function DemoView({ analysisJobs, meta, jobs, status, onChanged, onRemove
             <Tabs.Content value="players">
               <PlayersTab parsed={parsed} />
             </Tabs.Content>
-            <Tabs.Content value="scoring"><ScoringTab onAnalyze={()=>void scoreMatch()} status={status} onSetup={()=>onSetup('render')} onRendered={()=>setTab('renders')} key={`${meta.id}:${analysisJob?.finishedAt ?? ''}`} meta={meta} parsed={parsed} busy={scoringBusy} step={analysisJob?.step ?? 1} job={analysisJob} queuePosition={queuePosition} error={scoringError}/></Tabs.Content>
+            <Tabs.Content value="scoring"><ScoringTab onAnalyze={()=>void scoreMatch()} status={status} onSetup={()=>onSetup('render')} onRendered={()=>setTab('renders')} key={`${meta.id}:${analysisJob?.finishedAt ?? ''}:${dataRevision}`} players={analysisRecords ?? {}} parsed={parsed} busy={scoringBusy} step={analysisJob?.step ?? 1} job={analysisJob} queuePosition={queuePosition} error={scoringError || historyError}/></Tabs.Content>
             <Tabs.Content value="charts">
               <ChartsTab parsed={parsed} />
             </Tabs.Content>

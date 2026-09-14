@@ -53,7 +53,9 @@ pub(crate) fn capture(parser: &SecondPassParser<'_>, tracking_only: bool) -> Sce
         let Some(class) = parser.cls_by_id.get(entity.cls_id as usize) else {
             continue;
         };
-        if !(relevant_class(&class.name) || animation_serializer(&class.serializer)) || (tracking_only && class.name != "CCSPlayerPawn") {
+        if !(relevant_class(&class.name) || animation_serializer(&class.serializer))
+            || (tracking_only && class.name != "CCSPlayerPawn")
+        {
             continue;
         }
         let mut properties: BTreeMap<String, Variant> = entity
@@ -120,7 +122,9 @@ pub(crate) fn capture(parser: &SecondPassParser<'_>, tracking_only: bool) -> Sce
     }
 }
 /// Follow the recorded schema, including animated weapons and secondary graph entities.
-pub(crate) fn animation_serializer(serializer: &parser::first_pass::sendtables::Serializer) -> bool {
+pub(crate) fn animation_serializer(
+    serializer: &parser::first_pass::sendtables::Serializer,
+) -> bool {
     use parser::first_pass::sendtables::Field;
     fn visit_field(field: &Field) -> bool {
         match field {
@@ -157,11 +161,30 @@ pub(crate) fn relevant_class(name: &str) -> bool {
 pub(crate) fn relevant_property(name: &str) -> bool {
     // Legacy IDs conflate velocity and view offset. Their distinct wire-owned
     // values are retained by generic pose capture before the statistics overwrite.
-    if matches!(name, "CCSPlayerPawn.m_vecX" | "CCSPlayerPawn.m_vecY" | "CCSPlayerPawn.m_vecZ") {
+    if matches!(
+        name,
+        "CCSPlayerPawn.m_vecX" | "CCSPlayerPawn.m_vecY" | "CCSPlayerPawn.m_vecZ"
+    ) {
         return false;
     }
     let n = name.rsplit('.').next().unwrap_or(name).to_ascii_lowercase();
-    if n.rsplit('.').next() == Some("m_hplayerpawn") { return true; }
+    if matches!(
+        n.as_str(),
+        "m_ubinterpolationframe"
+            | "m_bnointerpolate"
+            | "m_binitiallypopulateinterphistory"
+            | "m_ntickbase"
+            | "m_hactiveweapon"
+            | "m_nnextprimaryattacktick"
+            | "m_flnextprimaryattacktickratio"
+            | "m_nnextsecondaryattacktick"
+            | "m_flnextsecondaryattacktickratio"
+    ) {
+        return true;
+    }
+    if n.rsplit('.').next() == Some("m_hplayerpawn") {
+        return true;
+    }
     [
         "graph",
         "serialization",
@@ -173,6 +196,8 @@ pub(crate) fn relevant_property(name: &str) -> bool {
         "warmup",
         "match",
         "paused",
+        "pausestarttick",
+        "explodeeffecttickbegin",
         "origin",
         "m_vec",
         "steamid",
@@ -232,12 +257,30 @@ pub fn contract() -> super::Contract {
     super::Contract {
         module: "packet-scene".into(),
         schema_version: 1,
-        implementation_version: "0.3.0".into(),
+        implementation_version: "0.5.0".into(),
     }
 }
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn retains_declared_rewind_timing_inputs_without_inventing_values() {
+        for name in [
+            "CCSPlayerPawn.m_ubInterpolationFrame",
+            "CCSPlayerPawn.m_bNoInterpolate",
+            "CCSPlayerPawn.m_bInitiallyPopulateInterpHistory",
+            "CCSPlayerController.m_nTickBase",
+            "CCSPlayerPawn.m_flSimulationTime",
+            "CCSPlayerPawn.lerptime",
+            "CCSPlayerPawn.CCSPlayer_WeaponServices.m_hActiveWeapon",
+            "CWeaponGalilAR.m_nNextPrimaryAttackTick",
+            "CWeaponGalilAR.m_flNextPrimaryAttackTickRatio",
+            "CWeaponGalilAR.m_nNextSecondaryAttackTick",
+            "CWeaponGalilAR.m_flNextSecondaryAttackTickRatio",
+        ] {
+            assert!(super::relevant_property(name), "{name}");
+        }
+    }
     use parser::first_pass::{
         prop_controller::SMOKE_VOXELS_ID,
         read_bits::Bitreader,
@@ -248,28 +291,80 @@ mod tests {
     #[test]
     fn secondary_animation_entities_are_selected_by_schema() {
         use parser::first_pass::sendtables::{Field, Serializer, SerializerField};
-        let mut serializer = Serializer { name: "UnlistedAnimatedEntity".into(), fields: vec![] };
+        let mut serializer = Serializer {
+            name: "UnlistedAnimatedEntity".into(),
+            fields: vec![],
+        };
         assert!(!super::animation_serializer(&serializer));
-        serializer.fields.push(Field::Serializer(SerializerField { serializer: Serializer {
-            name:"CBodyComponentBaseAnimGraph".into(),fields:vec![],
-        }}));
+        serializer.fields.push(Field::Serializer(SerializerField {
+            serializer: Serializer {
+                name: "CBodyComponentBaseAnimGraph".into(),
+                fields: vec![],
+            },
+        }));
         assert!(super::animation_serializer(&serializer));
     }
 
     #[test]
+    fn smoke_clock_inputs_survive_compact_capture() {
+        for (class, name) in [
+            (
+                "CCSGameRulesProxy",
+                "CCSGameRulesProxy.CCSGameRules.m_nTotalPausedTicks",
+            ),
+            (
+                "CCSGameRulesProxy",
+                "CCSGameRulesProxy.CCSGameRules.m_nPauseStartTick",
+            ),
+            (
+                "CCSGameRulesProxy",
+                "CCSGameRulesProxy.CCSGameRules.m_bGamePaused",
+            ),
+            ("CHEGrenadeProjectile", "m_nExplodeEffectTickBegin"),
+            ("CHEGrenadeProjectile", "m_vecExplodeEffectOrigin"),
+        ] {
+            let field = super::super::compact::Field {
+                entity: 1,
+                serial: 1,
+                class: class.into(),
+                name: name.into(),
+            };
+            assert!(
+                super::super::compact::retains_field(&field),
+                "{}",
+                field.name
+            );
+        }
+    }
+
+    #[test]
     fn controller_pawn_handle_does_not_select_every_player_internal() {
-        assert!(super::relevant_property("CCSPlayerController.m_hPlayerPawn"));
+        assert!(super::relevant_property(
+            "CCSPlayerController.m_hPlayerPawn"
+        ));
         assert!(super::relevant_property("CCSPlayerController.m_steamID"));
         assert!(super::relevant_property("CCSPlayerPawn.m_iHealth"));
         assert!(!super::relevant_property("CCSPlayerPawn.m_vecZ"));
-        assert!(super::relevant_property("CCSPlayerPawn.m_vecViewOffset.m_vecZ"));
-        assert!(super::relevant_property("CCSPlayerPawn.m_vecVelocity.m_vecZ"));
-        assert!(super::relevant_property("CBodyComponentBaseAnimGraph.m_nSecondarySkeletonMasterCount"));
+        assert!(super::relevant_property(
+            "CCSPlayerPawn.m_vecViewOffset.m_vecZ"
+        ));
+        assert!(super::relevant_property(
+            "CCSPlayerPawn.m_vecVelocity.m_vecZ"
+        ));
+        assert!(super::relevant_property(
+            "CBodyComponentBaseAnimGraph.m_nSecondarySkeletonMasterCount"
+        ));
         assert!(super::relevant_property("CCSPlayerPawn.m_angEyeAngles"));
         assert!(super::relevant_property("CCSPlayerPawn.m_flFlashDuration"));
-        assert!(!super::relevant_property("CCSPlayerPawn.CCSPlayer_MovementServices.m_flFrictionStashedSpeed"));
-        assert!(!super::relevant_property("CBodyComponentBaseAnimGraph.m_internalCounter"));
-        assert!(super::relevant_property("CBodyComponentBaseAnimGraph.m_nServerSerializationContextIteration"));
+        assert!(!super::relevant_property(
+            "CCSPlayerPawn.CCSPlayer_MovementServices.m_flFrictionStashedSpeed"
+        ));
+        assert!(!super::relevant_property(
+            "CBodyComponentBaseAnimGraph.m_internalCounter"
+        ));
+        assert!(super::relevant_property(
+            "CBodyComponentBaseAnimGraph.m_nServerSerializationContextIteration"
+        ));
     }
     #[test]
     fn binary_and_smoke_fields_preserve_bytes_and_indices() {

@@ -243,6 +243,10 @@ mod tests {
     use super::*;
     fn frame(_tick: i32, pitch: f64, yaw: f64, serial: u32) -> Vec<PlayerFrame> {
         vec![PlayerFrame {
+            simulation_tick: None,
+            hitbox_set: None,
+            hitbox_transforms: vec![],
+            capsules: vec![],
             movement: None,
             player_id: "a".into(),
             identity: format!("1:{serial}:2"),
@@ -299,8 +303,12 @@ mod tests {
         for after in [None, Some((3, 90.)), Some((3, 60.)), Some((4, 0.))] {
             let mut m = Match::new(&["a".into()], 64.).unwrap();
             m.push(1, &frame(1, 0., 0., 1), Some(1), &[]).unwrap();
-            m.push(2, &frame(2, 0., 90., 1), Some(1), &[shot(2)]).unwrap();
-            if let Some((tick,yaw)) = after { m.push(tick, &frame(tick, 0., yaw, 1), Some(1), &[]).unwrap(); }
+            m.push(2, &frame(2, 0., 90., 1), Some(1), &[shot(2)])
+                .unwrap();
+            if let Some((tick, yaw)) = after {
+                m.push(tick, &frame(tick, 0., yaw, 1), Some(1), &[])
+                    .unwrap();
+            }
             let r = m.finish();
             assert!(r["a"].findings.is_empty());
             assert_eq!(r["a"].evaluated_samples, 1);

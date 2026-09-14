@@ -454,10 +454,11 @@ impl PropController {
         f.full_name = full_name.to_string();
         // The legacy statistics name omits send_node and aliases these two vectors.
         // Analysis retains their recorded owner separately, without changing basic property IDs.
-        f.analysis_name = if matches!(f.send_node.as_str(), "m_vecViewOffset" | "m_vecVelocity")
-            && matches!(f.name.as_str(), "m_vecX" | "m_vecY" | "m_vecZ") {
+        f.analysis_name = if matches!(f.send_node.as_str(), "m_vecViewOffset" | "m_vecVelocity") && matches!(f.name.as_str(), "m_vecX" | "m_vecY" | "m_vecZ") {
             full_name.rsplit_once('.').map(|(owner, leaf)| format!("{owner}.{}.{leaf}", f.send_node))
-        } else { None };
+        } else {
+            None
+        };
 
         let prop_name = split_weapon_prefix_from_prop_name(full_name);
 
@@ -469,7 +470,11 @@ impl PropController {
         let grenade_or_weapon = is_grenade_or_weapon(full_name);
 
         if prop_name == "m_firePositions" || prop_name == "m_bFireIsBurning" || prop_name == "m_VoxelFrameData" {
-            f.prop_id = match prop_name.as_str() { "m_firePositions" => FIRE_POSITIONS_ID, "m_bFireIsBurning" => FIRE_BURNING_ID, _ => SMOKE_VOXELS_ID };
+            f.prop_id = match prop_name.as_str() {
+                "m_firePositions" => FIRE_POSITIONS_ID,
+                "m_bFireIsBurning" => FIRE_BURNING_ID,
+                _ => SMOKE_VOXELS_ID,
+            };
             if !self.name_to_id.contains_key(&prop_name) {
                 self.name_to_id.insert(prop_name.clone(), f.prop_id);
                 self.id_to_name.insert(f.prop_id, prop_name.clone());
@@ -510,7 +515,7 @@ impl PropController {
         if full_name.starts_with("CCSPlayerPawn") && prop_name.contains("CEconItemAttribute.m_iRawValue32") {
             f.prop_id = GLOVE_PAINT_ID as u32;
         }
-        if full_name == "CCSPlayerPawn.CCSPlayer_WeaponServices.m_iAmmo"{
+        if full_name == "CCSPlayerPawn.CCSPlayer_WeaponServices.m_iAmmo" {
             f.prop_id = GRENADE_AMMO_ID;
         }
         self.id += 1;

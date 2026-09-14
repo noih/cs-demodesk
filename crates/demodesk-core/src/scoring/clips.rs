@@ -146,11 +146,13 @@ pub(crate) mod tests {
             ),
             (448, 1024)
         );
-        let mut render_demo=demo.clone();
-        let mut render_clips=clips.clone();
-        let synthetic_id=0x0110000100000001u64.to_string();
-        render_demo.players[0].steamid=synthetic_id.clone();
-        for clip in &mut render_clips {clip.player.steamid=synthetic_id.clone();}
+        let mut render_demo = demo.clone();
+        let mut render_clips = clips.clone();
+        let synthetic_id = 0x0110000100000001u64.to_string();
+        render_demo.players[0].steamid = synthetic_id.clone();
+        for clip in &mut render_clips {
+            clip.player.steamid = synthetic_id.clone();
+        }
         let plan = crate::render::to_render_clips(&render_demo, &render_clips);
         assert!(plan
             .iter()

@@ -172,6 +172,10 @@ mod tests {
                 (
                     tick,
                     PlayerFrame {
+                        simulation_tick: None,
+                        hitbox_set: None,
+                        hitbox_transforms: vec![],
+                        capsules: vec![],
                         player_id: "player".into(),
                         identity: "pawn".into(),
                         identity_key: (1, 2, 3),

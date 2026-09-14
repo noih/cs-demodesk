@@ -50,11 +50,13 @@ fn main() -> Result<()> {
     second.analysis_changes = Some(Default::default());
     let mut packets = 0u64;
     let mut final_tick = None;
-    second.start_with_observer(&bytes, |p| {
-        packets += 1;
-        final_tick = Some(p.tick);
-        p.tick < last_tick
-    }).map_err(|e| anyhow!("{e:?}"))?;
+    second
+        .start_with_observer(&bytes, |p| {
+            packets += 1;
+            final_tick = Some(p.tick);
+            p.tick < last_tick
+        })
+        .map_err(|e| anyhow!("{e:?}"))?;
     let mut context = BTreeMap::new();
     for table in &second.animation_strings.tables {
         for (index, (key, bytes)) in &table.entries {
@@ -69,15 +71,28 @@ fn main() -> Result<()> {
     let context_digest = sha1_smol::Sha1::from(serde_json::to_vec(&context)?)
         .digest()
         .to_string();
-    let model_entities=second.entities.iter().flatten().filter_map(|entity| {
-        let properties=entity.props.iter().filter_map(|(id,value)| {
-            let name=second.prop_controller.id_to_name.get(id)?;
-            (name.ends_with(".m_hModel") || name.ends_with(".m_hGraphDefinitionAG2") || name.ends_with(".m_hSkeletonDefinitionAG2"))
-                .then(||(name.clone(),value.clone()))
-        }).collect::<BTreeMap<_,_>>();
-        (!properties.is_empty()).then(||serde_json::json!({"entity":entity.entity_id,"serial":entity.serial,
-            "class":second.cls_by_id[entity.cls_id as usize].name,"properties":properties}))
-    }).collect::<Vec<_>>();
+    let model_entities = second
+        .entities
+        .iter()
+        .flatten()
+        .filter_map(|entity| {
+            let properties = entity
+                .props
+                .iter()
+                .filter_map(|(id, value)| {
+                    let name = second.prop_controller.id_to_name.get(id)?;
+                    (name.ends_with(".m_hModel")
+                        || name.ends_with(".m_hGraphDefinitionAG2")
+                        || name.ends_with(".m_hSkeletonDefinitionAG2"))
+                    .then(|| (name.clone(), value.clone()))
+                })
+                .collect::<BTreeMap<_, _>>();
+            (!properties.is_empty()).then(|| {
+                serde_json::json!({"entity":entity.entity_id,"serial":entity.serial,
+            "class":second.cls_by_id[entity.cls_id as usize].name,"properties":properties})
+            })
+        })
+        .collect::<Vec<_>>();
     let mut out = std::fs::OpenOptions::new()
         .write(true)
         .create_new(true)

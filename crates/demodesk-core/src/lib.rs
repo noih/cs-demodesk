@@ -5,9 +5,9 @@ pub mod detector;
 pub mod engine;
 pub mod error;
 pub use error::ErrorCode;
-pub mod radar;
 pub mod model;
 pub mod parser;
+pub mod radar;
 pub mod render;
 pub mod replay;
 pub mod stats;
@@ -24,3 +24,4 @@ pub mod updates;
 pub mod scoring;
 
 pub mod analysis;
+pub mod smoke;

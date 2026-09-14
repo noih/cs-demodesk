@@ -111,10 +111,7 @@ impl<'a> SecondPassParser<'a> {
             } else {
                 for prop_info in &self.prop_controller.prop_infos {
                     let val = self.find_prop_with_collect_cache(prop_info, entity_id, player, &mut velocity_indicies, &mut button_mask);
-                    self.output
-                        .entry(prop_info.id)
-                        .or_insert_with(PropColumn::new)
-                        .push(val);
+                    self.output.entry(prop_info.id).or_insert_with(PropColumn::new).push(val);
                 }
             }
         }
@@ -204,12 +201,10 @@ impl<'a> SecondPassParser<'a> {
             }
         }
 
-        self.get_prop_from_ent(&USERCMD_BUTTONSTATE_1, entity_id)
-            .ok()
-            .and_then(|value| match value {
-                Variant::U64(button_mask) => Some(button_mask),
-                _ => None,
-            })
+        self.get_prop_from_ent(&USERCMD_BUTTONSTATE_1, entity_id).ok().and_then(|value| match value {
+            Variant::U64(button_mask) => Some(button_mask),
+            _ => None,
+        })
     }
 
     fn get_button_prop_cached(
@@ -237,9 +232,7 @@ impl<'a> SecondPassParser<'a> {
     }
     pub fn get_controller_prop(&self, prop_id: &u32, player: &PlayerMetaData) -> Result<Variant, PropCollectionError> {
         match player.controller_entid {
-            Some(entid) => {
-                return self.get_prop_from_ent(prop_id, &entid)
-            },
+            Some(entid) => return self.get_prop_from_ent(prop_id, &entid),
             None => return Err(PropCollectionError::ControllerEntityIdNotSet),
         }
     }
@@ -289,8 +282,14 @@ impl<'a> SecondPassParser<'a> {
 
     pub fn collect_projectiles(&mut self) {
         for projectile_entid in &self.projectiles {
-            let grenade_type = match self.find_grenade_type(projectile_entid) {              
-                Some(t) => {if !t.contains("Projectile") && !self.parse_grenades{continue}else{t}},
+            let grenade_type = match self.find_grenade_type(projectile_entid) {
+                Some(t) => {
+                    if !t.contains("Projectile") && !self.parse_grenades {
+                        continue;
+                    } else {
+                        t
+                    }
+                }
                 None => continue,
             };
             let steamid = match self.find_thrower_steamid(projectile_entid) {
@@ -344,15 +343,24 @@ impl<'a> SecondPassParser<'a> {
                 if prop_info.id == FIRE_POSITIONS_ID {
                     // Reuse StringVec to transport the active XYZ cells without a new column type.
                     let cells = if grenade_type == "CInferno" {
-                        (0..64).filter_map(|i| {
-                            if self.get_prop_from_ent(&(FIRE_BURNING_ID + i), projectile_entid).ok() != Some(Variant::Bool(true)) { return None; }
-                            match self.get_prop_from_ent(&(FIRE_POSITIONS_ID + i), projectile_entid).ok()? {
-                                Variant::VecXYZ([x, y, z]) if x.is_finite() && y.is_finite() && z.is_finite() => Some(format!("{x},{y},{z}")),
-                                _ => None,
-                            }
-                        }).collect()
-                    } else { Vec::new() };
-                    self.output.entry(prop_info.id).or_insert_with(PropColumn::new).push(Some(Variant::StringVec(cells)));
+                        (0..64)
+                            .filter_map(|i| {
+                                if self.get_prop_from_ent(&(FIRE_BURNING_ID + i), projectile_entid).ok() != Some(Variant::Bool(true)) {
+                                    return None;
+                                }
+                                match self.get_prop_from_ent(&(FIRE_POSITIONS_ID + i), projectile_entid).ok()? {
+                                    Variant::VecXYZ([x, y, z]) if x.is_finite() && y.is_finite() && z.is_finite() => Some(format!("{x},{y},{z}")),
+                                    _ => None,
+                                }
+                            })
+                            .collect()
+                    } else {
+                        Vec::new()
+                    };
+                    self.output
+                        .entry(prop_info.id)
+                        .or_insert_with(PropColumn::new)
+                        .push(Some(Variant::StringVec(cells)));
                     continue;
                 }
                 let prop = match self.get_prop_from_ent(&prop_info.id, &projectile_entid) {
@@ -721,11 +729,7 @@ impl<'a> SecondPassParser<'a> {
     ) -> Result<Variant, PropCollectionError> {
         self.collect_velocity_axis(player, axis)
     }
-    fn cached_velocity_indicies<'b>(
-        &self,
-        player: &PlayerMetaData,
-        indicies_cache: &'b mut Option<Vec<usize>>,
-    ) -> Result<&'b [usize], PropCollectionError> {
+    fn cached_velocity_indicies<'b>(&self, player: &PlayerMetaData, indicies_cache: &'b mut Option<Vec<usize>>) -> Result<&'b [usize], PropCollectionError> {
         if indicies_cache.is_none() {
             let steamid = player.steamid.ok_or(PropCollectionError::PlayerNotFound)?;
             *indicies_cache = Some(self.find_wanted_indicies(self.output.get(&STEAMID_ID), steamid));

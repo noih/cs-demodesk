@@ -1,5 +1,7 @@
 {
-  "errors": { "app-closed": "工作因程式關閉而中斷" },
+  "errors": {
+    "app-closed": "工作因程式關閉而中斷"
+  },
   "startup": {
     "title": "無法使用資料目錄",
     "hint": "請選擇其他資料目錄，或恢復 預設資料目錄。程式將重新啟動，現有資料會保留在原處。",
@@ -92,8 +94,8 @@
     "reparse": "重新解析",
     "parse": "解析",
     "parsing": "解析中…",
-    "clearAnalysis": "清除解析",
-    "deleteDemo": "刪除 demo 檔",
+    "clearAnalysis": "刪除全部分析資料",
+    "deleteDemo": "刪除 demo 檔案",
     "rounds_other": "{{count}} 回合",
     "tabs": {
       "highlights": "高光",
@@ -105,7 +107,9 @@
     "activeJobs": "{{n}} 進行中",
     "deleteTitle": "刪除 demo 檔？",
     "deleteBody": "會刪除 <path/>、此 demo 的解析資料，以及所有已輸出的影片與輸出紀錄，無法復原。若想保留影片，請先備份再繼續。",
-    "deleteConfirm": "刪除檔案"
+    "deleteConfirm": "刪除檔案",
+    "deleteVideos": "刪除影片",
+    "deleteAnomaly": "刪除異常數據"
   },
   "players": {
     "aim": "瞄準",
@@ -271,7 +275,7 @@
     "visibleGame": "錄影時會顯示 CS2 遊戲畫面，請不要手動結束它。",
     "hiddenGame": "錄影時 CS2 會隱藏執行，請不要手動結束它。",
     "submitting": "送出中…",
-    "resolutionLimit": "錄影解析度受裝置與遊戲支援上限限制。"
+    "resolutionLimit": "解析度受限於裝置與遊戲支援"
   },
   "renders": {
     "overallProgress": "整體進度（估計）",
@@ -423,7 +427,7 @@
     "parsedDir": "解析資料",
     "clipsDir": "影片",
     "radarDir": "雷達圖",
-    "clearParsedConfirm": "刪除已儲存的解析資料，未失敗的 demo 會自動重新解析。失敗的 demo 仍需手動重試。保留 demo 檔案與影片。",
+    "clearParsedConfirm": "刪除解析資料、異常數據與影片，保留 demo 原檔。未失敗的 demo 會自動重新解析。",
     "clearClipsConfirm": "會刪掉所有輸出過的影片與紀錄；demo 檔與解析資料不受影響。",
     "clearRadarConfirm": "下次開 2D 回放時會再從遊戲檔案抽出。",
     "clearParsedWhat": "解析資料",
@@ -510,7 +514,7 @@
     "progress": "步驟 {{step}} / {{total}}",
     "elapsed": "已等待 {{seconds}} 秒",
     "details": "分析細節",
-    "start": "分析",
+    "start": "解析",
     "title": "異常數據",
     "rescore": "重新分析",
     "history": "分析歷史",
@@ -562,11 +566,12 @@
       "bhop-speed-retention": "連續跳躍並維持起跳速度；初始加速另行區分。",
       "shot-synchronous-view-turn": "開槍時單 tick 急轉至少 30°，下一 tick 再急轉至少 30° 並回到原方向 3° 內才計次。",
       "fixed-view-air-strafe": "記錄的視角保持穩定時，空中水平移動反覆左右交替並持續加速。",
-      "smoke-hit-rate": "統計已確認的穿煙命中；未命中射擊的完整路徑不足，不計算命中率。",
-      "penetration-hit-rate": "統計已確認的穿透命中；未命中射擊的完整路徑不足，不計算命中率。"
+      "smoke-hit-rate": "以射擊方向估算穿煙命中率，排除手雷擾動及不確定的遮擋。",
+      "penetration-hit-rate": "統計已確認的穿透命中。",
+      "time-to-damage": "依 demo 姿態與本機地圖碰撞模型，估算前方敵人首次無遮擋到首次槍擊傷害的時間；排除背後，含 tick 取樣誤差。"
     },
     "reasons": {
-      "visibilityOnsetMissing": "缺少敵方任意身體部位首次實際可見時間，尚未計算 TTD。",
+      "visibilityOnsetMissing": "沒有可量測的首次傷害交戰。",
       "missing": "缺少已量測的身體追蹤資料。",
       "failed": "本次規則執行失敗。",
       "rapidAcquisition": "快速瞄準固定身體位置。",
@@ -586,7 +591,8 @@
       "experimentalMeasurements": "供檢視的行為觀察。",
       "shotViewMissing": "缺少同次存活、有效回合內連續視角樣本的槍械射擊。",
       "movementMissing": "缺少必要的移動資料。",
-      "shotPathsMissing": "已記錄命中次數；缺少未命中射擊的完整路徑，尚無法計算命中率。"
+      "shotPathsMissing": "已記錄命中次數；缺少未命中射擊的完整路徑，尚無法計算命中率。",
+      "visibilityAssetsMissing": "無法載入地圖遮擋資料。"
     },
     "metrics": {
       "speed": "吸附速度",
@@ -638,8 +644,17 @@
       "maximumViewStep": "最大視角變化",
       "unmeasuredShots": "未量測視角的射擊數",
       "smokeHits": "穿煙命中數",
+      "smokeShots": "估算樣本射擊數",
+      "smokeHitRate": "穿煙命中率（估算）",
       "penetrationHits": "穿透命中數",
-      "unclassifiedShots": "其他射擊數"
+      "unclassifiedShots": "其他射擊數",
+      "measuredTtdEncounters": "有效 TTD 交戰",
+      "shortTtdEncounters": "TTD ≤150 ms",
+      "shortTtdPercent": "短 TTD 比例",
+      "medianTtdUpperMs": "TTD 上界中位數",
+      "ttdLowerMs": "TTD 下界",
+      "ttdUpperMs": "TTD 上界",
+      "estimatedSmokeHits": "估算樣本命中數"
     },
     "sourceUnverified": "尚未驗證來源 demo，顯示已儲存分析。",
     "ruleCounts": "各項行為次數",
@@ -661,6 +676,15 @@
       "errors": "{{count}} 項失敗"
     },
     "detailsShort": "詳情",
-    "restart": "重新分析"
+    "deleteData": "刪除資料",
+    "restart": "重新解析",
+    "previousPage": "上一頁",
+    "nextPage": "下一頁",
+    "ttdSamples": "TTD 樣本",
+    "units": {
+      "encounters": "次",
+      "percent": "%",
+      "shots": "發"
+    }
   }
 }

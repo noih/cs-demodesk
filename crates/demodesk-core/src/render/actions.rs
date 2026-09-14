@@ -59,7 +59,10 @@ pub fn sequence_folder_name(index: usize) -> String {
 }
 
 pub fn steamid_to_account_id(steamid64: &str) -> Option<String> {
-    steamid64.parse::<u64>().ok().map(|v| (v - 76561197960265728).to_string())
+    steamid64
+        .parse::<u64>()
+        .ok()
+        .map(|v| (v - 76561197960265728).to_string())
 }
 
 /// Commands for all clips, sorted by tick. Clips are visited in start-tick
@@ -73,13 +76,19 @@ pub fn build_schedule(clips: &[RenderClip], o: &ActionsOptions) -> Vec<Scheduled
     let mut out: Vec<Scheduled> = vec![];
     // `slot` keeps commands scheduled on the same tick in insertion order.
     let mut push = |tick: i32, slot: &mut u32, cmd: String| {
-        out.push(Scheduled { tick: tick.max(MIN_TICK) as f64 + (*slot as f64) * 0.001, cmd });
+        out.push(Scheduled {
+            tick: tick.max(MIN_TICK) as f64 + (*slot as f64) * 0.001,
+            cmd,
+        });
         *slot += 1;
     };
 
     let mut prev_end: Option<i32> = None;
     let n = order.len();
-    let total_ticks: f64 = clips.iter().map(|c| (c.highlight.end_tick - c.highlight.start_tick).max(1) as f64).sum();
+    let total_ticks: f64 = clips
+        .iter()
+        .map(|c| (c.highlight.end_tick - c.highlight.start_tick).max(1) as f64)
+        .sum();
     let mut completed_ticks = 0.0;
     for (seq, &ci) in order.iter().enumerate() {
         let clip = &clips[ci];
@@ -100,14 +109,26 @@ pub fn build_schedule(clips: &[RenderClip], o: &ActionsOptions) -> Vec<Scheduled
             Some(pe) => pe + rate / 4,
         };
         let mut slot = 0;
-        push(jump_from, &mut slot, format!("echo {MARK} seq {} of {n} seek", seq + 1));
+        push(
+            jump_from,
+            &mut slot,
+            format!("echo {MARK} seq {} of {n} seek", seq + 1),
+        );
         if setup_tick - 1 > jump_from + 1 {
-            push(jump_from, &mut slot, format!("demo_gototick {}", setup_tick - 1));
+            push(
+                jump_from,
+                &mut slot,
+                format!("demo_gototick {}", setup_tick - 1),
+            );
         }
 
         // 2. Baseline + recording configuration at the setup tick.
         let mut slot = 0;
-        push(setup_tick, &mut slot, format!("echo {MARK} seq {} of {n} setup", seq + 1));
+        push(
+            setup_tick,
+            &mut slot,
+            format!("echo {MARK} seq {} of {n} setup", seq + 1),
+        );
         for cmd in [
             "sv_cheats 1",
             "demo_ui_mode 0",
@@ -125,51 +146,139 @@ pub fn build_schedule(clips: &[RenderClip], o: &ActionsOptions) -> Vec<Scheduled
             push(setup_tick, &mut slot, cmd.to_string());
         }
         push(setup_tick, &mut slot, "volume 1".into());
-        push(setup_tick, &mut slot, format!("cl_demo_predict {}", r.true_view as u8));
+        push(
+            setup_tick,
+            &mut slot,
+            format!("cl_demo_predict {}", r.true_view as u8),
+        );
         // HUD: cl_drawhud must stay on for any element; without the main HUD we go through
         // cl_draw_only_deathnotices and force radar / kill feed on or off individually.
-        push(setup_tick, &mut slot, format!("cl_drawhud {}", (r.hud || r.radar || r.kill_feed) as u8));
-        push(setup_tick, &mut slot, format!("cl_draw_only_deathnotices {}", (!r.hud) as u8));
-        push(setup_tick, &mut slot, format!("crosshair {}", r.crosshair as u8));
+        push(
+            setup_tick,
+            &mut slot,
+            format!("cl_drawhud {}", (r.hud || r.radar || r.kill_feed) as u8),
+        );
+        push(
+            setup_tick,
+            &mut slot,
+            format!("cl_draw_only_deathnotices {}", (!r.hud) as u8),
+        );
+        push(
+            setup_tick,
+            &mut slot,
+            format!("crosshair {}", r.crosshair as u8),
+        );
         push(setup_tick, &mut slot, "cl_show_observer_crosshair 2".into());
         let force = |on: bool| if on { 1 } else { -1 };
-        push(setup_tick, &mut slot, format!("cl_drawhud_force_radar {}", force(r.radar)));
-        push(setup_tick, &mut slot, format!("cl_drawhud_force_deathnotices {}", force(r.kill_feed)));
+        push(
+            setup_tick,
+            &mut slot,
+            format!("cl_drawhud_force_radar {}", force(r.radar)),
+        );
+        push(
+            setup_tick,
+            &mut slot,
+            format!("cl_drawhud_force_deathnotices {}", force(r.kill_feed)),
+        );
         // teammate names / equipment over heads: never (clutter, and it is not the player's own view)
-        push(setup_tick, &mut slot, "cl_drawhud_force_teamid_overhead -1".into());
-        push(setup_tick, &mut slot, format!("cl_chatfilters {}", if r.chat { 63 } else { 0 }));
-        push(setup_tick, &mut slot, format!("r_drawviewmodel {}", r.viewmodel as u8));
-        push(setup_tick, &mut slot, format!("r_drawtracers_firstperson {}", r.tracers as u8));
-        push(setup_tick, &mut slot, format!("hud_scaling {:.2}", r.hud_scale.clamp(0.5, 0.95)));
-        push(setup_tick, &mut slot, format!("mirv_deathmsg lifetime {}", r.death_notice_seconds));
+        push(
+            setup_tick,
+            &mut slot,
+            "cl_drawhud_force_teamid_overhead -1".into(),
+        );
+        push(
+            setup_tick,
+            &mut slot,
+            format!("cl_chatfilters {}", if r.chat { 63 } else { 0 }),
+        );
+        push(
+            setup_tick,
+            &mut slot,
+            format!("r_drawviewmodel {}", r.viewmodel as u8),
+        );
+        push(
+            setup_tick,
+            &mut slot,
+            format!("r_drawtracers_firstperson {}", r.tracers as u8),
+        );
+        push(
+            setup_tick,
+            &mut slot,
+            format!("hud_scaling {:.2}", r.hud_scale.clamp(0.5, 0.95)),
+        );
+        push(
+            setup_tick,
+            &mut slot,
+            format!("mirv_deathmsg lifetime {}", r.death_notice_seconds),
+        );
         push(setup_tick, &mut slot, "mirv_deathmsg filter clear".into());
         push(setup_tick, &mut slot, "mirv_deathmsg clear".into());
-        push(setup_tick, &mut slot, format!("tv_listen_voice_indices {}", if r.voice { -1 } else { 0 }));
-        push(setup_tick, &mut slot, format!("tv_listen_voice_indices_h {}", if r.voice { -1 } else { 0 }));
-        push(setup_tick, &mut slot, "mirv_streams record startMovieWav 1".into());
-        push(setup_tick, &mut slot, format!("mirv_streams record name \"{folder}\""));
-        push(setup_tick, &mut slot, format!("spec_show_xray {}", r.xray as u8));
+        push(
+            setup_tick,
+            &mut slot,
+            format!("tv_listen_voice_indices {}", if r.voice { -1 } else { 0 }),
+        );
+        push(
+            setup_tick,
+            &mut slot,
+            format!("tv_listen_voice_indices_h {}", if r.voice { -1 } else { 0 }),
+        );
+        push(
+            setup_tick,
+            &mut slot,
+            "mirv_streams record startMovieWav 1".into(),
+        );
+        push(
+            setup_tick,
+            &mut slot,
+            format!("mirv_streams record name \"{folder}\""),
+        );
+        push(
+            setup_tick,
+            &mut slot,
+            format!("spec_show_xray {}", r.xray as u8),
+        );
         push(setup_tick, &mut slot, "mp_display_kill_assists 1".into());
         // HLAE unescapes the doubled backslash before the file name; {QUOTE} is its quote placeholder.
         push(setup_tick, &mut slot, format!("mirv_streams settings add ffmpeg {preset} \"{} {{QUOTE}}{folder}\\\\video.{}{{QUOTE}}\"", o.ffmpeg_preset, r.container));
-        push(setup_tick, &mut slot, format!("mirv_streams record screen settings {preset}"));
-        push(setup_tick, &mut slot, format!("mirv_streams record fps {}", r.fps));
+        push(
+            setup_tick,
+            &mut slot,
+            format!("mirv_streams record screen settings {preset}"),
+        );
+        push(
+            setup_tick,
+            &mut slot,
+            format!("mirv_streams record fps {}", r.fps),
+        );
 
         // 3. Camera on the highlighted player (after the seek, before recording).
         push(setup_tick, &mut slot, "spec_mode 1".into());
         match (r.camera, &clip.account_id, clip.slot) {
-            (Camera::Lock, Some(acc), _) => push(setup_tick, &mut slot, format!("spec_lock_to_accountid {acc}")),
+            (Camera::Lock, Some(acc), _) => push(
+                setup_tick,
+                &mut slot,
+                format!("spec_lock_to_accountid {acc}"),
+            ),
             (_, _, Some(slot_no)) => push(setup_tick, &mut slot, format!("spec_player {slot_no}")),
             _ => {}
         }
 
         // 4. Record.
         let mut slot = 0;
-        push(start_tick, &mut slot, format!("echo {MARK} seq {} of {n} start", seq + 1));
+        push(
+            start_tick,
+            &mut slot,
+            format!("echo {MARK} seq {} of {n} start", seq + 1),
+        );
         push(start_tick, &mut slot, "mirv_streams record start".into());
         let mut slot = 0;
         push(end_tick, &mut slot, "mirv_streams record end".into());
-        push(end_tick, &mut slot, format!("echo {MARK} seq {} of {n} end", seq + 1));
+        push(
+            end_tick,
+            &mut slot,
+            format!("echo {MARK} seq {} of {n} end", seq + 1),
+        );
 
         let clip_ticks = (h.end_tick - h.start_tick).max(1) as f64;
         // At most 100 updates per clip, including long clips; each marker follows real demo time.
@@ -177,7 +286,11 @@ pub fn build_schedule(clips: &[RenderClip], o: &ActionsOptions) -> Vec<Scheduled
             let tick = start_tick + ((end_tick - start_tick) as i64 * step / 100) as i32;
             let fraction = (completed_ticks + clip_ticks * step as f64 / 100.0) / total_ticks;
             let mut slot = 10 + step as u32;
-            push(tick, &mut slot, format!("echo {MARK} progress {fraction:.6}"));
+            push(
+                tick,
+                &mut slot,
+                format!("echo {MARK} progress {fraction:.6}"),
+            );
         }
         completed_ticks += clip_ticks;
 
@@ -196,7 +309,9 @@ pub fn build_schedule(clips: &[RenderClip], o: &ActionsOptions) -> Vec<Scheduled
 }
 
 fn xml_escape(s: &str) -> String {
-    s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;")
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
 }
 
 /// `mirv_cmd load` file: `<commandSystem><commands><c tick="…">cmd</c>…`.
@@ -204,7 +319,11 @@ fn xml_escape(s: &str) -> String {
 pub fn mirv_cmd_xml(schedule: &[Scheduled]) -> String {
     let mut s = String::from("<commandSystem>\n<commands>\n");
     for c in schedule {
-        s.push_str(&format!("<c tick=\"{:.3}\">{}</c>\n", c.tick, xml_escape(&c.cmd)));
+        s.push_str(&format!(
+            "<c tick=\"{:.3}\">{}</c>\n",
+            c.tick,
+            xml_escape(&c.cmd)
+        ));
     }
     s.push_str("</commands>\n</commandSystem>\n");
     s
@@ -217,14 +336,22 @@ mod tests {
     use std::collections::BTreeMap;
 
     fn opts(render: &RenderOptions) -> ActionsOptions<'_> {
-        ActionsOptions { render, tick_rate: 64.0, output_dir: "C:/test-output/r1".into(), ffmpeg_preset: "-c:v libx264 -pix_fmt yuv420p -crf 23".into() }
+        ActionsOptions {
+            render,
+            tick_rate: 64.0,
+            output_dir: "C:/test-output/r1".into(),
+            ffmpeg_preset: "-c:v libx264 -pix_fmt yuv420p -crf 23".into(),
+        }
     }
 
     fn clip(start: i32, end: i32, slot: Option<i32>) -> RenderClip {
         RenderClip {
             highlight: Highlight {
                 id: "h".into(),
-                player: HighlightPlayer { steamid: (76561197960265728_u64 + 123).to_string(), name: "Player A".into() },
+                player: HighlightPlayer {
+                    steamid: (76561197960265728_u64 + 123).to_string(),
+                    name: "Player A".into(),
+                },
                 round: 3,
                 start_tick: start,
                 end_tick: end,
@@ -241,20 +368,37 @@ mod tests {
     }
 
     fn tick_of(sched: &[Scheduled], cmd: &str) -> i32 {
-        sched.iter().find(|a| a.cmd == cmd || a.cmd.starts_with(&format!("{cmd} "))).unwrap().tick.floor() as i32
+        sched
+            .iter()
+            .find(|a| a.cmd == cmd || a.cmd.starts_with(&format!("{cmd} ")))
+            .unwrap()
+            .tick
+            .floor() as i32
     }
     fn idx(sched: &[Scheduled], cmd: &str) -> usize {
-        sched.iter().position(|a| a.cmd == cmd || a.cmd.starts_with(&format!("{cmd} "))).unwrap()
+        sched
+            .iter()
+            .position(|a| a.cmd == cmd || a.cmd.starts_with(&format!("{cmd} ")))
+            .unwrap()
     }
 
     #[test]
     fn every_clip_keeps_game_audio_for_recording() {
         let clips = [clip(10_000, 11_000, Some(3)), clip(20_000, 21_000, Some(3))];
         for show_game in [false, true] {
-            let render = RenderOptions { show_game, ..RenderOptions::default() };
+            let render = RenderOptions {
+                show_game,
+                ..RenderOptions::default()
+            };
             let schedule = build_schedule(&clips, &opts(&render));
-            let volumes: Vec<_> = schedule.iter().filter(|a| a.cmd.starts_with("volume ")).collect();
-            let starts: Vec<_> = schedule.iter().filter(|a| a.cmd == "mirv_streams record start").collect();
+            let volumes: Vec<_> = schedule
+                .iter()
+                .filter(|a| a.cmd.starts_with("volume "))
+                .collect();
+            let starts: Vec<_> = schedule
+                .iter()
+                .filter(|a| a.cmd == "mirv_streams record start")
+                .collect();
             assert_eq!(volumes.len(), clips.len());
             for (volume, start) in volumes.iter().zip(starts) {
                 assert_eq!(volume.cmd, "volume 1");
@@ -265,8 +409,18 @@ mod tests {
 
     #[test]
     fn recording_progress_follows_duration_across_unequal_clips() {
-        let schedule = build_schedule(&[clip(10_000, 11_000, Some(3)), clip(20_000, 23_000, Some(3))], &opts(&RenderOptions::default()));
-        let values: Vec<(i32, f64)> = schedule.iter().filter_map(|a| a.cmd.strip_prefix("echo [demodesk] progress ").map(|p| (a.tick.floor() as i32, p.parse().unwrap()))).collect();
+        let schedule = build_schedule(
+            &[clip(10_000, 11_000, Some(3)), clip(20_000, 23_000, Some(3))],
+            &opts(&RenderOptions::default()),
+        );
+        let values: Vec<(i32, f64)> = schedule
+            .iter()
+            .filter_map(|a| {
+                a.cmd
+                    .strip_prefix("echo [demodesk] progress ")
+                    .map(|p| (a.tick.floor() as i32, p.parse().unwrap()))
+            })
+            .collect();
         assert_eq!(values.first(), Some(&(10_000, 0.0)));
         assert_eq!(values.last(), Some(&(23_000, 1.0)));
         assert!(values.contains(&(11_000, 0.25)));
@@ -276,7 +430,10 @@ mod tests {
 
     #[test]
     fn schedule_is_ordered() {
-        let s = build_schedule(&[clip(10_000, 11_000, Some(3))], &opts(&RenderOptions::default()));
+        let s = build_schedule(
+            &[clip(10_000, 11_000, Some(3))],
+            &opts(&RenderOptions::default()),
+        );
         assert_eq!(tick_of(&s, "demo_gototick"), 96);
         assert!(s.iter().any(|a| a.cmd == "demo_gototick 9935"));
         assert_eq!(tick_of(&s, "mirv_streams record name"), 9936);
@@ -288,30 +445,48 @@ mod tests {
         assert!(idx(&s, "spec_mode 1") < idx(&s, "spec_player 3"));
         assert!(idx(&s, "mirv_streams record name") < idx(&s, "mirv_streams record start"));
         assert!(s.windows(2).all(|w| w[0].tick <= w[1].tick));
-        let preset = s.iter().find(|a| a.cmd.starts_with("mirv_streams settings add ffmpeg")).unwrap();
+        let preset = s
+            .iter()
+            .find(|a| a.cmd.starts_with("mirv_streams settings add ffmpeg"))
+            .unwrap();
         assert_eq!(preset.cmd, "mirv_streams settings add ffmpeg demodesk1 \"-c:v libx264 -pix_fmt yuv420p -crf 23 {QUOTE}C:/test-output/r1/1-sequence\\\\video.mp4{QUOTE}\"");
         let xml = mirv_cmd_xml(&s);
-        assert!(xml.starts_with("<commandSystem>\n<commands>\n<c tick=\"96.000\">echo [demodesk] seq 1 of 1 seek</c>"));
+        assert!(xml.starts_with(
+            "<commandSystem>\n<commands>\n<c tick=\"96.000\">echo [demodesk] seq 1 of 1 seek</c>"
+        ));
         assert!(xml.contains("<c tick=\"9936.000\">echo [demodesk] seq 1 of 1 setup</c>"));
     }
 
     #[test]
     fn clamps_and_chains() {
-        let s = build_schedule(&[clip(20_000, 21_000, Some(1)), clip(50, 400, Some(1))], &opts(&RenderOptions::default()));
+        let s = build_schedule(
+            &[clip(20_000, 21_000, Some(1)), clip(50, 400, Some(1))],
+            &opts(&RenderOptions::default()),
+        );
         // clips are visited in tick order: the early clip becomes sequence 1
         assert_eq!(s.iter().map(|a| a.tick.floor() as i32).min(), Some(96));
-        assert!(s.iter().any(|a| a.cmd.contains("/1-sequence") && a.tick < 1000.0));
-        assert!(s.iter().any(|a| a.cmd.contains("/2-sequence") && a.tick > 19_000.0));
+        assert!(s
+            .iter()
+            .any(|a| a.cmd.contains("/1-sequence") && a.tick < 1000.0));
+        assert!(s
+            .iter()
+            .any(|a| a.cmd.contains("/2-sequence") && a.tick > 19_000.0));
         assert!(s.iter().any(|a| a.cmd == "demo_gototick 19935"));
         assert_eq!(s.iter().filter(|a| a.cmd == "quit").count(), 1);
-        let locked = RenderOptions { camera: Camera::Lock, ..RenderOptions::default() };
+        let locked = RenderOptions {
+            camera: Camera::Lock,
+            ..RenderOptions::default()
+        };
         let lock = build_schedule(&[clip(10_000, 11_000, Some(1))], &opts(&locked));
         assert!(lock.iter().any(|a| a.cmd == "spec_lock_to_accountid 123"));
     }
 
     #[test]
     fn overlapping_clips_never_jump_backwards() {
-        let s = build_schedule(&[clip(10_000, 11_000, Some(1)), clip(10_500, 11_500, Some(1))], &opts(&RenderOptions::default()));
+        let s = build_schedule(
+            &[clip(10_000, 11_000, Some(1)), clip(10_500, 11_500, Some(1))],
+            &opts(&RenderOptions::default()),
+        );
         let mut last_goto = 0;
         for a in &s {
             if let Some(t) = a.cmd.strip_prefix("demo_gototick ") {

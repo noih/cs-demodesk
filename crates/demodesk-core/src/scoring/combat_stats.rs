@@ -2,7 +2,7 @@
 use super::{Check, Definition, Finding, Measurement, State};
 use crate::model::RoundInfo;
 use serde_json::{json, Value};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 fn text<'a>(event: &'a Value, field: &str) -> &'a str {
     event[field].as_str().unwrap_or("")
@@ -14,6 +14,33 @@ fn gun(name: &str) -> &str {
         other => other,
     }
 }
+/// A trigger identity, shared with the event ledger (including weapon aliases).
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct SmokeShotKey {
+    player: String,
+    tick: i32,
+    weapon: String,
+}
+impl SmokeShotKey {
+    pub fn new(player: &str, tick: i32, weapon: &str) -> Self {
+        Self {
+            player: player.into(),
+            tick,
+            weapon: gun(weapon).into(),
+        }
+    }
+}
+
+/// Directional smoke estimate, aggregated per trigger.
+/// Unknown shots are excluded from the estimate, including confirmed smoke hits.
+/// Recorded damage is evidence; it must not select the denominator sample.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SmokeVerdict {
+    Crossing,
+    Clear,
+    Unknown,
+}
+
 fn metric(name: &str, value: f64, unit: &str) -> Measurement {
     Measurement {
         name: name.into(),
@@ -26,7 +53,12 @@ fn check(id: &str, category: &str) -> Check {
     Check {
         definition: Definition {
             id: id.into(),
-            version: "2-counts-weapon-samples".into(),
+            version: if id == "smoke-hit-rate" {
+                "3-estimated-smoke-samples"
+            } else {
+                "2-counts-weapon-samples"
+            }
+            .into(),
             name: id.into(),
             description: "Observed match behavior; not a cheating verdict.".into(),
             category: category.into(),
@@ -37,7 +69,10 @@ fn check(id: &str, category: &str) -> Check {
                 }
                 "unbroken-hit-sequence" => json!({"minimumHitStreak":10}),
                 "rapid-multikill" => json!({"twoKillsSeconds":1.5,"threeOrMoreKillsSeconds":3}),
-                "smoke-hit-rate" | "penetration-hit-rate" => {
+                "smoke-hit-rate" => {
+                    json!({"source":"directionalSmokeEstimateAndEnemyDamage","estimated":true,"maximumShotDelayTicks":1,"requiresUniqueShot":true,"eligibleSamplesOnly":true,"perTrigger":true})
+                }
+                "penetration-hit-rate" => {
                     json!({"source":"player_bullet_hit","maximumShotDelayTicks":1,"requiresUniqueShot":true,"denominatorAvailable":false,"unclassifiedShots":"shotsWithoutConfirmedContextHit"})
                 }
                 _ => json!({"recordedBlindWindow":true}),
@@ -81,6 +116,7 @@ struct Shot {
     weapon: String,
     hit: bool,
     target: String,
+    damaged_targets: BTreeSet<String>,
     blind: Option<f64>,
     smoke_target: Option<String>,
     penetration_target: Option<String>,
@@ -91,6 +127,7 @@ pub fn evaluate_match(
     players: &[String],
     rounds: &[RoundInfo],
     rate: f64,
+    smoke_shots: &BTreeMap<SmokeShotKey, SmokeVerdict>,
 ) -> BTreeMap<String, Vec<Check>> {
     if !rate.is_finite() || rate <= 0. {
         return players
@@ -147,6 +184,7 @@ pub fn evaluate_match(
                         weapon: weapon.into(),
                         hit: false,
                         target: String::new(),
+                        damaged_targets: BTreeSet::new(),
                         blind: None,
                         smoke_target: None,
                         penetration_target: None,
@@ -181,6 +219,7 @@ pub fn evaluate_match(
                     continue;
                 }
                 shot.hit = true;
+                shot.damaged_targets.insert(victim.into());
                 if shot.target.is_empty() {
                     shot.target = victim.into();
                 }
@@ -220,6 +259,10 @@ pub fn evaluate_match(
                 break;
             }
             let shot = ledger.get_mut(&key).unwrap();
+            // Context belongs to this damaged target, not another victim hit by the same shot.
+            if !shot.damaged_targets.contains(victim) {
+                break;
+            }
             if smoke && shot.smoke_target.is_none() {
                 shot.smoke_target = Some(victim.into());
             }
@@ -369,6 +412,33 @@ pub fn evaluate_match(
             c.reason_code="shotPathsMissing".into();
             c.reason="Recorded enemy-hit shots are counted; missing missed-shot paths leave the context hit-rate denominator incomplete.".into();
         }
+        // Select the sample independently of damage: otherwise excluded hits would
+        // enter the denominator while excluded misses would not, inflating the rate.
+        let mut smoke_count = 0;
+        let mut estimated_hits = 0;
+        for shot in &rows {
+            if smoke_shots.get(&SmokeShotKey::new(&player, shot.tick, &shot.weapon))
+                == Some(&SmokeVerdict::Crossing)
+            {
+                smoke_count += 1;
+                estimated_hits += usize::from(shot.smoke_target.is_some());
+            }
+        }
+        let smoke = &mut checks[5];
+        smoke.evaluated_samples = smoke_count;
+        smoke.summary = vec![metric("smokeHits", smoke.findings.len() as f64, "shots"),
+            metric("estimatedSmokeHits", estimated_hits as f64, "shots"),
+            metric("smokeShots", smoke_count as f64, "shots")];
+        if smoke_count > 0 {
+            smoke.summary.push(metric("smokeHitRate", 100. * estimated_hits as f64 / smoke_count as f64, "%"));
+            smoke.state = State::Passed;
+            smoke.reason_code = "measuredBehavior".into();
+            smoke.reason = "Estimated hit rate among eligible directional smoke samples; hits require recorded enemy damage through smoke.".into();
+        } else {
+            smoke.state = State::Unavailable;
+            smoke.reason_code = "noEligibleShots".into();
+            smoke.reason = "No eligible directional smoke samples.".into();
+        }
         for c in &mut checks {if !c.findings.is_empty(){c.state=State::Findings;}}
         (player,checks)
     }).collect()
@@ -378,6 +448,123 @@ pub fn evaluate_match(
 mod tests {
     use super::*;
     use crate::model::Team;
+    fn value(check: &Check, name: &str) -> Option<f64> {
+        check
+            .summary
+            .iter()
+            .find(|m| m.name == name)
+            .map(|m| m.value)
+    }
+
+    #[test]
+    fn smoke_estimates_exclude_unknown_hits_and_count_triggers_not_victims() {
+        let round = RoundInfo {
+            round: 1,
+            start_tick: 0,
+            freeze_end_tick: 10,
+            end_tick: 100,
+            officially_ended_tick: 100,
+            winner: None,
+            reason: String::new(),
+            roster: BTreeMap::from([
+                ("a".into(), Team::Ct),
+                ("other".into(), Team::Ct),
+                ("front".into(), Team::T),
+                ("behind".into(), Team::T),
+            ]),
+            bomb_planted_tick: None,
+            bomb_defused_tick: None,
+            bomb_defuser: None,
+            bomb_exploded_tick: None,
+        };
+        let mut events = vec![];
+        for (player, tick, weapon) in [
+            ("a", 20, "xm1014"),
+            ("a", 30, "ak47"),
+            ("a", 40, "weapon_usp_silencer"),
+            ("other", 50, "ak47"),
+        ] {
+            events.push(json!({"event_name":"weapon_fire","tick":tick,
+                "user_steamid":player,"weapon":weapon}));
+        }
+        // Shotgun has front and behind victims, duplicate pellets and fire events.
+        // Front damage alone never contributes to the smoke numerator.
+        for (tick, victim, smoke) in [
+            (20, "front", false),
+            (20, "behind", true),
+            (30, "front", false),
+        ] {
+            let weapon = if tick == 20 { "xm1014" } else { "ak47" };
+            events.push(json!({"event_name":"player_hurt","tick":tick,
+                "attacker_steamid":"a","user_steamid":victim,"weapon":weapon,"dmg_health":10}));
+            events.push(json!({"event_name":"player_bullet_hit","tick":tick,
+                "attacker_steamid":"a","user_steamid":victim,"through_smoke":smoke,"penetration_count":0}));
+        }
+        events.push(events[0].clone());
+        events.push(events[7].clone());
+        let players = ["a".into(), "other".into()];
+        let mut paths = BTreeMap::from([
+            // Confirmed enemy damage must not override sample exclusion.
+            (SmokeShotKey::new("a", 20, "xm1014"), SmokeVerdict::Unknown),
+            (SmokeShotKey::new("a", 30, "ak47"), SmokeVerdict::Crossing),
+            (SmokeShotKey::new("a", 40, "hkp2000"), SmokeVerdict::Clear),
+        ]);
+        let evaluate = |paths: &BTreeMap<SmokeShotKey, SmokeVerdict>| {
+            evaluate_match(&events, &players, std::slice::from_ref(&round), 64., paths)
+        };
+        let excluded = evaluate(&paths);
+        let smoke = &excluded["a"][5];
+        assert_eq!(smoke.findings.len(), 1);
+        assert_eq!(smoke.findings[0].target_id, "behind");
+        assert_eq!(value(smoke, "smokeHits"), Some(1.));
+        assert_eq!(value(smoke, "estimatedSmokeHits"), Some(0.));
+        assert_eq!(value(smoke, "smokeShots"), Some(1.));
+        assert_eq!(value(smoke, "smokeHitRate"), Some(0.));
+        assert_eq!(value(smoke, "unclassifiedShots"), None);
+        assert_eq!(smoke.evaluated_samples, 1);
+        assert_eq!(value(&excluded["other"][5], "smokeHitRate"), None);
+
+        paths.insert(SmokeShotKey::new("a", 20, "xm1014"), SmokeVerdict::Crossing);
+        paths.remove(&SmokeShotKey::new("a", 40, "hkp2000"));
+        let sampled = evaluate(&paths);
+        let smoke = &sampled["a"][5];
+        assert_eq!(value(smoke, "smokeHits"), Some(1.));
+        assert_eq!(value(smoke, "estimatedSmokeHits"), Some(1.));
+        assert_eq!(value(smoke, "smokeShots"), Some(2.));
+        assert_eq!(value(smoke, "smokeHitRate"), Some(50.));
+        assert_eq!(smoke.evaluated_samples, 2);
+        assert_eq!(smoke.reason_code, "measuredBehavior");
+
+        paths.insert(
+            SmokeShotKey::new("other", 50, "ak47"),
+            SmokeVerdict::Crossing,
+        );
+        let zero_hits = evaluate(&paths);
+        assert_eq!(value(&zero_hits["other"][5], "smokeShots"), Some(1.));
+        assert_eq!(
+            value(&zero_hits["other"][5], "estimatedSmokeHits"),
+            Some(0.)
+        );
+        assert_eq!(value(&zero_hits["other"][5], "smokeHitRate"), Some(0.));
+        assert_eq!(zero_hits["other"][5].state, State::Passed);
+
+        paths.insert(SmokeShotKey::new("other", 50, "ak47"), SmokeVerdict::Clear);
+        let clear = evaluate(&paths);
+        assert_eq!(value(&clear["other"][5], "smokeShots"), Some(0.));
+        assert_eq!(value(&clear["other"][5], "smokeHitRate"), None);
+        assert_eq!(clear["other"][5].state, State::Unavailable);
+
+        paths.clear();
+        let evidence_only = evaluate(&paths);
+        assert_eq!(evidence_only["a"][5].state, State::Findings);
+        assert_eq!(value(&evidence_only["a"][5], "smokeHits"), Some(1.));
+        assert_eq!(
+            value(&evidence_only["a"][5], "estimatedSmokeHits"),
+            Some(0.)
+        );
+        assert_eq!(value(&evidence_only["a"][5], "smokeHitRate"), None);
+    }
+
     #[test]
     fn context_hits_deduplicate_shots_without_inventing_miss_denominators() {
         let round = RoundInfo {
@@ -430,7 +617,7 @@ mod tests {
         }
         // Duplicate impact/damage events and multiple victims must remain one shot.
         events.push(events[5].clone());
-        let mut checks = evaluate_match(&events, &["a".into()], &[round], 64.)
+        let mut checks = evaluate_match(&events, &["a".into()], &[round], 64., &BTreeMap::new())
             .remove("a")
             .unwrap();
         super::super::statistics::summarize(&mut checks);
@@ -445,15 +632,9 @@ mod tests {
                 .value,
             1.
         );
-        assert_eq!(
-            checks[5]
-                .summary
-                .iter()
-                .find(|m| m.name == "unclassifiedShots")
-                .unwrap()
-                .value,
-            4.
-        );
+        assert_eq!(value(&checks[5], "estimatedSmokeHits"), Some(0.));
+        assert_eq!(value(&checks[5], "smokeShots"), Some(0.));
+        assert_eq!(value(&checks[5], "unclassifiedShots"), None);
         assert_eq!(
             checks[6]
                 .summary
@@ -463,12 +644,60 @@ mod tests {
                 .value,
             3.
         );
+        assert_eq!(checks[5].reason_code, "noEligibleShots");
+        assert_eq!(checks[6].reason_code, "shotPathsMissing");
         for c in &checks[5..] {
-            assert_eq!(c.reason_code, "shotPathsMissing");
             assert!(!c
                 .summary
                 .iter()
                 .any(|m| m.unit == "%" || m.name.to_lowercase().contains("rate")));
+        }
+    }
+    #[test]
+    fn context_requires_damage_to_the_occluded_target() {
+        let round = RoundInfo {
+            round: 1,
+            start_tick: 0,
+            freeze_end_tick: 0,
+            end_tick: 100,
+            officially_ended_tick: 100,
+            winner: None,
+            reason: String::new(),
+            roster: BTreeMap::from([
+                ("a".into(), Team::Ct),
+                ("front".into(), Team::T),
+                ("behind".into(), Team::T),
+            ]),
+            bomb_planted_tick: None,
+            bomb_defused_tick: None,
+            bomb_defuser: None,
+            bomb_exploded_tick: None,
+        };
+        let mut events = vec![
+            json!({"event_name":"weapon_fire","tick":20,"user_steamid":"a","weapon":"ak47"}),
+            json!({"event_name":"player_hurt","tick":20,"attacker_steamid":"a","user_steamid":"front","weapon":"ak47","dmg_health":10}),
+            json!({"event_name":"player_bullet_hit","tick":20,"attacker_steamid":"a","user_steamid":"front","through_smoke":false,"penetration_count":0}),
+            json!({"event_name":"player_bullet_hit","tick":20,"attacker_steamid":"a","user_steamid":"behind","through_smoke":true,"penetration_count":1}),
+        ];
+        let evaluate = |events: &[Value]| {
+            evaluate_match(
+                events,
+                &["a".into()],
+                std::slice::from_ref(&round),
+                64.,
+                &BTreeMap::new(),
+            )
+            .remove("a")
+            .unwrap()
+        };
+        let checks = evaluate(&events);
+        assert!(checks[5].findings.is_empty() && checks[6].findings.is_empty());
+        events.push(json!({"event_name":"player_hurt","tick":20,"attacker_steamid":"a","user_steamid":"behind","weapon":"ak47","dmg_health":10}));
+        events.push(events[3].clone());
+        let checks = evaluate(&events);
+        for check in &checks[5..=6] {
+            assert_eq!(check.findings.len(), 1);
+            assert_eq!(check.findings[0].target_id, "behind");
         }
     }
     #[test]
@@ -510,24 +739,83 @@ mod tests {
         }
         // A large denominator is real evidence; tiny or mixed-weapon samples cannot borrow it.
         for count in [1, 100] {
-            let mut sample_round=round.clone();sample_round.end_tick=4000;
+            let mut sample_round = round.clone();
+            sample_round.end_tick = 4000;
             let sample_events:Vec<_>=(0..count).flat_map(|i| {
                 let tick=20+i*32;
                 [json!({"event_name":"weapon_fire","tick":tick,"user_steamid":"a","weapon":"ak47"}),
                  json!({"event_name":"player_hurt","tick":tick,"attacker_steamid":"a","user_steamid":"b","weapon":"ak47","dmg_health":10})]
             }).collect();
-            let sample=evaluate_match(&sample_events,&["a".into()],&[sample_round],64.);
-            assert_eq!(sample["a"][0].evaluated_samples,count as usize);
-            assert_eq!(sample["a"][0].findings.len(),if count==100 {100}else{0});
-            assert_eq!(sample["a"][1].findings.len(),if count==100 {100}else{0});
+            let sample = evaluate_match(
+                &sample_events,
+                &["a".into()],
+                &[sample_round],
+                64.,
+                &BTreeMap::new(),
+            );
+            assert_eq!(sample["a"][0].evaluated_samples, count as usize);
+            assert_eq!(
+                sample["a"][0].findings.len(),
+                if count == 100 { 100 } else { 0 }
+            );
+            assert_eq!(
+                sample["a"][1].findings.len(),
+                if count == 100 { 100 } else { 0 }
+            );
         }
         let mixed:Vec<_>=(0..10).flat_map(|i| {
             let tick=20+i*32;let weapon=if i==9 {"awp"} else {"ak47"};
             [json!({"event_name":"weapon_fire","tick":tick,"user_steamid":"a","weapon":weapon}),
              json!({"event_name":"player_hurt","tick":tick,"attacker_steamid":"a","user_steamid":"b","weapon":weapon,"dmg_health":10})]
         }).collect();
-        assert!(evaluate_match(&mixed,&["a".into()],&[round.clone()],64.)["a"][1].findings.is_empty());
-        let mut results = evaluate_match(&events, &["a".into(), "b".into()], &[round], 64.);
+        assert!(evaluate_match(
+            &mixed,
+            &["a".into()],
+            &[round.clone()],
+            64.,
+            &BTreeMap::new()
+        )["a"][1]
+            .findings
+            .is_empty());
+        let missed: Vec<_> = events
+            .iter()
+            .filter(|e| text(e, "event_name") != "player_hurt")
+            .cloned()
+            .collect();
+        let no_hits = evaluate_match(
+            &missed,
+            &["a".into()],
+            std::slice::from_ref(&round),
+            64.,
+            &BTreeMap::new(),
+        );
+        let flash = &no_hits["a"][4];
+        assert_eq!(flash.state, State::Passed);
+        assert_eq!(
+            flash
+                .summary
+                .iter()
+                .find(|m| m.name == "blindShots")
+                .unwrap()
+                .value,
+            2.
+        );
+        assert_eq!(
+            flash
+                .summary
+                .iter()
+                .find(|m| m.name == "blindHitRate")
+                .unwrap()
+                .value,
+            0.
+        );
+        let mut results = evaluate_match(
+            &events,
+            &["a".into(), "b".into()],
+            &[round],
+            64.,
+            &BTreeMap::new(),
+        );
         let mut checks = results.remove("a").unwrap();
         super::super::statistics::summarize(&mut checks);
         assert_eq!(

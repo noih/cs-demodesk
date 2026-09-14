@@ -1,5 +1,7 @@
 {
-  "errors": { "app-closed": "アプリの終了によりジョブが中断されました" },
+  "errors": {
+    "app-closed": "アプリの終了によりジョブが中断されました"
+  },
   "startup": {
     "title": "データフォルダーを利用できません",
     "hint": "別のフォルダーを選ぶか、既定のデータフォルダー に戻してください。アプリは再起動します。既存のデータは元の場所に残ります。",
@@ -92,7 +94,7 @@
     "reparse": "再解析",
     "parse": "解析",
     "parsing": "解析中…",
-    "clearAnalysis": "解析結果を削除",
+    "clearAnalysis": "すべての解析データを削除",
     "deleteDemo": "デモファイルを削除",
     "rounds_other": "{{count}} ラウンド",
     "tabs": {
@@ -105,7 +107,9 @@
     "activeJobs": "{{n}} 件実行中",
     "deleteTitle": "デモファイルを削除しますか？",
     "deleteBody": "<path/> と、このデモの解析データ、すべての書き出し動画および書き出し記録を削除します。元に戻せません。残したい動画は、続行する前にバックアップしてください。",
-    "deleteConfirm": "ファイルを削除"
+    "deleteConfirm": "ファイルを削除",
+    "deleteVideos": "動画を削除",
+    "deleteAnomaly": "異常データを削除"
   },
   "players": {
     "aim": "エイム",
@@ -271,7 +275,7 @@
     "visibleGame": "録画中は CS2 のゲーム画面を表示します。手動で終了しないでください。",
     "hiddenGame": "録画中の CS2 は非表示で動作します。手動で終了しないでください。",
     "submitting": "送信中…",
-    "resolutionLimit": "録画解像度はデバイスとゲームの対応上限に制限されます。"
+    "resolutionLimit": "解像度はデバイスとゲームの対応範囲に限られます"
   },
   "renders": {
     "overallProgress": "全体の進捗（推定）",
@@ -423,7 +427,7 @@
     "parsedDir": "解析データ",
     "clipsDir": "動画",
     "radarDir": "レーダー画像",
-    "clearParsedConfirm": "保存済みの解析データを削除します。エラーのないデモは自動で再解析されます。失敗したデモは手動で再試行してください。デモファイルと動画は保持されます。",
+    "clearParsedConfirm": "解析データ、異常データ、動画を削除し、デモファイルを保持します。エラーのないデモは自動で再解析されます。",
     "clearClipsConfirm": "書き出したすべての動画と記録を削除します。デモファイルと解析データは残ります。",
     "clearRadarConfirm": "次に 2D リプレイを開いたときにゲームファイルから再抽出します。",
     "clearParsedWhat": "解析データ",
@@ -510,7 +514,7 @@
     "progress": "ステップ {{step}} / {{total}}",
     "elapsed": "経過：{{seconds}} 秒",
     "details": "分析の詳細",
-    "start": "分析",
+    "start": "解析",
     "title": "試合の異常行動",
     "rescore": "再分析",
     "history": "分析履歴",
@@ -562,11 +566,12 @@
       "bhop-speed-retention": "初期加速を区別し、踏み切り速度を維持する連続ジャンプを観測します。",
       "shot-synchronous-view-turn": "射撃時に30度以上旋回し、次のtickでも30度以上旋回して元の方向の3度以内に戻る必要があります。",
       "fixed-view-air-strafe": "記録された視点が安定したまま、空中で水平方向の移動を左右交互に繰り返して加速します。",
-      "smoke-hit-rate": "確認された煙越しの命中を集計します。外れた射撃の経路が不完全なため、命中率は計算しません。",
-      "penetration-hit-rate": "確認された表面貫通の命中を集計します。外れた射撃の経路が不完全なため、命中率は計算しません。"
+      "smoke-hit-rate": "射撃方向からスモーク命中率を推定。HEによる影響や遮蔽が不確かな射撃は除外します。",
+      "penetration-hit-rate": "確認された表面貫通の命中を集計します。",
+      "time-to-damage": "demo の姿勢とインストール済みマップの衝突モデルから、前方の敵への遮蔽が初めてなくなってから最初の銃撃ダメージまでを推定。背後は除外し、tick 誤差を含みます。"
     },
     "reasons": {
-      "visibilityOnsetMissing": "敵の身体の一部が初めて実際に見えた時刻が不明なため、TTDは未計算です。",
+      "visibilityOnsetMissing": "測定可能な初回ダメージの交戦がありません。",
       "missing": "身体上の点の実測追跡データが不足しています。",
       "failed": "ルールを評価できませんでした。",
       "rapidAcquisition": "身体の固定位置への素早い照準移動。",
@@ -586,7 +591,8 @@
       "experimentalMeasurements": "確認用の行動観測です。",
       "shotViewMissing": "同じ生存期間かつ有効ラウンド内の連続した視点サンプルを持つ銃器射撃がありません。",
       "movementMissing": "必要な移動データが不足しています。",
-      "shotPathsMissing": "命中数は記録されていますが、外れた射撃の完全な経路が不足しているため、命中率はまだ計算できません。"
+      "shotPathsMissing": "命中数は記録されていますが、外れた射撃の完全な経路が不足しているため、命中率はまだ計算できません。",
+      "visibilityAssetsMissing": "マップの遮蔽データを読み込めません。"
     },
     "metrics": {
       "speed": "吸着時の移動速度",
@@ -638,8 +644,17 @@
       "maximumViewStep": "最大視点変化",
       "unmeasuredShots": "視点未計測の射撃数",
       "smokeHits": "煙越しの命中数",
+      "smokeShots": "推定対象の射撃数",
+      "smokeHitRate": "スモーク命中率（推定）",
       "penetrationHits": "貫通命中数",
-      "unclassifiedShots": "その他の射撃数"
+      "unclassifiedShots": "その他の射撃数",
+      "measuredTtdEncounters": "有効な TTD 交戦数",
+      "shortTtdEncounters": "TTD ≤150 ms",
+      "shortTtdPercent": "短い TTD の割合",
+      "medianTtdUpperMs": "TTD 上限の中央値",
+      "ttdLowerMs": "TTD 下限",
+      "ttdUpperMs": "TTD 上限",
+      "estimatedSmokeHits": "推定対象の命中数"
     },
     "sourceUnverified": "元デモは未確認です。保存済みの分析を表示しています。",
     "ruleCounts": "行動別の回数",
@@ -661,6 +676,15 @@
       "errors": "{{count}} 件失敗"
     },
     "detailsShort": "詳細",
-    "restart": "再分析"
+    "deleteData": "データを削除",
+    "restart": "再解析",
+    "previousPage": "前へ",
+    "nextPage": "次へ",
+    "ttdSamples": "TTD サンプル",
+    "units": {
+      "encounters": "回",
+      "percent": "%",
+      "shots": "発"
+    }
   }
 }

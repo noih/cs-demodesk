@@ -1,19 +1,24 @@
 //! Shared analysis data. Producers do not depend on scoring rules.
-pub mod model_hitboxes;
-pub mod event_context;
-pub mod animation_pose;
 pub mod animation_aim;
-pub mod native_body;
 pub mod animation_assets;
 pub mod animation_clip;
-pub mod kv3_text;
+pub mod animation_pose;
 pub mod animation_recipe;
-pub mod journal;
-pub mod compact;
+pub mod animation_rewind;
+pub mod ballistics;
 pub mod body_journal;
+pub mod collision;
+pub mod compact;
+pub mod event_context;
+pub mod journal;
+pub mod kv3_text;
+pub mod line_of_sight;
 pub mod measurements;
+pub mod model_hitboxes;
+pub mod native_body;
 pub mod scene;
-pub mod smoke;
+pub use crate::smoke;
+pub mod visibility_assets;
 
 use anyhow::{ensure, Context, Result};
 use prost::Message;

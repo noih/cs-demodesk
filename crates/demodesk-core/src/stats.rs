@@ -89,13 +89,35 @@ pub struct ParsedDemo {
 /// Team identity that survives the halftime swap: A = CT in round 1, B = T in round 1.
 pub fn team_of_player(demo: &DemoData) -> impl Fn(&str) -> TeamKey + '_ {
     let first = demo.rounds.first();
-    let first_ct: HashSet<String> = first.map(|r| r.roster.iter().filter(|(_, t)| **t == Team::Ct).map(|(id, _)| id.clone()).collect()).unwrap_or_default();
-    let first_t: HashSet<String> = first.map(|r| r.roster.iter().filter(|(_, t)| **t == Team::T).map(|(id, _)| id.clone()).collect()).unwrap_or_default();
+    let first_ct: HashSet<String> = first
+        .map(|r| {
+            r.roster
+                .iter()
+                .filter(|(_, t)| **t == Team::Ct)
+                .map(|(id, _)| id.clone())
+                .collect()
+        })
+        .unwrap_or_default();
+    let first_t: HashSet<String> = first
+        .map(|r| {
+            r.roster
+                .iter()
+                .filter(|(_, t)| **t == Team::T)
+                .map(|(id, _)| id.clone())
+                .collect()
+        })
+        .unwrap_or_default();
     move |sid: &str| {
         // not in the first round's roster: fall back to the side recorded at demo start (2 = T)
         if first_ct.contains(sid) {
             TeamKey::A
-        } else if first_t.contains(sid) || demo.info.players.iter().any(|p| p.steamid == sid && p.team_number == 2) {
+        } else if first_t.contains(sid)
+            || demo
+                .info
+                .players
+                .iter()
+                .any(|p| p.steamid == sid && p.team_number == 2)
+        {
             TeamKey::B
         } else {
             TeamKey::A
@@ -105,7 +127,12 @@ pub fn team_of_player(demo: &DemoData) -> impl Fn(&str) -> TeamKey + '_ {
 
 fn round_winner_key(r: &RoundInfo, team_of: &impl Fn(&str) -> TeamKey) -> Option<TeamKey> {
     let winner = r.winner?;
-    let votes: Vec<TeamKey> = r.roster.iter().filter(|(_, t)| **t == winner).map(|(id, _)| team_of(id)).collect();
+    let votes: Vec<TeamKey> = r
+        .roster
+        .iter()
+        .filter(|(_, t)| **t == winner)
+        .map(|(id, _)| team_of(id))
+        .collect();
     let a = votes.iter().filter(|v| **v == TeamKey::A).count();
     let b = votes.len() - a;
     Some(if a >= b { TeamKey::A } else { TeamKey::B })
@@ -131,24 +158,46 @@ pub fn round_summaries(demo: &DemoData) -> Vec<RoundSummary> {
         .iter()
         .map(|r| {
             let kills = per_round.get(&r.round).cloned().unwrap_or_default();
-            let mut players = demo.round_metrics.get(&r.round).cloned().unwrap_or_default();
+            let mut players = demo
+                .round_metrics
+                .get(&r.round)
+                .cloned()
+                .unwrap_or_default();
             let mut kills_a = 0;
             let mut kills_b = 0;
             for k in &kills {
                 players.entry(k.victim.steamid.clone()).or_default().deaths += 1;
                 let Some(a) = &k.attacker else { continue };
-                if a.steamid == k.victim.steamid || r.roster.get(&a.steamid).copied().unwrap_or(a.team) == r.roster.get(&k.victim.steamid).copied().unwrap_or(k.victim.team) {
+                if a.steamid == k.victim.steamid
+                    || r.roster.get(&a.steamid).copied().unwrap_or(a.team)
+                        == r.roster
+                            .get(&k.victim.steamid)
+                            .copied()
+                            .unwrap_or(k.victim.team)
+                {
                     continue;
                 }
                 let player = players.entry(a.steamid.clone()).or_default();
                 player.kills += 1;
-                if k.weapon == "awp" { player.awp += 1; }
+                if k.weapon == "awp" {
+                    player.awp += 1;
+                }
                 match team_of(&a.steamid) {
                     TeamKey::A => kills_a += 1,
                     TeamKey::B => kills_b += 1,
                 }
             }
-            RoundSummary { players, round: r.round, winner: round_winner_key(r, &team_of), reason: r.reason.clone(), start_tick: r.start_tick, end_tick: r.end_tick, kills_a, kills_b, bomb_planted: r.bomb_planted_tick.is_some() }
+            RoundSummary {
+                players,
+                round: r.round,
+                winner: round_winner_key(r, &team_of),
+                reason: r.reason.clone(),
+                start_tick: r.start_tick,
+                end_tick: r.end_tick,
+                kills_a,
+                kills_b,
+                bomb_planted: r.bomb_planted_tick.is_some(),
+            }
         })
         .collect()
 }
@@ -184,7 +233,10 @@ pub fn compute_stats(demo: &DemoData, highlights: &[Highlight]) -> Vec<PlayerSta
                 headshots: 0,
                 headshot_pct: 0,
                 kd: 0.0,
-                multi_kills: ["2k", "3k", "4k", "5k"].iter().map(|k| (k.to_string(), 0)).collect(),
+                multi_kills: ["2k", "3k", "4k", "5k"]
+                    .iter()
+                    .map(|k| (k.to_string(), 0))
+                    .collect(),
                 clutches_won: 0,
                 damage: demo.damage.get(&p.steamid).map(|d| d.total).unwrap_or(0),
                 utility_damage: demo.damage.get(&p.steamid).map(|d| d.utility).unwrap_or(0),
@@ -213,7 +265,11 @@ pub fn compute_stats(demo: &DemoData, highlights: &[Highlight]) -> Vec<PlayerSta
             }
             let Some(a) = &k.attacker else { continue };
             let attacker_team = round.roster.get(&a.steamid).copied().unwrap_or(a.team);
-            let victim_team = round.roster.get(&k.victim.steamid).copied().unwrap_or(k.victim.team);
+            let victim_team = round
+                .roster
+                .get(&k.victim.steamid)
+                .copied()
+                .unwrap_or(k.victim.team);
             if a.steamid == k.victim.steamid || attacker_team == victim_team {
                 continue;
             }
@@ -243,18 +299,43 @@ pub fn compute_stats(demo: &DemoData, highlights: &[Highlight]) -> Vec<PlayerSta
             }
         }
         // A traded death must be avenged by a teammate within five seconds in this round.
-        let enemy = |k: &&KillEvent| k.attacker.as_ref().is_some_and(|a| a.steamid != k.victim.steamid &&
-            round.roster.get(&a.steamid).copied().unwrap_or(a.team) != round.roster.get(&k.victim.steamid).copied().unwrap_or(k.victim.team));
+        let enemy = |k: &&KillEvent| {
+            k.attacker.as_ref().is_some_and(|a| {
+                a.steamid != k.victim.steamid
+                    && round.roster.get(&a.steamid).copied().unwrap_or(a.team)
+                        != round
+                            .roster
+                            .get(&k.victim.steamid)
+                            .copied()
+                            .unwrap_or(k.victim.team)
+            })
+        };
         let mut traded = HashSet::new();
         let mut trade_kill_ticks = HashSet::new();
         for (i, death) in kills.iter().enumerate().filter(|(_, k)| enemy(k)) {
             let killer = death.attacker.as_ref().expect("enemy kill has attacker");
-            if let Some((j, revenge)) = kills.iter().enumerate().skip(i + 1).find(|(_, k)| enemy(k) && k.victim.steamid == killer.steamid &&
-                (k.tick - death.tick) as f64 <= 5.0 * demo.info.tick_rate &&
-                k.attacker.as_ref().is_some_and(|a| round.roster.get(&a.steamid).copied().unwrap_or(a.team) == round.roster.get(&death.victim.steamid).copied().unwrap_or(death.victim.team))) {
+            if let Some((j, revenge)) = kills.iter().enumerate().skip(i + 1).find(|(_, k)| {
+                enemy(k)
+                    && k.victim.steamid == killer.steamid
+                    && (k.tick - death.tick) as f64 <= 5.0 * demo.info.tick_rate
+                    && k.attacker.as_ref().is_some_and(|a| {
+                        round.roster.get(&a.steamid).copied().unwrap_or(a.team)
+                            == round
+                                .roster
+                                .get(&death.victim.steamid)
+                                .copied()
+                                .unwrap_or(death.victim.team)
+                    })
+            }) {
                 traded.insert(death.victim.steamid.as_str());
                 if trade_kill_ticks.insert(j) {
-                    if let Some(s) = revenge.attacker.as_ref().and_then(|a| by_player.get_mut(&a.steamid)) { s.trade_kills += 1; }
+                    if let Some(s) = revenge
+                        .attacker
+                        .as_ref()
+                        .and_then(|a| by_player.get_mut(&a.steamid))
+                    {
+                        s.trade_kills += 1;
+                    }
                 }
             }
         }
@@ -264,13 +345,36 @@ pub fn compute_stats(demo: &DemoData, highlights: &[Highlight]) -> Vec<PlayerSta
                 let survived = !kills.iter().any(|k| k.victim.steamid == *id);
                 s.rounds_survived += u32::from(survived);
                 s.traded_deaths += u32::from(traded.contains(id.as_str()));
-                if survived || traded.contains(id.as_str()) || kills.iter().any(|k| (enemy(k) && k.attacker.as_ref().is_some_and(|a| a.steamid == *id)) || enemy_assister(k, round).is_some_and(|a| a.steamid == *id)) { s.kast += 1.0; }
+                if survived
+                    || traded.contains(id.as_str())
+                    || kills.iter().any(|k| {
+                        (enemy(k) && k.attacker.as_ref().is_some_and(|a| a.steamid == *id))
+                            || enemy_assister(k, round).is_some_and(|a| a.steamid == *id)
+                    })
+                {
+                    s.kast += 1.0;
+                }
             }
         }
         for c in find_clutches(round, &kills) {
             if let Some(s) = by_player.get_mut(&c.player) {
-                s.clutches.push(ClutchStats { round: round.round, side: c.team, versus: c.versus,
-                    kills: c.kills.len(), outcome: if c.won { "won" } else if !kills.iter().any(|k| k.tick <= round.end_tick && k.victim.steamid == c.player) { "saved" } else { "lost" }.into() });
+                s.clutches.push(ClutchStats {
+                    round: round.round,
+                    side: c.team,
+                    versus: c.versus,
+                    kills: c.kills.len(),
+                    outcome: if c.won {
+                        "won"
+                    } else if !kills
+                        .iter()
+                        .any(|k| k.tick <= round.end_tick && k.victim.steamid == c.player)
+                    {
+                        "saved"
+                    } else {
+                        "lost"
+                    }
+                    .into(),
+                });
             }
             if c.won {
                 if let Some(s) = by_player.get_mut(&c.player) {
@@ -288,10 +392,26 @@ pub fn compute_stats(demo: &DemoData, highlights: &[Highlight]) -> Vec<PlayerSta
     let mut out: Vec<PlayerStats> = by_player
         .into_values()
         .map(|mut s| {
-            s.kast = if s.rounds_played == 0 { 0.0 } else { (s.kast / s.rounds_played as f64 * 1000.0).round() / 10.0 };
-            s.headshot_pct = if s.kills > 0 { ((s.headshots as f64 / s.kills as f64) * 100.0).round() as u32 } else { 0 };
-            s.kd = if s.deaths > 0 { ((s.kills as f64 / s.deaths as f64) * 100.0).round() / 100.0 } else { s.kills as f64 };
-            s.adr = if demo.rounds.is_empty() { 0.0 } else { (s.damage as f64 / demo.rounds.len() as f64 * 10.0).round() / 10.0 };
+            s.kast = if s.rounds_played == 0 {
+                0.0
+            } else {
+                (s.kast / s.rounds_played as f64 * 1000.0).round() / 10.0
+            };
+            s.headshot_pct = if s.kills > 0 {
+                ((s.headshots as f64 / s.kills as f64) * 100.0).round() as u32
+            } else {
+                0
+            };
+            s.kd = if s.deaths > 0 {
+                ((s.kills as f64 / s.deaths as f64) * 100.0).round() / 100.0
+            } else {
+                s.kills as f64
+            };
+            s.adr = if demo.rounds.is_empty() {
+                0.0
+            } else {
+                (s.damage as f64 / demo.rounds.len() as f64 * 10.0).round() / 10.0
+            };
             s
         })
         .collect();
@@ -311,11 +431,28 @@ impl ParsedDemo {
 }
 
 pub fn build_parsed_demo(demo: DemoData) -> ParsedDemo {
-    let highlights = crate::detector::detect(&demo, &DetectOptions { min_score: 1.0, top_n: 200, ..Default::default() });
+    let highlights = crate::detector::detect(
+        &demo,
+        &DetectOptions {
+            min_score: 1.0,
+            top_n: 200,
+            ..Default::default()
+        },
+    );
     let stats = compute_stats(&demo, &highlights);
     let score = compute_score(&demo);
     let round_summaries = round_summaries(&demo);
-    ParsedDemo { recoil_reference: demo.recoil_reference, info: demo.info, rounds: demo.rounds, kills: demo.kills, highlights, stats, score, round_summaries, parsed_at: chrono::Utc::now().to_rfc3339() }
+    ParsedDemo {
+        recoil_reference: demo.recoil_reference,
+        info: demo.info,
+        rounds: demo.rounds,
+        kills: demo.kills,
+        highlights,
+        stats,
+        score,
+        round_summaries,
+        parsed_at: chrono::Utc::now().to_rfc3339(),
+    }
 }
 
 #[cfg(test)]
@@ -345,7 +482,8 @@ mod tests {
             "weapon":"ak47","headshot":false,"noscope":false,"penetrated":0,"thruSmoke":false,
             "attackerBlind":false,"attackerInAir":false,"assistedFlash":true,
             "distance":10,"hitgroup":"chest","isFreezePeriod":false
-        })).unwrap();
+        }))
+        .unwrap();
         let mut later = kill.clone();
         later.tick = 30;
         later.assisted_flash = false;
@@ -364,30 +502,69 @@ mod tests {
         second.assister = None;
         let mut outside = kill.clone();
         outside.tick = 301;
-        demo.kills = vec![later, friendly, world, frozen, outside, second, kill.clone()];
+        demo.kills = vec![
+            later,
+            friendly,
+            world,
+            frozen,
+            outside,
+            second,
+            kill.clone(),
+        ];
         let stats = compute_stats(&demo, &[]);
         let a = stats.iter().find(|s| s.steamid == "a").unwrap();
         let b = stats.iter().find(|s| s.steamid == "b").unwrap();
         let c = stats.iter().find(|s| s.steamid == "c").unwrap();
-        assert_eq!((a.opening_kills, c.opening_deaths, b.flash_assists), (2, 2, 1));
-        assert_eq!((b.opening_kills, b.opening_deaths, a.flash_assists), (0, 0, 0));
+        assert_eq!(
+            (a.opening_kills, c.opening_deaths, b.flash_assists),
+            (2, 2, 1)
+        );
+        assert_eq!(
+            (b.opening_kills, b.opening_deaths, a.flash_assists),
+            (0, 0, 0)
+        );
         assert_eq!((a.kills, b.assists), (3, 2));
         demo.rounds.truncate(1);
         demo.rounds[0].roster.clear();
         demo.kills = vec![kill.clone()];
         let stats = compute_stats(&demo, &[]);
-        assert_eq!(stats.iter().find(|s| s.steamid == "a").unwrap().opening_kills, 1);
+        assert_eq!(
+            stats
+                .iter()
+                .find(|s| s.steamid == "a")
+                .unwrap()
+                .opening_kills,
+            1
+        );
         let mut teamkill = kill.clone();
         teamkill.attacker.as_mut().unwrap().steamid = "c".into();
         teamkill.attacker.as_mut().unwrap().team = Team::T;
         demo.kills = vec![teamkill];
-        assert_eq!(compute_stats(&demo, &[]).iter().find(|s| s.steamid == "b").unwrap().assists, 1);
+        assert_eq!(
+            compute_stats(&demo, &[])
+                .iter()
+                .find(|s| s.steamid == "b")
+                .unwrap()
+                .assists,
+            1
+        );
         let mut friendly_assist = kill.clone();
         friendly_assist.assister.as_mut().unwrap().steamid = "c".into();
         friendly_assist.assister.as_mut().unwrap().team = Team::T;
         demo.kills = vec![friendly_assist];
-        assert_eq!(compute_stats(&demo, &[]).iter().find(|s| s.steamid == "c").unwrap().assists, 0);
-        demo.rounds[0].roster = BTreeMap::from([("a".into(),Team::Ct),("b".into(),Team::Ct),("c".into(),Team::T)]);
+        assert_eq!(
+            compute_stats(&demo, &[])
+                .iter()
+                .find(|s| s.steamid == "c")
+                .unwrap()
+                .assists,
+            0
+        );
+        demo.rounds[0].roster = BTreeMap::from([
+            ("a".into(), Team::Ct),
+            ("b".into(), Team::Ct),
+            ("c".into(), Team::T),
+        ]);
         demo.rounds[0].end_tick = 1000;
         demo.rounds[0].officially_ended_tick = 1000;
         let mut death = kill.clone();
@@ -404,7 +581,10 @@ mod tests {
         let stats = compute_stats(&demo, &[]);
         let a = stats.iter().find(|s| s.steamid == "a").unwrap();
         assert_eq!((a.kast, a.traded_deaths), (100.0, 1));
-        assert_eq!(stats.iter().find(|s| s.steamid == "b").unwrap().trade_kills, 1);
+        assert_eq!(
+            stats.iter().find(|s| s.steamid == "b").unwrap().trade_kills,
+            1
+        );
         demo.kills[1].tick += 1;
         let stats = compute_stats(&demo, &[]);
         let a = stats.iter().find(|s| s.steamid == "a").unwrap();
@@ -423,6 +603,13 @@ pub struct ClutchStats {
 }
 
 fn enemy_assister<'a>(kill: &'a KillEvent, round: &RoundInfo) -> Option<&'a Assister> {
-    kill.assister.as_ref().filter(|a| a.steamid != kill.victim.steamid &&
-        round.roster.get(&a.steamid).copied().unwrap_or(a.team) != round.roster.get(&kill.victim.steamid).copied().unwrap_or(kill.victim.team))
+    kill.assister.as_ref().filter(|a| {
+        a.steamid != kill.victim.steamid
+            && round.roster.get(&a.steamid).copied().unwrap_or(a.team)
+                != round
+                    .roster
+                    .get(&kill.victim.steamid)
+                    .copied()
+                    .unwrap_or(kill.victim.team)
+    })
 }

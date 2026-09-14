@@ -48,7 +48,11 @@ pub fn kills_by_round(demo: &DemoData) -> HashMap<i32, Vec<&KillEvent>> {
         if kill.is_freeze_period {
             continue;
         }
-        if let Some(round) = demo.rounds.iter().find(|r| kill.tick >= r.start_tick && kill.tick <= r.officially_ended_tick) {
+        if let Some(round) = demo
+            .rounds
+            .iter()
+            .find(|r| kill.tick >= r.start_tick && kill.tick <= r.officially_ended_tick)
+        {
             out.entry(round.round).or_default().push(kill);
         }
     }
@@ -79,13 +83,20 @@ pub fn find_clutches(round: &RoundInfo, kills: &[&KillEvent]) -> Vec<ClutchSitua
     if alive[&Team::Ct].is_empty() || alive[&Team::T].is_empty() {
         return vec![];
     }
-    let mut sorted: Vec<&KillEvent> = kills.iter().copied().filter(|k| k.tick <= round.end_tick).collect();
+    let mut sorted: Vec<&KillEvent> = kills
+        .iter()
+        .copied()
+        .filter(|k| k.tick <= round.end_tick)
+        .collect();
     sorted.sort_by_key(|k| k.tick);
 
     let mut found: Vec<ClutchSituation> = vec![];
     for kill in &sorted {
         if let Some(team) = round.roster.get(&kill.victim.steamid) {
-            alive.get_mut(team).unwrap().remove(kill.victim.steamid.as_str());
+            alive
+                .get_mut(team)
+                .unwrap()
+                .remove(kill.victim.steamid.as_str());
         }
         for team in [Team::Ct, Team::T] {
             let enemies = alive[&team.enemy()].len();
@@ -108,7 +119,10 @@ pub fn find_clutches(round: &RoundInfo, kills: &[&KillEvent]) -> Vec<ClutchSitua
         s.kills = sorted
             .iter()
             .filter(|k| {
-                k.attacker.as_ref().map(|a| a.steamid == s.player).unwrap_or(false)
+                k.attacker
+                    .as_ref()
+                    .map(|a| a.steamid == s.player)
+                    .unwrap_or(false)
                     && k.tick >= s.start_tick
                     && round.roster.get(&k.victim.steamid) == Some(&s.team.enemy())
             })
@@ -122,7 +136,10 @@ pub fn find_clutches(round: &RoundInfo, kills: &[&KillEvent]) -> Vec<ClutchSitua
 pub fn enemies_alive_at(round: &RoundInfo, kills: &[&KillEvent], team: Team, tick: i32) -> usize {
     let enemy = team.enemy();
     let total = round.roster.values().filter(|t| **t == enemy).count();
-    let dead = kills.iter().filter(|k| k.tick <= tick && round.roster.get(&k.victim.steamid) == Some(&enemy)).count();
+    let dead = kills
+        .iter()
+        .filter(|k| k.tick <= tick && round.roster.get(&k.victim.steamid) == Some(&enemy))
+        .count();
     total.saturating_sub(dead)
 }
 
@@ -136,7 +153,13 @@ struct Moment<'a> {
     is_match_point: bool,
 }
 
-fn push_moment<'a>(moments: &mut Vec<Moment<'a>>, current: &mut Vec<KillEvent>, attacker: &str, round: &'a RoundInfo, match_point: bool) {
+fn push_moment<'a>(
+    moments: &mut Vec<Moment<'a>>,
+    current: &mut Vec<KillEvent>,
+    attacker: &str,
+    round: &'a RoundInfo,
+    match_point: bool,
+) {
     if current.is_empty() {
         return;
     }
@@ -163,7 +186,11 @@ fn score_multikill(m: &Moment, tick_rate: f64, tags: &mut Vec<String>) -> f64 {
     if n < 2 {
         return 0.0;
     }
-    let tag = if n == 5 { "ace".to_string() } else { format!("{n}k") };
+    let tag = if n == 5 {
+        "ace".to_string()
+    } else {
+        format!("{n}k")
+    };
     add_tag(tags, &tag);
     let mut score = Score::MULTIKILL[n];
     let span = (m.kills[m.kills.len() - 1].tick - m.kills[0].tick) as f64 / tick_rate;
@@ -268,7 +295,10 @@ fn is_match_point(demo: &DemoData, round: &RoundInfo) -> bool {
 
 fn describe(m: &Moment, tags: &[String]) -> String {
     let mut parts: Vec<String> = vec![];
-    if let Some(kt) = tags.iter().find(|t| *t == "ace" || (t.len() == 2 && t.ends_with('k'))) {
+    if let Some(kt) = tags
+        .iter()
+        .find(|t| *t == "ace" || (t.len() == 2 && t.ends_with('k')))
+    {
         parts.push(kt.to_uppercase());
     } else if m.kills.len() == 1 {
         parts.push("1k".into());
@@ -277,7 +307,13 @@ fn describe(m: &Moment, tags: &[String]) -> String {
     let extras: Vec<&str> = tags
         .iter()
         .map(|s| s.as_str())
-        .filter(|t| !((t.len() == 2 && t.ends_with('k')) || matches!(*t, "ace" | "fast" | "headshot" | "pistol-round" | "match-point")))
+        .filter(|t| {
+            !((t.len() == 2 && t.ends_with('k'))
+                || matches!(
+                    *t,
+                    "ace" | "fast" | "headshot" | "pistol-round" | "match-point"
+                ))
+        })
         .collect();
     let mut detail: Vec<String> = vec![];
     if hs > 0 {
@@ -288,7 +324,11 @@ fn describe(m: &Moment, tags: &[String]) -> String {
         parts.push(format!("({})", detail.join(", ")));
     }
     if let Some(c) = &m.clutch {
-        parts.push(format!("1v{}{}", c.versus, if c.won { " won" } else { " lost" }));
+        parts.push(format!(
+            "1v{}{}",
+            c.versus,
+            if c.won { " won" } else { " lost" }
+        ));
     }
     format!("{} — {} · R{}", m.name, parts.join(" "), m.round.round)
 }
@@ -299,7 +339,14 @@ pub fn detect(demo: &DemoData, opts: &DetectOptions) -> Vec<Highlight> {
     let lead_in = seconds_to_ticks(opts.lead_in_seconds, tick_rate);
     let lead_out = seconds_to_ticks(opts.lead_out_seconds, tick_rate);
     let player_filter: HashSet<&str> = opts.players.iter().map(|s| s.as_str()).collect();
-    let name_of = |sid: &str| demo.info.players.iter().find(|p| p.steamid == sid).map(|p| p.name.clone()).unwrap_or_else(|| sid.to_string());
+    let name_of = |sid: &str| {
+        demo.info
+            .players
+            .iter()
+            .find(|p| p.steamid == sid)
+            .map(|p| p.name.clone())
+            .unwrap_or_else(|| sid.to_string())
+    };
 
     let per_round = kills_by_round(demo);
     let mut highlights: Vec<Highlight> = vec![];
@@ -313,7 +360,11 @@ pub fn detect(demo: &DemoData, opts: &DetectOptions) -> Vec<Highlight> {
         for k in &kills {
             let Some(a) = &k.attacker else { continue };
             let attacker_team = round.roster.get(&a.steamid).copied().unwrap_or(a.team);
-            let victim_team = round.roster.get(&k.victim.steamid).copied().unwrap_or(k.victim.team);
+            let victim_team = round
+                .roster
+                .get(&k.victim.steamid)
+                .copied()
+                .unwrap_or(k.victim.team);
             if attacker_team == victim_team {
                 continue;
             }
@@ -340,11 +391,17 @@ pub fn detect(demo: &DemoData, opts: &DetectOptions) -> Vec<Highlight> {
             let involved: Vec<usize> = moments
                 .iter()
                 .enumerate()
-                .filter(|(_, m)| m.steamid == situation.player && m.kills.iter().any(|k| k.tick >= situation.start_tick))
+                .filter(|(_, m)| {
+                    m.steamid == situation.player
+                        && m.kills.iter().any(|k| k.tick >= situation.start_tick)
+                })
                 .map(|(i, _)| i)
                 .collect();
             if let Some(&target) = involved.first() {
-                let mut merged: Vec<KillEvent> = involved.iter().flat_map(|&i| moments[i].kills.clone()).collect();
+                let mut merged: Vec<KillEvent> = involved
+                    .iter()
+                    .flat_map(|&i| moments[i].kills.clone())
+                    .collect();
                 merged.sort_by_key(|k| k.tick);
                 moments[target].kills = merged;
                 moments[target].clutch = Some(situation);
@@ -365,7 +422,8 @@ pub fn detect(demo: &DemoData, opts: &DetectOptions) -> Vec<Highlight> {
         }
 
         // 3. Ninja defuse: bomb defused while at least one T is still alive.
-        if let (Some(defused_tick), Some(defuser)) = (round.bomb_defused_tick, &round.bomb_defuser) {
+        if let (Some(defused_tick), Some(defuser)) = (round.bomb_defused_tick, &round.bomb_defuser)
+        {
             if enemies_alive_at(round, &kills, Team::Ct, defused_tick) >= 1 {
                 if let Some(m) = moments.iter_mut().rev().find(|m| &m.steamid == defuser) {
                     m.ninja_defuse = true;
@@ -419,13 +477,29 @@ pub fn detect(demo: &DemoData, opts: &DetectOptions) -> Vec<Highlight> {
             if score < opts.min_score {
                 continue;
             }
-            let first_tick = m.kills.first().map(|k| k.tick).or(m.clutch.as_ref().map(|c| c.start_tick)).unwrap_or(round.freeze_end_tick);
-            let last_tick = m.kills.last().map(|k| k.tick).unwrap_or(if m.clutch.is_some() { round.end_tick } else { first_tick });
+            let first_tick = m
+                .kills
+                .first()
+                .map(|k| k.tick)
+                .or(m.clutch.as_ref().map(|c| c.start_tick))
+                .unwrap_or(round.freeze_end_tick);
+            let last_tick = m
+                .kills
+                .last()
+                .map(|k| k.tick)
+                .unwrap_or(if m.clutch.is_some() {
+                    round.end_tick
+                } else {
+                    first_tick
+                });
             let start_tick = (first_tick - lead_in).max(round.freeze_end_tick);
             let end_tick = (last_tick + lead_out).min(round.officially_ended_tick);
             highlights.push(Highlight {
                 id: format!("r{}-{}-{}", round.round, m.steamid, first_tick),
-                player: HighlightPlayer { steamid: m.steamid.clone(), name: m.name.clone() },
+                player: HighlightPlayer {
+                    steamid: m.steamid.clone(),
+                    name: m.name.clone(),
+                },
                 round: round.round,
                 start_tick,
                 end_tick,
@@ -439,7 +513,11 @@ pub fn detect(demo: &DemoData, opts: &DetectOptions) -> Vec<Highlight> {
         }
     }
 
-    highlights.sort_by(|a, b| b.score.total_cmp(&a.score).then(a.start_tick.cmp(&b.start_tick)));
+    highlights.sort_by(|a, b| {
+        b.score
+            .total_cmp(&a.score)
+            .then(a.start_tick.cmp(&b.start_tick))
+    });
     highlights.truncate(opts.top_n);
     highlights
 }
@@ -489,8 +567,19 @@ mod tests {
         KillEvent {
             tick,
             round: 0,
-            attacker: Some(Attacker { steamid: attacker.into(), name: attacker.into(), team: team(attacker), health: 100, weapon_name: "AK-47".into() }),
-            victim: Victim { steamid: victim.into(), name: victim.into(), team: team(victim), weapon_name: "M4A1".into() },
+            attacker: Some(Attacker {
+                steamid: attacker.into(),
+                name: attacker.into(),
+                team: team(attacker),
+                health: 100,
+                weapon_name: "AK-47".into(),
+            }),
+            victim: Victim {
+                steamid: victim.into(),
+                name: victim.into(),
+                team: team(victim),
+                weapon_name: "M4A1".into(),
+            },
             assister: None,
             weapon: "ak47".into(),
             headshot: false,
@@ -507,19 +596,56 @@ mod tests {
     }
 
     fn demo(rounds: Vec<RoundInfo>, kills: Vec<KillEvent>) -> DemoData {
-        let players = CT.iter().chain(TS.iter()).map(|id| PlayerInfo { name: id.to_string(), steamid: id.to_string(), team_number: if id.starts_with("ct") { 3 } else { 2 }, user_id: None }).collect();
-        DemoData { round_metrics: Default::default(), info: DemoInfo { path: "x.dem".into(), map_name: "de_test".into(), server_name: String::new(), tick_rate: TR, players }, kills, rounds, activity: Default::default(), aim: Default::default(), recoil: Default::default(), recoil_reference: Default::default(), damage: Default::default() }
+        let players = CT
+            .iter()
+            .chain(TS.iter())
+            .map(|id| PlayerInfo {
+                name: id.to_string(),
+                steamid: id.to_string(),
+                team_number: if id.starts_with("ct") { 3 } else { 2 },
+                user_id: None,
+            })
+            .collect();
+        DemoData {
+            round_metrics: Default::default(),
+            info: DemoInfo {
+                path: "x.dem".into(),
+                map_name: "de_test".into(),
+                server_name: String::new(),
+                tick_rate: TR,
+                players,
+            },
+            kills,
+            rounds,
+            activity: Default::default(),
+            aim: Default::default(),
+            recoil: Default::default(),
+            recoil_reference: Default::default(),
+            damage: Default::default(),
+        }
     }
 
     fn opts(min_score: f64) -> DetectOptions {
-        DetectOptions { min_score, ..Default::default() }
+        DetectOptions {
+            min_score,
+            ..Default::default()
+        }
     }
 
     #[test]
     fn splits_clusters_by_gap_and_ignores_team_kills() {
         let r = round(2, Team::Ct);
         let f = r.freeze_end_tick;
-        let d = demo(vec![r], vec![kill(f + 100, "ct1", "t1"), kill(f + 200, "ct1", "t2"), kill(f + 200 + 30 * 64, "ct1", "t3"), kill(f + 200 + 31 * 64, "ct1", "t4"), kill(f + 300, "ct2", "ct3")]);
+        let d = demo(
+            vec![r],
+            vec![
+                kill(f + 100, "ct1", "t1"),
+                kill(f + 200, "ct1", "t2"),
+                kill(f + 200 + 30 * 64, "ct1", "t3"),
+                kill(f + 200 + 31 * 64, "ct1", "t4"),
+                kill(f + 300, "ct2", "ct3"),
+            ],
+        );
         let hl = detect(&d, &opts(0.0));
         let ct1: Vec<_> = hl.iter().filter(|h| h.player.steamid == "ct1").collect();
         assert_eq!(ct1.len(), 2);
@@ -531,12 +657,25 @@ mod tests {
     fn ace_beats_3k_and_fast_tag() {
         let r = round(2, Team::Ct);
         let t0 = r.freeze_end_tick + 500;
-        let mut kills: Vec<KillEvent> = TS.iter().enumerate().map(|(i, v)| kill(t0 + i as i32 * 32, "ct1", v)).collect();
-        kills.extend(["t1", "t2", "t3"].iter().enumerate().map(|(i, v)| kill(t0 + 3000 + i as i32 * 640, "ct2", v)));
+        let mut kills: Vec<KillEvent> = TS
+            .iter()
+            .enumerate()
+            .map(|(i, v)| kill(t0 + i as i32 * 32, "ct1", v))
+            .collect();
+        kills.extend(
+            ["t1", "t2", "t3"]
+                .iter()
+                .enumerate()
+                .map(|(i, v)| kill(t0 + 3000 + i as i32 * 640, "ct2", v)),
+        );
         let hl = detect(&demo(vec![r], kills), &opts(0.0));
         assert_eq!(hl[0].player.steamid, "ct1");
-        assert!(hl[0].tags.contains(&"ace".to_string()) && hl[0].tags.contains(&"fast".to_string()));
-        assert!(hl[1].tags.contains(&"3k".to_string()) && !hl[1].tags.contains(&"fast".to_string()));
+        assert!(
+            hl[0].tags.contains(&"ace".to_string()) && hl[0].tags.contains(&"fast".to_string())
+        );
+        assert!(
+            hl[1].tags.contains(&"3k".to_string()) && !hl[1].tags.contains(&"fast".to_string())
+        );
         assert!(hl[0].score > hl[1].score);
     }
 
@@ -550,7 +689,20 @@ mod tests {
         awp.headshot = true;
         let mut ak = kill(r2.freeze_end_tick + 100, "ct2", "t2");
         ak.noscope = true;
-        let hl = detect(&demo(vec![r1.clone(), r2.clone()], vec![awp, ak, kill(r1.freeze_end_tick + 100, "ct3", "t3"), kill(r1.freeze_end_tick + 132, "ct3", "t4"), kill(r2.freeze_end_tick + 100, "ct4", "t3"), kill(r2.freeze_end_tick + 132, "ct4", "t4")]), &opts(0.0));
+        let hl = detect(
+            &demo(
+                vec![r1.clone(), r2.clone()],
+                vec![
+                    awp,
+                    ak,
+                    kill(r1.freeze_end_tick + 100, "ct3", "t3"),
+                    kill(r1.freeze_end_tick + 132, "ct3", "t4"),
+                    kill(r2.freeze_end_tick + 100, "ct4", "t3"),
+                    kill(r2.freeze_end_tick + 132, "ct4", "t4"),
+                ],
+            ),
+            &opts(0.0),
+        );
         let find = |id: &str| hl.iter().find(|h| h.player.steamid == id).unwrap();
         assert!(find("ct1").tags.contains(&"noscope".to_string()));
         assert!(!find("ct2").tags.contains(&"noscope".to_string()));
@@ -574,12 +726,17 @@ mod tests {
             kill(b + 800 + 40 * 64, "ct1", "t5"),
         ];
         let refs: Vec<&KillEvent> = kills.iter().collect();
-        let s = find_clutches(&r, &refs).into_iter().find(|s| s.player == "ct1").unwrap();
+        let s = find_clutches(&r, &refs)
+            .into_iter()
+            .find(|s| s.player == "ct1")
+            .unwrap();
         assert_eq!((s.versus, s.won, s.kills.len()), (5, true, 5));
         let hl = detect(&demo(vec![r], kills), &opts(0.0));
         let ct1: Vec<_> = hl.iter().filter(|h| h.player.steamid == "ct1").collect();
         assert_eq!(ct1.len(), 1);
-        assert!(ct1[0].tags.contains(&"ace".to_string()) && ct1[0].tags.contains(&"clutch".to_string()));
+        assert!(
+            ct1[0].tags.contains(&"ace".to_string()) && ct1[0].tags.contains(&"clutch".to_string())
+        );
         assert_eq!(ct1[0].kills.len(), 5);
     }
 
@@ -590,31 +747,88 @@ mod tests {
         r.bomb_defused_tick = Some(1700);
         r.bomb_defuser = Some("ct1".into());
         let b = r.freeze_end_tick;
-        let kills: Vec<KillEvent> = ["ct2", "ct3", "ct4", "ct5"].iter().map(|v| kill(b + 100, "t1", v)).collect();
+        let kills: Vec<KillEvent> = ["ct2", "ct3", "ct4", "ct5"]
+            .iter()
+            .map(|v| kill(b + 100, "t1", v))
+            .collect();
         let hl = detect(&demo(vec![r], kills), &opts(0.0));
         let ct1 = hl.iter().find(|h| h.player.steamid == "ct1").unwrap();
-        assert!(ct1.tags.contains(&"clutch".to_string()) && ct1.tags.contains(&"ninja-defuse".to_string()));
+        assert!(
+            ct1.tags.contains(&"clutch".to_string())
+                && ct1.tags.contains(&"ninja-defuse".to_string())
+        );
         assert!(ct1.kills.is_empty());
 
         let r = round(3, Team::T);
         let b = r.freeze_end_tick;
-        let mut kills: Vec<KillEvent> = ["ct2", "ct3", "ct4", "ct5"].iter().map(|v| kill(b + 100, "t1", v)).collect();
-        kills.extend([kill(b + 200, "ct1", "t1"), kill(b + 300, "ct1", "t2"), kill(b + 400, "t3", "ct1")]);
+        let mut kills: Vec<KillEvent> = ["ct2", "ct3", "ct4", "ct5"]
+            .iter()
+            .map(|v| kill(b + 100, "t1", v))
+            .collect();
+        kills.extend([
+            kill(b + 200, "ct1", "t1"),
+            kill(b + 300, "ct1", "t2"),
+            kill(b + 400, "t3", "ct1"),
+        ]);
         let hl = detect(&demo(vec![r], kills), &opts(0.0));
         let ct1 = hl.iter().find(|h| h.player.steamid == "ct1").unwrap();
-        assert!(ct1.tags.contains(&"clutch-attempt".to_string()) && !ct1.tags.contains(&"clutch".to_string()));
+        assert!(
+            ct1.tags.contains(&"clutch-attempt".to_string())
+                && !ct1.tags.contains(&"clutch".to_string())
+        );
     }
 
     #[test]
     fn options_filter_top_and_padding() {
         let r = round(2, Team::Ct);
         let b = r.freeze_end_tick;
-        let d = demo(vec![r], vec![kill(b + 1000, "ct1", "t1"), kill(b + 1032, "ct1", "t2"), kill(b + 2000, "ct2", "t3"), kill(b + 2032, "ct2", "t4")]);
-        let only = detect(&d, &DetectOptions { players: vec!["ct2".into()], min_score: 0.0, ..Default::default() });
-        assert_eq!(only.iter().map(|h| h.player.steamid.as_str()).collect::<Vec<_>>(), vec!["ct2"]);
-        assert_eq!(detect(&d, &DetectOptions { top_n: 1, min_score: 0.0, ..Default::default() }).len(), 1);
+        let d = demo(
+            vec![r],
+            vec![
+                kill(b + 1000, "ct1", "t1"),
+                kill(b + 1032, "ct1", "t2"),
+                kill(b + 2000, "ct2", "t3"),
+                kill(b + 2032, "ct2", "t4"),
+            ],
+        );
+        let only = detect(
+            &d,
+            &DetectOptions {
+                players: vec!["ct2".into()],
+                min_score: 0.0,
+                ..Default::default()
+            },
+        );
+        assert_eq!(
+            only.iter()
+                .map(|h| h.player.steamid.as_str())
+                .collect::<Vec<_>>(),
+            vec!["ct2"]
+        );
+        assert_eq!(
+            detect(
+                &d,
+                &DetectOptions {
+                    top_n: 1,
+                    min_score: 0.0,
+                    ..Default::default()
+                }
+            )
+            .len(),
+            1
+        );
         assert!(detect(&d, &opts(999.0)).is_empty());
-        let h = &detect(&d, &DetectOptions { players: vec!["ct1".into()], min_score: 0.0, ..Default::default() })[0];
-        assert_eq!((h.start_tick, h.end_tick, h.anchor_tick), (b + 1000 - 5 * 64, b + 1032 + 3 * 64, b + 1000));
+        let h = &detect(
+            &d,
+            &DetectOptions {
+                players: vec!["ct1".into()],
+                min_score: 0.0,
+                ..Default::default()
+            },
+        )[0];
+        assert_eq!(
+            (h.start_tick, h.end_tick, h.anchor_tick),
+            (b + 1000 - 5 * 64, b + 1032 + 3 * 64, b + 1000)
+        );
     }
 }

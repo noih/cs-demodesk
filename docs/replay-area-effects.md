@@ -15,23 +15,20 @@ boundary**. The old 150-unit circle is only used for older replay schemas.
 `cargo run -p demodesk-core --example effect_props -- <demo>` inspects the
 networked fields and sampled entity data without modifying the source demo.
 
-## Smoke: unresolved visible-volume reconstruction
+## Smoke
 
-Observed demos contain `m_VoxelFrameData`, `m_nVoxelFrameDataSize`, and detonation-origin fields. Their presence does not mean the
-rendered cloud can be recovered with the current parser.
+Replay schema 6 uses the shared `smoke` module's reconstructed density instead
+of a fixed circle when coverage is available. `ShotCoverage` supplies analysis
+queries; `projection::Coverage` supplies top-down coverage independently of the
+CS2 wire adapter in `source`.
 
-The [cs2parser format investigation](https://github.com/osztenkurden/cs2parser/blob/master/src/helpers/smokeVoxel.ts)
-decodes journal occupancy as **seed voxels**. Density/state and the client's
-subsequent volume growth are not fully decoded. Drawing the seed set as the full
-smoke would misrepresent visibility. No external implementation was copied.
+The adapter streams journal changes without retaining pose history. Projection
+samples every 8 ticks and stores only changed snapshots, with horizontal runs
+of 20-unit cells and 16 density levels. Seeking uses a binary lookup. `null`
+means unavailable and retains the circle fallback; `[]` means no smoke.
 
-For now smoke retains the existing 144-unit radius approximation. It cannot be
-used to determine whether a player can see through a gap. Calibrating a larger
-approximate footprint requires matching in-game views; replacing it with exact
-geometry requires the remaining volume-growth/density decoding. No arbitrary
-radius increase has been applied.
-
-Sources:
-- [Recorded CInferno fields](https://docs.cssharp.dev/api/CounterStrikeSharp.API.Core.CInferno.html)
-- [Game convars, including flame spacing](https://cs2.poggu.me/dumped-data/convar-list/)
-- [Valve: smoke expands to fill spaces](https://www.counter-strike.net/cs2)
+Coverage is a top-down estimate, not POV visibility. HE disturbances reuse the
+shared spatial falloff with approximate proximity registration; scene occlusion
+and client rendering can differ. Shot traces remain visible, but unverified
+bullet endpoints are not used to carve smoke openings. The projection interface
+accepts qualified bullet effects when available.

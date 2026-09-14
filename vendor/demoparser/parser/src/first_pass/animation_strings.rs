@@ -157,8 +157,12 @@ impl AnimationTable {
 impl AnimationStrings {
     /// Baselines decoded from the current wire table, including keyless updates.
     pub fn instance_baseline(&self, class_id: u32) -> Option<&[u8]> {
-        self.tables.iter().find(|table| table.name == "instancebaseline")?
-            .entries.values().find(|(key, _)| key.parse::<u32>().ok() == Some(class_id))
+        self.tables
+            .iter()
+            .find(|table| table.name == "instancebaseline")?
+            .entries
+            .values()
+            .find(|(key, _)| key.parse::<u32>().ok() == Some(class_id))
             .map(|(_, bytes)| bytes.as_slice())
     }
     pub fn create(&mut self, message: &CsvcMsgCreateStringTable) -> Result<(), DemoParserError> {
@@ -258,29 +262,41 @@ mod tests {
     #[test]
     fn instance_baselines_follow_wire_slots_and_keyless_updates() {
         let mut tables = AnimationStrings::default();
-        tables.create(&CsvcMsgCreateStringTable {
-            name: Some("unrelated".into()), ..Default::default()
-        }).unwrap();
-        tables.create(&CsvcMsgCreateStringTable {
-            name: Some("instancebaseline".into()), num_entries: Some(1),
-            string_data: Some(update(None, Some("19"), &[1, 2, 3]).into()),
-            ..Default::default()
-        }).unwrap();
+        tables
+            .create(&CsvcMsgCreateStringTable {
+                name: Some("unrelated".into()),
+                ..Default::default()
+            })
+            .unwrap();
+        tables
+            .create(&CsvcMsgCreateStringTable {
+                name: Some("instancebaseline".into()),
+                num_entries: Some(1),
+                string_data: Some(update(None, Some("19"), &[1, 2, 3]).into()),
+                ..Default::default()
+            })
+            .unwrap();
         assert_eq!(tables.instance_baseline(19), Some(&[1, 2, 3][..]));
         for bytes in [vec![4, 5], vec![6]] {
-            tables.update(&CsvcMsgUpdateStringTable {
-                table_id: Some(1), num_changed_entries: Some(1),
-                string_data: Some(update(None, None, &bytes).into()),
-                ..Default::default()
-            }).unwrap();
+            tables
+                .update(&CsvcMsgUpdateStringTable {
+                    table_id: Some(1),
+                    num_changed_entries: Some(1),
+                    string_data: Some(update(None, None, &bytes).into()),
+                    ..Default::default()
+                })
+                .unwrap();
             assert_eq!(tables.instance_baseline(19), Some(bytes.as_slice()));
             assert_eq!(tables.tables.len(), 2);
         }
-        tables.update(&CsvcMsgUpdateStringTable {
-            table_id: Some(1), num_changed_entries: Some(1),
-            string_data: Some(update(Some(0), Some("188"), &[9]).into()),
-            ..Default::default()
-        }).unwrap();
+        tables
+            .update(&CsvcMsgUpdateStringTable {
+                table_id: Some(1),
+                num_changed_entries: Some(1),
+                string_data: Some(update(Some(0), Some("188"), &[9]).into()),
+                ..Default::default()
+            })
+            .unwrap();
         assert_eq!(tables.instance_baseline(19), Some(&[6][..]));
         assert_eq!(tables.instance_baseline(188), Some(&[9][..]));
         tables.snapshot(&CDemoStringTables::default());

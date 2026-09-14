@@ -173,3 +173,24 @@ test('CAS preserves flat colors and alpha while increasing a soft edge contrast'
   assert.deepEqual(sharpenCas(transparent,2,1),transparent,'Hidden RGB cannot contaminate a visible border');
   assert.throws(()=>sharpenCas(flat,1,1));
 });
+
+test('smoke coverage seeks independently and distinguishes unavailable from empty', () => {
+  const r = replay([frame(100),frame(140)], []);
+  const cells = [[0,20,30,3,15]];
+  r.data.smoke = [{t:100,cells},{t:108,cells:[]},{t:120,cells:null}];
+  assert.deepEqual(r.stateAt(104).smokeCells,cells);
+  assert.deepEqual(r.stateAt(110).smokeCells,[]);
+  assert.equal(r.stateAt(125).smokeCells,undefined);
+  assert.deepEqual(r.stateAt(100).smokeCells,cells);
+});
+
+test('smoke runs draw density coverage instead of a circle and retain empty gaps', () => {
+  const calls=[];
+  const ctx=new Proxy({}, {get(target,key) {return key in target?target[key]:(...args)=>calls.push({key,args});}});
+  const map={posX:0,posY:0,scale:1,layers:[{altitudeMin:-100,altitudeMax:100}]};
+  const state={tick:1,players:[],grenades:[],shots:[],deaths:[],smokeCells:[[100,100,0,2,15],[180,100,0,1,5]],effects:[{kind:'smoke',x:100,y:100,z:0,start:0,end:10}]};
+  draw(ctx,500,500,map,[{width:2048,height:2048}],state,DEFAULT_TOGGLES,{zoom:1,panX:0,panY:0});
+  assert.equal(calls.filter(c=>c.key==='arc').length,0);
+  assert.equal(calls.filter(c=>c.key==='fillRect').length,2);
+  assert.equal(ctx.globalAlpha,1);
+});

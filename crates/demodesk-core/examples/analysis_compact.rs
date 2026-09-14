@@ -22,7 +22,9 @@ fn main() -> Result<()> {
                 clock.update(&frame.net_tick.to_le_bytes());
                 for id in frame.changed {
                     let f = &frame.fields[*id as usize];
-                    if !compact::retains_field(f) { continue; }
+                    if !compact::retains_field(f) {
+                        continue;
+                    }
                     if let Some(array) = f
                         .name
                         .strip_prefix("pose-array/")
@@ -159,17 +161,26 @@ fn main() -> Result<()> {
             |frame| {
                 for id in frame.changed {
                     let field = &frame.fields[*id as usize];
-                    if field.class != "AnimationContext" { continue; }
+                    if field.class != "AnimationContext" {
+                        continue;
+                    }
                     if let Some(value) = frame.values.get(id) {
                         context.insert(field.name.clone(), value.clone());
-                    } else { context.remove(&field.name); }
+                    } else {
+                        context.remove(&field.name);
+                    }
                 }
                 Ok(())
             },
             |_| Ok(()),
         )?;
-        let context_digest = sha1_smol::Sha1::from(serde_json::to_vec(&context)?).digest().to_string();
-        println!("{}", serde_json::json!({"summary":summary,"contextFields":context.len(),"contextDigest":context_digest}));
+        let context_digest = sha1_smol::Sha1::from(serde_json::to_vec(&context)?)
+            .digest()
+            .to_string();
+        println!(
+            "{}",
+            serde_json::json!({"summary":summary,"contextFields":context.len(),"contextDigest":context_digest})
+        );
         return Ok(());
     }
     let started = Instant::now();

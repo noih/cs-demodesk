@@ -190,6 +190,7 @@ struct Entity {
     body_fields: HashMap<String, String>,
     pose_version: Option<String>,
     pose_slot: Option<String>,
+    simulation_time: Option<String>,
     dynamic: Option<String>,
     model: Option<String>,
     eye_offsets: [Option<String>; 3],
@@ -199,6 +200,9 @@ struct Entity {
 }
 impl Entity {
     fn remember_field(&mut self, name: &str) {
+        if name.starts_with("pose/rawNetworkTime/CCSPlayerPawn.m_flSimulationTime/") {
+            self.simulation_time = Some(name.into());
+        }
         if name.ends_with(".m_hModel") {
             self.model = Some(name.into());
         }
@@ -285,6 +289,13 @@ impl Entity {
         } else {
             self.number(&format!("CCSPlayerPawn.CBodyComponentBaseAnimGraph.{name}"))
         }
+    }
+    fn simulation_tick(&self) -> Option<i32> {
+        let bytes = self.alias(&self.simulation_time)?;
+        if bytes.len() != 5 || bytes[0] != 1 {
+            return None;
+        }
+        i32::try_from(u32::from_le_bytes(bytes[1..].try_into().ok()?)).ok()
     }
     fn pose_number(&self, name: &str) -> Option<u32> {
         let field = match name {
@@ -480,6 +491,9 @@ pub struct Movement {
 }
 #[derive(Clone)]
 pub struct PlayerFrame {
+    /// Native simulation-time wire integer; rewind records use this same tick.
+    /// Packet/pose phase eligibility still has to be established by the caller.
+    pub simulation_tick: Option<i32>,
     pub movement: Option<Movement>,
     pub player_id: String,
     pub identity: String,
@@ -488,6 +502,11 @@ pub struct PlayerFrame {
     pub eye: Option<[f64; 3]>,
     pub view: Option<[f64; 2]>,
     pub points: Vec<Option<[f64; 3]>>,
+    pub capsules: Vec<super::line_of_sight::Capsule>,
+    /// Capsule ordinal indexes this immutable model/set's native-order hitbox metadata.
+    pub hitbox_set: Option<(u64, u32)>,
+    /// Per-hitbox world transforms retained for server rewind interpolation.
+    pub hitbox_transforms: Vec<Transform>,
 }
 #[derive(Default, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -610,14 +629,124 @@ pub fn visit(
     visit_when(path, prepared, skeleton, |_| true, consume)
 }
 
-/// Apply every source update; reconstruct poses only in the caller's shared measurement scope.
-/// Excluded packets still reach consumers with an empty frame to break temporal continuity.
+#[derive(Default)]
+pub struct SceneOcclusion {
+    /// Shared pre-smoke-system snapshot; only the CPU query API consumes it.
+    pub cpu_smoke: super::smoke::timeline::Timeline,
+    pub smoke_bounds: BTreeMap<i64, Option<super::line_of_sight::Bounds>>,
+    pub uncertain: Vec<super::line_of_sight::Bounds>,
+    pub unbounded: bool,
+}
+fn dynamic_occluder(class: &str) -> bool {
+    [
+        "Door",
+        "Breakable",
+        "DynamicProp",
+        "PhysicsProp",
+        "PhysProp",
+        "FuncBrush",
+        "MovingToggle",
+    ]
+    .iter()
+    .any(|kind| class.contains(kind))
+}
+fn scene_occlusion(entities: &BTreeMap<(i32, u32), Entity>) -> SceneOcclusion {
+    let mut scene = SceneOcclusion::default();
+    for entity in entities
+        .values()
+        .filter(|e| dynamic_occluder(&e.class) && e.get("$present").is_some())
+    {
+        let field = |suffix: &str| -> Option<&str> {
+            let mut values = entity.fields.keys().filter(|name| name.ends_with(suffix));
+            let first = values.next()?;
+            if values.next().is_some() {
+                None
+            } else {
+                Some(first.as_str())
+            }
+        };
+        if field(".m_nSolidType").and_then(|key| entity.number(key)) == Some(0.) {
+            continue;
+        }
+        let bounds = (|| -> Option<super::line_of_sight::Bounds> {
+            let model = field(".m_hModel")?;
+            let prefix = model.strip_suffix("m_hModel")?;
+            let mut origin = [0.; 3];
+            for (i, axis) in ["X", "Y", "Z"].iter().enumerate() {
+                origin[i] = entity.number(&format!("{prefix}m_cell{axis}"))? * 512. - 16384.
+                    + entity.number(&format!("{prefix}m_vec{axis}"))?;
+            }
+            let min = entity.vector(field(".m_vecMins")?)?;
+            let max = entity.vector(field(".m_vecMaxs")?)?;
+            let scale = entity.number(&format!("{prefix}m_flScale"))?;
+            if !scale.is_finite()
+                || scale <= 0.
+                || !(0..3).all(|i| min[i].is_finite() && max[i].is_finite() && min[i] <= max[i])
+            {
+                return None;
+            }
+            let radius = (0..3)
+                .map(|i| f64::from(min[i].abs().max(max[i].abs())).powi(2))
+                .sum::<f64>()
+                .sqrt()
+                * scale;
+            if !radius.is_finite() || radius <= 0. || !origin.iter().all(|n| n.is_finite()) {
+                return None;
+            }
+            Some(super::line_of_sight::Bounds {
+                min: origin.map(|v| v - radius),
+                max: origin.map(|v| v + radius),
+            })
+        })();
+        if let Some(bounds) = bounds {
+            scene.uncertain.push(bounds);
+        } else {
+            scene.unbounded = true;
+        }
+    }
+    for ((id, _), entity) in entities
+        .iter()
+        .filter(|(_, e)| e.class == "CSmokeGrenadeProjectile" && e.get("$present").is_some())
+    {
+        let bounds = (entity.number("m_bDidSmokeEffect") == Some(1.))
+            .then(|| {
+                entity
+                    .vector("m_vSmokeDetonationPos")
+                    .and_then(super::smoke::bounds)
+            })
+            .flatten();
+        scene
+            .smoke_bounds
+            .entry(i64::from(*id))
+            .and_modify(|b| *b = None)
+            .or_insert(bounds);
+    }
+    scene
+}
 pub fn visit_when(
     path: &Path,
     prepared: &Prepared,
     skeleton: &super::animation_pose::Skeleton,
-    mut should_measure: impl FnMut(i32) -> bool,
+    should_measure: impl FnMut(i32) -> bool,
     mut consume: impl FnMut(i32, &[PlayerFrame]) -> Result<()>,
+) -> Result<Coverage> {
+    visit_scene(
+        path,
+        prepared,
+        skeleton,
+        should_measure,
+        |tick, players, _| consume(tick, players),
+    )
+}
+
+/// Apply every source update; reconstruct poses only in the caller's shared measurement scope.
+/// Excluded packets still reach consumers with an empty frame to break temporal continuity.
+pub fn visit_scene(
+    path: &Path,
+    prepared: &Prepared,
+    skeleton: &super::animation_pose::Skeleton,
+    mut should_measure: impl FnMut(i32) -> bool,
+    mut consume: impl FnMut(i32, &[PlayerFrame], &SceneOcclusion) -> Result<()>,
 ) -> Result<Coverage> {
     let mut entities: BTreeMap<(i32, u32), Entity> = BTreeMap::new();
     let mut context = RecordedContext::default();
@@ -626,15 +755,53 @@ pub fn visit_when(
     let mut asset_context = vec![];
     let mut task_names: Vec<String> = vec![];
     let mut graphs: Vec<(u64, usize)> = vec![];
-    let body_points: Vec<_> = prepared.point_names.iter().map(|name| is_body_attached_point(name)).collect();
+    let body_points: Vec<_> = prepared
+        .point_names
+        .iter()
+        .map(|name| is_body_attached_point(name))
+        .collect();
     let mut coverage = Coverage::default();
     let mut last_tick = None;
+    let mut scene = SceneOcclusion::default();
+    let mut scene_dirty = true;
     compact::visit(
         reader(path)?,
         |frame| {
+            scene.cpu_smoke.begin_packet(&frame);
             let mut context_changed = false;
             for id in frame.changed {
                 let field = &frame.fields[*id as usize];
+                let smoke_changed = field.class == "CSmokeGrenadeProjectile"
+                    && matches!(
+                        field.name.as_str(),
+                        "$present" | "m_bDidSmokeEffect" | "m_vSmokeDetonationPos"
+                    );
+                if smoke_changed {
+                    scene_dirty = true;
+                }
+                if field.class != "CCSPlayerPawn"
+                    && field.class != "AnimationContext"
+                    && dynamic_occluder(&field.class)
+                    && matches!(
+                        field.name.rsplit('.').next(),
+                        Some(
+                            "$present"
+                                | "m_hModel"
+                                | "m_nSolidType"
+                                | "m_vecMins"
+                                | "m_vecMaxs"
+                                | "m_flScale"
+                                | "m_cellX"
+                                | "m_cellY"
+                                | "m_cellZ"
+                                | "m_vecX"
+                                | "m_vecY"
+                                | "m_vecZ"
+                        )
+                    )
+                {
+                    scene_dirty = true;
+                }
                 if field.class == "AnimationContext" {
                     context_changed = true;
                     if let Some(value) = frame.values.get(id) {
@@ -646,6 +813,8 @@ pub fn visit_when(
                 }
                 if field.class != "CCSPlayerPawn"
                     && field.class != "CCSPlayerController"
+                    && !dynamic_occluder(&field.class)
+                    && !smoke_changed
                     && field.name != "$present"
                     && !field.name.ends_with(".m_hModel")
                 {
@@ -679,13 +848,15 @@ pub fn visit_when(
                     .collect::<Result<_>>()?;
             }
             if last_tick == Some(frame.tick) {
+                scene.cpu_smoke.update(&frame, |_, _| Ok(()))?;
                 return Ok(());
             }
             last_tick = Some(frame.tick);
             // Entity values and animation dictionaries above must advance during freeze too.
             if !should_measure(frame.tick) {
                 coverage.skipped_nonlive_packets += 1;
-                consume(frame.tick, &[])?;
+                consume(frame.tick, &[], &SceneOcclusion::default())?;
+                scene.cpu_smoke.update(&frame, |_, _| Ok(()))?;
                 return Ok(());
             }
             let skeleton_context = asset_context
@@ -697,9 +868,11 @@ pub fn visit_when(
                 if pawn.class != "CCSPlayerPawn" || pawn.get("$present").is_none() {
                     continue;
                 }
-                if pawn.number("CCSPlayerPawn.m_lifeState") != Some(0.)
-                    || pawn.number("CCSPlayerPawn.m_iHealth").unwrap_or(0.) <= 0.
-                {
+                let alive = pawn.number("CCSPlayerPawn.m_lifeState") == Some(0.)
+                    && pawn
+                        .number("CCSPlayerPawn.m_iHealth")
+                        .is_some_and(|h| h > 0.);
+                if !alive {
                     continue;
                 }
                 let controller = pawn
@@ -742,6 +915,9 @@ pub fn visit_when(
                     }
                     Some(point)
                 });
+                let mut capsules = vec![];
+                let mut hitbox_transforms = vec![];
+                let mut hitbox_set = None;
                 let result = (|| -> Result<Vec<Option<[f64; 3]>>> {
                     let graph_handle = pawn
                         .get("CCSPlayerPawn.CBodyComponentBaseAnimGraph.m_hGraphDefinitionAG2")
@@ -840,30 +1016,39 @@ pub fn visit_when(
                         })
                         .collect();
                     points.resize(prepared.point_names.len(), None);
-                    let hitboxes = (|| -> Result<(u64, u64)> {
-                        let bytes = pawn
-                            .alias(&pawn.model)
-                            .context("missing pawn hitbox model")?;
-                        ensure!(
-                            bytes.len() == 9 && bytes[0] == 4,
-                            "invalid pawn hitbox model"
-                        );
-                        let model = u64::from_le_bytes(bytes[1..].try_into()?);
-                        let set = pawn
-                            .body_number("m_nHitboxSet")
-                            .context("missing pawn hitbox set")?;
-                        ensure!(
-                            set >= 0.0 && set <= u32::MAX as f64 && set.fract() == 0.0,
-                            "invalid pawn hitbox set"
-                        );
-                        prepared.hitbox_points.sample(
-                            model,
-                            set as u32,
-                            &pose.model,
-                            root,
-                            &mut points,
-                        )
-                    })();
+                    let hitboxes =
+                        (|| -> Result<(u64, u64)> {
+                            let bytes = pawn
+                                .alias(&pawn.model)
+                                .context("missing pawn hitbox model")?;
+                            ensure!(
+                                bytes.len() == 9 && bytes[0] == 4,
+                                "invalid pawn hitbox model"
+                            );
+                            let model = u64::from_le_bytes(bytes[1..].try_into()?);
+                            let set = pawn
+                                .body_number("m_nHitboxSet")
+                                .context("missing pawn hitbox set")?;
+                            ensure!(
+                                set >= 0.0 && set <= u32::MAX as f64 && set.fract() == 0.0,
+                                "invalid pawn hitbox set"
+                            );
+                            if let Ok((measured, transforms)) = prepared
+                                .hitbox_points
+                                .posed_capsules(model, set as u32, &pose.model, root)
+                            {
+                                capsules = measured;
+                                hitbox_transforms = transforms;
+                                hitbox_set = Some((model, set as u32));
+                            }
+                            prepared.hitbox_points.sample(
+                                model,
+                                set as u32,
+                                &pose.model,
+                                root,
+                                &mut points,
+                            )
+                        })();
                     match hitboxes {
                         Ok((measured, missing)) => {
                             coverage.hitbox_center_points += measured;
@@ -903,7 +1088,8 @@ pub fn visit_when(
                         vec![]
                     }
                 };
-                players.push(PlayerFrame {
+                let player = PlayerFrame {
+                    simulation_tick: pawn.simulation_tick(),
                     movement: pawn.movement(frame.net_tick),
                     player_id,
                     identity: format!("{entity_id}:{serial}:{team}"),
@@ -912,9 +1098,21 @@ pub fn visit_when(
                     eye,
                     view,
                     points,
-                });
+                    capsules,
+                    hitbox_set,
+                    hitbox_transforms,
+                };
+                players.push(player);
             }
-            consume(frame.tick, &players)?;
+            if scene_dirty {
+                let cpu_smoke = std::mem::take(&mut scene.cpu_smoke);
+                scene = scene_occlusion(&entities);
+                scene.cpu_smoke = cpu_smoke;
+                scene_dirty = false;
+            }
+            consume(frame.tick, &players, &scene)?;
+            // Server weapon simulation precedes the shared smoke-system journal step.
+            scene.cpu_smoke.update(&frame, |_, _| Ok(()))?;
             Ok(())
         },
         |_| Ok(()),
@@ -924,34 +1122,111 @@ pub fn visit_when(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn rewind_tick_uses_raw_simulation_time_and_respects_removal() {
+        let mut entity = Entity::default();
+        let key = "pose/rawNetworkTime/CCSPlayerPawn.m_flSimulationTime/[1]";
+        entity.update(
+            "CCSPlayerPawn.m_flSimulationTime",
+            Some(&vec![3, 0, 0, 0, 0]),
+        );
+        assert_eq!(entity.simulation_tick(), None);
+        let mut raw = vec![1];
+        raw.extend(103_520_u32.to_le_bytes());
+        entity.update(key, Some(&raw));
+        assert_eq!(entity.simulation_tick(), Some(103_520));
+        entity.update(key, None);
+        assert_eq!(entity.simulation_tick(), None);
+        raw[1..].copy_from_slice(&u32::MAX.to_le_bytes());
+        entity.update(key, Some(&raw));
+        assert_eq!(entity.simulation_tick(), None);
+    }
+
+    #[test]
+    fn smoke_bounds_require_recorded_initialization_and_follow_entity_removal() {
+        let mut entity = Entity {
+            class: "CSmokeGrenadeProjectile".into(),
+            ..Default::default()
+        };
+        entity.update("$present", Some(&vec![0, 1]));
+        let mut position = vec![7];
+        for value in [-1473.8789_f32, 754.08203, -45.96875] {
+            position.extend(value.to_le_bytes());
+        }
+        entity.update("m_vSmokeDetonationPos", Some(&position));
+        let mut entities = BTreeMap::from([((7, 1), entity)]);
+        assert!(scene_occlusion(&entities).smoke_bounds[&7].is_none());
+        entities
+            .get_mut(&(7, 1))
+            .unwrap()
+            .update("m_bDidSmokeEffect", Some(&vec![0, 1]));
+        let scene = scene_occlusion(&entities);
+        let bounds = scene.smoke_bounds[&7].as_ref().unwrap();
+        assert!(bounds.intersects([-1473., 754., -46.], [-1470., 754., -46.]));
+        assert!(!bounds.intersects([0.; 3], [10., 0., 0.]));
+        entities
+            .get_mut(&(7, 1))
+            .unwrap()
+            .update("m_vSmokeDetonationPos", None);
+        assert!(scene_occlusion(&entities).smoke_bounds[&7].is_none());
+        entities.get_mut(&(7, 1)).unwrap().update("$present", None);
+        assert!(scene_occlusion(&entities).smoke_bounds.is_empty());
+    }
     use super::*;
     #[test]
     fn movement_requires_signed_clock_and_qualified_velocity_without_filling_missing_values() {
         use parser::second_pass::variants::Variant;
-        let mut entity=Entity::default();
-        let mut put=|name:&str,value:Variant| {entity.update(name,Some(&compact::value(&value).unwrap()));};
-        for axis in ["X","Y","Z"] {
-            put(&format!("CCSPlayerPawn.CBodyComponentBaseAnimGraph.m_cell{axis}"),Variant::U32(32));
-            put(&format!("CCSPlayerPawn.CBodyComponentBaseAnimGraph.m_vec{axis}"),Variant::F32(0.0));
+        let mut entity = Entity::default();
+        let mut put = |name: &str, value: Variant| {
+            entity.update(name, Some(&compact::value(&value).unwrap()));
+        };
+        for axis in ["X", "Y", "Z"] {
+            put(
+                &format!("CCSPlayerPawn.CBodyComponentBaseAnimGraph.m_cell{axis}"),
+                Variant::U32(32),
+            );
+            put(
+                &format!("CCSPlayerPawn.CBodyComponentBaseAnimGraph.m_vec{axis}"),
+                Variant::F32(0.0),
+            );
         }
-        put("pose/CCSPlayerPawn.m_fFlags/[6]",Variant::U32(65664));
-        let jump="pose/CCSPlayerPawn.CCSPlayer_MovementServices.m_nLastJumpTick/[1,34]";
-        put(jump,Variant::I32(3634));
-        put("pose/CCSPlayerPawn.CCSPlayer_MovementServices.m_flLastJumpFrac/[1,35]",Variant::F32(0.171875));
-        for (axis,value) in [("X",10.0),("Y",-20.0),("Z",288.515625)] {
-            put(&format!("pose/CCSPlayerPawn.m_vecVelocity.m_vec{axis}/[77]"),Variant::F32(value));
+        put("pose/CCSPlayerPawn.m_fFlags/[6]", Variant::U32(65664));
+        let jump = "pose/CCSPlayerPawn.CCSPlayer_MovementServices.m_nLastJumpTick/[1,34]";
+        put(jump, Variant::I32(3634));
+        put(
+            "pose/CCSPlayerPawn.CCSPlayer_MovementServices.m_flLastJumpFrac/[1,35]",
+            Variant::F32(0.171875),
+        );
+        for (axis, value) in [("X", 10.0), ("Y", -20.0), ("Z", 288.515625)] {
+            put(
+                &format!("pose/CCSPlayerPawn.m_vecVelocity.m_vec{axis}/[77]"),
+                Variant::F32(value),
+            );
         }
-        put("pose/CCSPlayerPawn.m_MoveType/[80]",Variant::U64(2));
-        put("pose/CCSPlayerPawn.m_flWaterLevel/[81]",Variant::F32(0.0));
-        put("pose/CCSPlayerPawn.CCSPlayer_MovementServices.m_nLadderSurfacePropIndex/[1,50]",Variant::I32(-1));
-        let m=entity.movement(3635).unwrap();
-        assert_eq!(m.last_jump_tick,3634);assert_eq!(m.network_tick,3635);assert_eq!(m.last_jump_fraction,0.171875);
-        assert_eq!(m.velocity,[10.0,-20.0,288.515625]);assert_eq!(m.move_type,Some(2));assert_eq!(m.ladder_surface,Some(-1));
-        entity.update(jump,Some(&compact::value(&Variant::U32(7268)).unwrap()));
-        assert!(entity.movement(3635).is_none(),"old unsigned clock must not be guessed");
-        entity.update(jump,Some(&compact::value(&Variant::I32(3634)).unwrap()));
-        entity.update("pose/CCSPlayerPawn.m_vecVelocity.m_vecZ/[77]",None);
-        assert!(entity.movement(3635).is_none(),"missing velocity is not zero");
+        put("pose/CCSPlayerPawn.m_MoveType/[80]", Variant::U64(2));
+        put("pose/CCSPlayerPawn.m_flWaterLevel/[81]", Variant::F32(0.0));
+        put(
+            "pose/CCSPlayerPawn.CCSPlayer_MovementServices.m_nLadderSurfacePropIndex/[1,50]",
+            Variant::I32(-1),
+        );
+        let m = entity.movement(3635).unwrap();
+        assert_eq!(m.last_jump_tick, 3634);
+        assert_eq!(m.network_tick, 3635);
+        assert_eq!(m.last_jump_fraction, 0.171875);
+        assert_eq!(m.velocity, [10.0, -20.0, 288.515625]);
+        assert_eq!(m.move_type, Some(2));
+        assert_eq!(m.ladder_surface, Some(-1));
+        entity.update(jump, Some(&compact::value(&Variant::U32(7268)).unwrap()));
+        assert!(
+            entity.movement(3635).is_none(),
+            "old unsigned clock must not be guessed"
+        );
+        entity.update(jump, Some(&compact::value(&Variant::I32(3634)).unwrap()));
+        entity.update("pose/CCSPlayerPawn.m_vecVelocity.m_vecZ/[77]", None);
+        assert!(
+            entity.movement(3635).is_none(),
+            "missing velocity is not zero"
+        );
     }
     #[test]
     fn indexed_aliases_track_updates_removal_and_exact_eye_owner() {

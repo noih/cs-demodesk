@@ -30,15 +30,27 @@ impl AimRule {
     }
     fn reason(self) -> &'static str {
         match self {
-            Self::Snap => "Instant acquisition followed by a sustained hold on an enemy body point.",
-            Self::Linear => "Rapid straight acquisition followed by a sustained hold on an enemy body point.",
+            Self::Snap => {
+                "Instant acquisition followed by a sustained hold on an enemy body point."
+            }
+            Self::Linear => {
+                "Rapid straight acquisition followed by a sustained hold on an enemy body point."
+            }
             Self::Tracking => "Sustained tracking of a fixed body point.",
         }
     }
     fn accepts(self, e: &crosshair_lock::Evidence, p: &crosshair_lock::Parameters) -> bool {
         match self {
-            Self::Snap => e.rapid_acquisition && e.acquisition_speed >= p.snap_speed && e.follow_seconds >= p.min_follow_seconds,
-            Self::Linear => e.rapid_acquisition && e.acquisition_speed < p.snap_speed && e.follow_seconds >= p.min_follow_seconds,
+            Self::Snap => {
+                e.rapid_acquisition
+                    && e.acquisition_speed >= p.snap_speed
+                    && e.follow_seconds >= p.min_follow_seconds
+            }
+            Self::Linear => {
+                e.rapid_acquisition
+                    && e.acquisition_speed < p.snap_speed
+                    && e.follow_seconds >= p.min_follow_seconds
+            }
             Self::Tracking => e.sustained_follow,
         }
     }
@@ -88,7 +100,12 @@ fn project(outcome: Option<Result<&crosshair_lock::Report, &str>>, rule: AimRule
     let mut check = Check {
         definition: Definition {
             id: rule.id().into(),
-            version: if matches!(rule, AimRule::Tracking) { "experimental-1" } else { "experimental-2" }.into(),
+            version: if matches!(rule, AimRule::Tracking) {
+                "experimental-1"
+            } else {
+                "experimental-2"
+            }
+            .into(),
             name: rule.name().into(),
             description: rule.reason().into(),
             category: "aim-assistance".into(),
@@ -329,28 +346,49 @@ mod split_tests {
     #[test]
     fn linear_requires_a_continuous_body_hold_even_when_obstructed() {
         let approach = [(-20., 0.), (-15., 0.), (-10., 0.), (-5., 0.)];
-        for tail in [vec![(0., 0.), (5., 0.), (10., 0.)], vec![(0., 0.); 10], vec![(2., 0.); 20]] {
+        for tail in [
+            vec![(0., 0.), (5., 0.), (10., 0.)],
+            vec![(0., 0.); 10],
+            vec![(2., 0.); 20],
+        ] {
             let r = report(approach.into_iter().chain(tail).collect());
             assert!(project(Some(Ok(&r)), AimRule::Linear).findings.is_empty());
         }
         // Consecutive intervals cannot be joined across a release from the body point.
-        let tail = [(0., 0.); 6].into_iter().chain([(1., 0.)]).chain([(0., 0.); 6]);
+        let tail = [(0., 0.); 6]
+            .into_iter()
+            .chain([(1., 0.)])
+            .chain([(0., 0.); 6]);
         let r = report(approach.into_iter().chain(tail).collect());
         assert!(project(Some(Ok(&r)), AimRule::Linear).findings.is_empty());
         let mut r = report(approach.into_iter().chain([(0., 0.); 11]).collect());
-        for obstruction in [crosshair_lock::Obstruction::Visible, crosshair_lock::Obstruction::Wall,
-            crosshair_lock::Obstruction::Smoke, crosshair_lock::Obstruction::Blind, crosshair_lock::Obstruction::Unknown] {
-            for evidence in &mut r.evidence { evidence.obstruction = obstruction; }
+        for obstruction in [
+            crosshair_lock::Obstruction::Visible,
+            crosshair_lock::Obstruction::Wall,
+            crosshair_lock::Obstruction::Smoke,
+            crosshair_lock::Obstruction::Blind,
+            crosshair_lock::Obstruction::Unknown,
+        ] {
+            for evidence in &mut r.evidence {
+                evidence.obstruction = obstruction;
+            }
             let check = project(Some(Ok(&r)), AimRule::Linear);
             assert_eq!(check.findings.len(), 1);
-            assert!(check.findings[0].measurements.iter().any(|m| m.name == "duration" && m.value >= 0.15));
+            assert!(check.findings[0]
+                .measurements
+                .iter()
+                .any(|m| m.name == "duration" && m.value >= 0.15));
         }
     }
 
     #[test]
     fn linear_acquisition_is_exclusive_and_tracking_can_stand_alone() {
-        let r = report([(-20., 0.), (-15., 0.), (-10., 0.), (-5., 0.)]
-            .into_iter().chain(std::iter::repeat_n((0., 0.), 12)).collect());
+        let r = report(
+            [(-20., 0.), (-15., 0.), (-10., 0.), (-5., 0.)]
+                .into_iter()
+                .chain(std::iter::repeat_n((0., 0.), 12))
+                .collect(),
+        );
         assert_eq!(project(Some(Ok(&r)), AimRule::Linear).findings.len(), 1);
         assert!(project(Some(Ok(&r)), AimRule::Snap).findings.is_empty());
         assert!(project(Some(Ok(&r)), AimRule::Tracking).findings.is_empty());

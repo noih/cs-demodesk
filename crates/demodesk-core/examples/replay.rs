@@ -11,8 +11,15 @@ fn main() {
     let parser = DemoParser::new();
     let bytes = std::fs::read(&path).expect("read demo");
     let t = Instant::now();
-    let demo = parser.load_demo_bytes(Path::new(&path), &bytes).expect("parse");
-    println!("parse: {:.1}s, {} rounds, {} players", t.elapsed().as_secs_f64(), demo.rounds.len(), demo.info.players.len());
+    let demo = parser
+        .load_demo_bytes(Path::new(&path), &bytes)
+        .expect("parse");
+    println!(
+        "parse: {:.1}s, {} rounds, {} players",
+        t.elapsed().as_secs_f64(),
+        demo.rounds.len(),
+        demo.info.players.len()
+    );
     let t = Instant::now();
     let replay = build_replay(&parser, &demo.info, &demo.rounds, &bytes).expect("replay");
     let json = serde_json::to_vec(&replay).unwrap();

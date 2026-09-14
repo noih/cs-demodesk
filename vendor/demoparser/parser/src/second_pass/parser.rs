@@ -30,8 +30,8 @@ use prost::Message;
 use snap::raw::decompress_len;
 use snap::raw::Decoder as SnapDecoder;
 
-use super::variants::{InputHistory, UserCmdSubtickMove};
 use super::usercmd_delta::apply_delta;
+use super::variants::{InputHistory, UserCmdSubtickMove};
 
 const OUTER_BUF_DEFAULT_LEN: usize = 400_000;
 const INNER_BUF_DEFAULT_LEN: usize = 8192 * 15;
@@ -135,8 +135,12 @@ impl<'a> SecondPassParser<'a> {
             };
             ok?;
             if matches!(frame.demo_cmd, DemPacket | DemSignonPacket) {
-                if !observer(self) { break; }
-                if let Some(changes) = &mut self.analysis_changes { changes.clear(); }
+                if !observer(self) {
+                    break;
+                }
+                if let Some(changes) = &mut self.analysis_changes {
+                    changes.clear();
+                }
                 self.animation_strings.dirty = false;
             }
         }
@@ -145,11 +149,7 @@ impl<'a> SecondPassParser<'a> {
             let coll = PROF_COLLECT_NS.with(|c| c.get());
             let paths = PROF_PATHS_NS.with(|c| c.get());
             let dec = PROF_DECODE_NS.with(|c| c.get());
-            eprintln!(
-                "[prof] parse_packet_ents: {:.3}s | collect_*: {:.3}s",
-                ents as f64 / 1e9,
-                coll as f64 / 1e9
-            );
+            eprintln!("[prof] parse_packet_ents: {:.3}s | collect_*: {:.3}s", ents as f64 / 1e9, coll as f64 / 1e9);
             eprintln!(
                 "[prof]   within ents: parse_paths {:.3}s | decode_entity_update {:.3}s",
                 paths as f64 / 1e9,
@@ -263,11 +263,15 @@ impl<'a> SecondPassParser<'a> {
                     if should_parse_entities {
                         let _pt = prof_on().then(std::time::Instant::now);
                         self.parse_packet_ents(msg_bytes, is_fullpacket)?;
-                        if let Some(t) = _pt { PROF_ENTS_NS.with(|c| c.set(c.get() + t.elapsed().as_nanos() as u64)); }
+                        if let Some(t) = _pt {
+                            PROF_ENTS_NS.with(|c| c.set(c.get() + t.elapsed().as_nanos() as u64));
+                        }
                         if !is_fullpacket {
                             let _ct = prof_on().then(std::time::Instant::now);
                             self.collect_entities();
-                            if let Some(t) = _ct { PROF_COLLECT_NS.with(|c| c.set(c.get() + t.elapsed().as_nanos() as u64)); }
+                            if let Some(t) = _ct {
+                                PROF_COLLECT_NS.with(|c| c.set(c.get() + t.elapsed().as_nanos() as u64));
+                            }
                         }
                     }
                     Ok(())
@@ -302,42 +306,86 @@ impl<'a> SecondPassParser<'a> {
         // We simply inject the values into the entities as if they came from packet_ents like any other val.
 
         // This method is quite expensive so early exit it if not needed.
-        if !self.parse_usercmd {
+        let capture = self.capture_pose_fields && self.analysis_changes.is_some();
+        if !self.parse_usercmd && !capture {
             return Ok(());
         }
 
         let msg = match CsvcMsgUserCommands::decode(bytes) {
             Ok(m) => m,
-            _ => return Ok(()),
+            Err(_) => {
+                if capture {
+                    self.usercmd_baselines.clear();
+                    self.capture_user_cmd(None, None, Some("malformed_packet"));
+                }
+                return Ok(());
+            }
         };
         for cmd in msg.commands {
             let player_slot = cmd.player_slot();
             if player_slot < 0 {
+                if capture {
+                    self.usercmd_baselines.clear();
+                    self.capture_user_cmd(Some(&cmd), None, Some("invalid_slot"));
+                }
                 continue;
             }
             let data = cmd.data.as_ref().filter(|data| !data.is_empty());
             let delta_data = cmd.delta_data.as_ref().filter(|data| !data.is_empty());
-            let mut next = if let Some(data) = data {
-                match CsgoUserCmdPb::decode(data.as_ref()) {
-                    Ok(command) => Some(command),
-                    Err(_) => continue,
-                }
-            } else if delta_data.is_some() {
-                self.usercmd_baselines.get(&player_slot).cloned()
+            let decoded = data.and_then(|data| CsgoUserCmdPb::decode(data.as_ref()).ok());
+            let next = if let Some(delta) = delta_data {
+                let baseline = if data.is_some() {
+                    decoded.as_ref()
+                } else {
+                    self.usercmd_baselines.get(&player_slot)
+                };
+                baseline.and_then(|baseline| apply_delta(baseline, delta.as_ref()))
             } else {
-                continue;
+                decoded
             };
-
-            if let Some(delta_data) = delta_data {
-                next = next.as_ref().and_then(|baseline| apply_delta(baseline, delta_data.as_ref()));
-            }
             let Some(next) = next else {
+                if capture {
+                    // Never let later deltas bridge a missing analysis baseline.
+                    self.usercmd_baselines.remove(&player_slot);
+                    self.capture_user_cmd(Some(&cmd), None, Some("invalid_baseline_or_command"));
+                }
                 continue;
             };
-            self.usercmd_baselines.insert(player_slot, next.clone());
-            self.apply_user_cmd(&next);
+            if capture {
+                self.capture_user_cmd(Some(&cmd), Some(&next), None);
+            }
+            if self.parse_usercmd {
+                self.apply_user_cmd(&next);
+            }
+            self.usercmd_baselines.insert(player_slot, next);
         }
         Ok(())
+    }
+
+    fn capture_user_cmd(&mut self, envelope: Option<&csgoproto::CMsgServerUserCmd>, command: Option<&CsgoUserCmdPb>, invalid: Option<&'static str>) {
+        let Some(changes) = self.analysis_changes.as_mut() else {
+            return;
+        };
+        let ordinal = changes.user_cmd_count;
+        changes.user_cmd_count += 1;
+        let relevant = command.is_some_and(|c| {
+            c.attack1_start_history_index.is_some_and(|i| i >= 0)
+                || c.attack2_start_history_index.is_some_and(|i| i >= 0)
+                || c.input_history
+                    .iter()
+                    .any(|h| h.cl_interp.is_some() || h.sv_interp0.is_some() || h.sv_interp1.is_some() || h.player_interp.is_some())
+        });
+        if relevant || invalid.is_some() {
+            changes.user_cmds.push(crate::second_pass::parser_settings::AnalysisUserCmd {
+                ordinal,
+                player_slot: envelope.and_then(|e| e.player_slot),
+                command_number: envelope.and_then(|e| e.cmd_number),
+                server_tick_executed: envelope.and_then(|e| e.server_tick_executed),
+                client_tick: envelope.and_then(|e| e.client_tick),
+                protobuf: command.map(Message::encode_to_vec),
+                invalid,
+            });
+        }
     }
 
     fn apply_user_cmd(&mut self, user_cmd: &CsgoUserCmdPb) {
@@ -379,8 +427,7 @@ impl<'a> SecondPassParser<'a> {
                 yaw_delta: subtick.yaw_delta(),
             })
             .collect();
-        ent.props
-            .insert(USERCMD_SUBTICK_MOVES_BASEID, Variant::UserCmdSubtickMoves(subtick_moves));
+        ent.props.insert(USERCMD_SUBTICK_MOVES_BASEID, Variant::UserCmdSubtickMoves(subtick_moves));
         ent.props.insert(USERCMD_LEFTMOVE, Variant::F32(base.leftmove()));
         ent.props.insert(USERCMD_FORWARDMOVE, Variant::F32(base.forwardmove()));
         ent.props.insert(USERCMD_IMPULSE, Variant::I32(base.impulse()));
@@ -452,7 +499,9 @@ impl<'a> SecondPassParser<'a> {
 
     pub fn parse_full_packet_stringtables(&mut self, full_packet: &CDemoFullPacket) {
         if let Some(string_table) = &full_packet.string_table {
-            if self.analysis_changes.is_some() { self.animation_strings.snapshot(string_table); }
+            if self.analysis_changes.is_some() {
+                self.animation_strings.snapshot(string_table);
+            }
             for item in &string_table.tables {
                 if item.table_name == Some("instancebaseline".to_string()) {
                     for i in &item.items {
@@ -474,7 +523,9 @@ impl<'a> SecondPassParser<'a> {
     }
     fn clear_stringtables(&mut self) -> Result<(), DemoParserError> {
         self.string_tables = vec![];
-        if self.analysis_changes.is_some() { self.animation_strings.clear(); }
+        if self.analysis_changes.is_some() {
+            self.animation_strings.clear();
+        }
         Ok(())
     }
     pub fn parse_server_info(&mut self, bytes: &[u8]) -> Result<(), DemoParserError> {

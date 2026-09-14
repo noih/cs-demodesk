@@ -3,23 +3,23 @@
 //! them into one video) and optionally shrinks the result to a size budget.
 
 pub mod actions;
+#[cfg(windows)]
+mod audio;
 pub mod encode;
 mod leftovers;
 pub mod paths;
+pub(crate) mod process;
 mod record;
 pub mod setup;
-mod window;
 mod startup;
-pub(crate) mod process;
-#[cfg(windows)]
-mod audio;
+mod window;
 
 use crate::model::{DemoInfo, Highlight};
 use actions::{build_schedule, steamid_to_account_id, ActionsOptions, Camera, RenderClip};
 use anyhow::{anyhow, Result};
 use encode::{bytes_to_mb, concat_clips, encode_to_size_with_progress, mux_clip};
-use paths::{resolve_tool_paths, to_forward_slashes, PathOverrides, ToolPaths, IS_WINDOWS};
 use leftovers::{has_leftovers, remove_leftovers};
+use paths::{resolve_tool_paths, to_forward_slashes, PathOverrides, ToolPaths, IS_WINDOWS};
 use record::{collect_clip_outputs, run_recording_session, RecordSession};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -67,7 +67,11 @@ pub fn doctor(tools_dir: &Path, o: &PathOverrides) -> DoctorReport {
     if paths.ffmpeg_exe.is_none() {
         problems.push("ffmpeg.exe not found — use \"Download tools\" or set the path".into());
     }
-    DoctorReport { ok: problems.is_empty(), problems, paths }
+    DoctorReport {
+        ok: problems.is_empty(),
+        problems,
+        paths,
+    }
 }
 
 /// Remove what an old version left in the game folder (see leftovers.rs).
@@ -82,14 +86,30 @@ pub fn clean_leftovers(tools_dir: &Path, o: &PathOverrides) -> bool {
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
-pub enum SetupTool { Hlae, Ffmpeg, Vrf }
+pub enum SetupTool {
+    Hlae,
+    Ffmpeg,
+    Vrf,
+}
 
-pub fn run_setup(tools_dir: &Path, o: &PathOverrides, tool: SetupTool, force: bool, log: &mut dyn FnMut(String)) -> Result<DoctorReport> {
+pub fn run_setup(
+    tools_dir: &Path,
+    o: &PathOverrides,
+    tool: SetupTool,
+    force: bool,
+    log: &mut dyn FnMut(String),
+) -> Result<DoctorReport> {
     std::fs::create_dir_all(tools_dir)?;
     match tool {
-        SetupTool::Hlae => { setup::install_hlae(tools_dir, force, log)?; }
-        SetupTool::Ffmpeg => { setup::install_ffmpeg(tools_dir, force, log)?; }
-        SetupTool::Vrf => { setup::install_vrf(tools_dir, force, log)?; }
+        SetupTool::Hlae => {
+            setup::install_hlae(tools_dir, force, log)?;
+        }
+        SetupTool::Ffmpeg => {
+            setup::install_ffmpeg(tools_dir, force, log)?;
+        }
+        SetupTool::Vrf => {
+            setup::install_vrf(tools_dir, force, log)?;
+        }
     }
     Ok(doctor(tools_dir, o))
 }
@@ -190,7 +210,12 @@ pub fn to_render_clips(demo: &DemoInfo, highlights: &[Highlight]) -> Vec<RenderC
         .iter()
         .map(|h| RenderClip {
             highlight: h.clone(),
-            slot: demo.players.iter().find(|p| p.steamid == h.player.steamid).and_then(|p| p.user_id).map(|u| u + 1),
+            slot: demo
+                .players
+                .iter()
+                .find(|p| p.steamid == h.player.steamid)
+                .and_then(|p| p.user_id)
+                .map(|u| u + 1),
             account_id: steamid_to_account_id(&h.player.steamid),
         })
         .collect()
@@ -211,12 +236,38 @@ pub struct RenderJobInput<'a> {
 }
 
 fn safe_name(s: &str) -> String {
-    s.chars().map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '_' }).collect()
+    s.chars()
+        .map(|c| {
+            if c.is_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect()
 }
 
 pub fn render_highlights(input: RenderJobInput) -> Result<RenderResult> {
-    let RenderJobInput { demo, demo_path, mut highlights, preserve_merge_order, output_dir, options: o, tools, cancel, log, stage, progress } = input;
-    let (Some(cs2_dir), Some(cs2_exe), Some(hlae_exe), Some(hlae_dll), Some(ffmpeg_exe)) = (tools.cs2_dir, tools.cs2_exe, tools.hlae_exe, tools.hlae_dll, tools.ffmpeg_exe) else {
+    let RenderJobInput {
+        demo,
+        demo_path,
+        mut highlights,
+        preserve_merge_order,
+        output_dir,
+        options: o,
+        tools,
+        cancel,
+        log,
+        stage,
+        progress,
+    } = input;
+    let (Some(cs2_dir), Some(cs2_exe), Some(hlae_exe), Some(hlae_dll), Some(ffmpeg_exe)) = (
+        tools.cs2_dir,
+        tools.cs2_exe,
+        tools.hlae_exe,
+        tools.hlae_dll,
+        tools.ffmpeg_exe,
+    ) else {
         return Err(anyhow!("environment not ready — check the settings page"));
     };
     let ffmpeg = &ffmpeg_exe;
@@ -229,23 +280,44 @@ pub fn render_highlights(input: RenderJobInput) -> Result<RenderResult> {
     if highlights.is_empty() {
         return Err(anyhow!("nothing to render"));
     }
-    let merge_order: Vec<_> = if preserve_merge_order { highlights.iter().map(|h| h.id.clone()).collect() } else { vec![] };
+    let merge_order: Vec<_> = if preserve_merge_order {
+        highlights.iter().map(|h| h.id.clone()).collect()
+    } else {
+        vec![]
+    };
     // Render in demo order so the game only seeks forward.
     highlights.sort_by_key(|h| h.start_tick);
     std::fs::create_dir_all(&output_dir)?;
     let clips = to_render_clips(demo, &highlights);
-    let missing_slots: Vec<&str> = clips.iter().filter(|c| c.slot.is_none() && o.camera == Camera::Slot).map(|c| c.highlight.player.name.as_str()).collect();
+    let missing_slots: Vec<&str> = clips
+        .iter()
+        .filter(|c| c.slot.is_none() && o.camera == Camera::Slot)
+        .map(|c| c.highlight.player.name.as_str())
+        .collect();
     if !missing_slots.is_empty() {
-        log(format!("warning: no player slot for {} — camera will not follow them", missing_slots.join(", ")));
+        log(format!(
+            "warning: no player slot for {} — camera will not follow them",
+            missing_slots.join(", ")
+        ));
     }
 
-    if cancel.load(std::sync::atomic::Ordering::Relaxed) { return Err(anyhow!("cancelled")); }
+    if cancel.load(std::sync::atomic::Ordering::Relaxed) {
+        return Err(anyhow!("cancelled"));
+    }
     let (preset, mut compatible) = encode::checked_record_preset(ffmpeg, &o, log)?;
     let schedule = build_schedule(
         &clips,
-        &ActionsOptions { render: &o, tick_rate: demo.tick_rate, output_dir: to_forward_slashes(&output_dir), ffmpeg_preset: preset },
+        &ActionsOptions {
+            render: &o,
+            tick_rate: demo.tick_rate,
+            output_dir: to_forward_slashes(&output_dir),
+            ffmpeg_preset: preset,
+        },
     );
-    let total_seconds: f64 = highlights.iter().map(|h| (h.end_tick - h.start_tick) as f64 / demo.tick_rate).sum();
+    let total_seconds: f64 = highlights
+        .iter()
+        .map(|h| (h.end_tick - h.start_tick) as f64 / demo.tick_rate)
+        .sum();
     let timeout_seconds = (180.0 + highlights.len() as f64 * 30.0 + total_seconds * 6.0) as u64;
 
     // ponytail: phase weights estimate work, not elapsed time; measure costs if adding time estimates.
@@ -262,7 +334,11 @@ pub fn render_highlights(input: RenderJobInput) -> Result<RenderResult> {
             hlae_dll,
             ffmpeg_exe: ffmpeg_exe.clone(),
             output_dir: output_dir.clone(),
-            cfg_dir: tools.tools_dir.parent().map(|p| p.join("cfg")).unwrap_or_else(|| output_dir.join("cfg")),
+            cfg_dir: tools
+                .tools_dir
+                .parent()
+                .map(|p| p.join("cfg"))
+                .unwrap_or_else(|| output_dir.join("cfg")),
             show_game: o.show_game,
             width: o.width,
             height: o.height,
@@ -280,36 +356,95 @@ pub fn render_highlights(input: RenderJobInput) -> Result<RenderResult> {
     stage("encoding");
     progress(recording_end);
     let outputs = collect_clip_outputs(&output_dir, clips.len(), &o.container);
-    let mut fit_to_size = |file: PathBuf, log: &mut dyn FnMut(String), report: &mut dyn FnMut(f64)| -> Result<PathBuf> {
-        let Some(mb) = o.max_size_mb else { report(1.0); return Ok(file) };
+    let mut fit_to_size = |file: PathBuf,
+                           log: &mut dyn FnMut(String),
+                           report: &mut dyn FnMut(f64)|
+     -> Result<PathBuf> {
+        let Some(mb) = o.max_size_mb else {
+            report(1.0);
+            return Ok(file);
+        };
         if std::fs::metadata(&file)?.len() <= (mb * 1_000_000.0) as u64 {
             report(1.0);
             return Ok(file);
         }
         let small = file.with_extension(format!("{}mb.mp4", mb as u32));
-        let r = encode_to_size_with_progress(ffmpeg, &file, &small, mb, &o.codec, o.audio_kbps, &mut compatible, report)?;
-        log(format!("{} → {} ({} kbps, {} MB)", file.file_name().unwrap().to_string_lossy(), small.file_name().unwrap().to_string_lossy(), r.bitrate_kbps, bytes_to_mb(r.bytes)));
+        let r = encode_to_size_with_progress(
+            ffmpeg,
+            &file,
+            &small,
+            mb,
+            &o.codec,
+            o.audio_kbps,
+            &mut compatible,
+            report,
+        )?;
+        log(format!(
+            "{} → {} ({} kbps, {} MB)",
+            file.file_name().unwrap().to_string_lossy(),
+            small.file_name().unwrap().to_string_lossy(),
+            r.bitrate_kbps,
+            bytes_to_mb(r.bytes)
+        ));
         let _ = std::fs::remove_file(&file);
         Ok(small)
     };
 
-    let mut result = RenderResult { final_video: None, final_bytes: None, clips: vec![] };
+    let mut result = RenderResult {
+        final_video: None,
+        final_bytes: None,
+        clips: vec![],
+    };
     let mut muxed: Vec<PathBuf> = vec![];
     for out in &outputs {
-        stage(&format!("encoding {}/{}: muxing", out.index + 1, outputs.len()));
+        stage(&format!(
+            "encoding {}/{}: muxing",
+            out.index + 1,
+            outputs.len()
+        ));
         let h = &highlights[out.index];
-        let tags = h.tags.iter().filter(|t| t.ends_with('k') || *t == "ace" || *t == "clutch").cloned().collect::<Vec<_>>().join("_");
-        let name = format!("{:02}-r{}-{}-{}.{}", out.index + 1, h.round, safe_name(&h.player.name), if tags.is_empty() { "clip".into() } else { tags }, o.container);
+        let tags = h
+            .tags
+            .iter()
+            .filter(|t| t.ends_with('k') || *t == "ace" || *t == "clutch")
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("_");
+        let name = format!(
+            "{:02}-r{}-{}-{}.{}",
+            out.index + 1,
+            h.round,
+            safe_name(&h.player.name),
+            if tags.is_empty() { "clip".into() } else { tags },
+            o.container
+        );
         let dest = output_dir.join(name);
         if out.video.is_none() {
-            log(format!("clip {}: missing video.{} — skipped", out.index + 1, o.container));
-            result.clips.push(RenderedClip { highlight_id: h.id.clone(), title: h.title.clone(), file: None, bytes: None });
+            log(format!(
+                "clip {}: missing video.{} — skipped",
+                out.index + 1,
+                o.container
+            ));
+            result.clips.push(RenderedClip {
+                highlight_id: h.id.clone(),
+                title: h.title.clone(),
+                file: None,
+                bytes: None,
+            });
             continue;
         }
         mux_clip(ffmpeg, out, &dest, o.audio_kbps)?;
-        progress(recording_end + (muxing_end - recording_end) * (out.index + 1) as f64 / outputs.len() as f64);
+        progress(
+            recording_end
+                + (muxing_end - recording_end) * (out.index + 1) as f64 / outputs.len() as f64,
+        );
         muxed.push(dest.clone());
-        result.clips.push(RenderedClip { highlight_id: h.id.clone(), title: h.title.clone(), file: Some(dest), bytes: None });
+        result.clips.push(RenderedClip {
+            highlight_id: h.id.clone(),
+            title: h.title.clone(),
+            file: Some(dest),
+            bytes: None,
+        });
     }
     if o.merge && muxed.len() > 1 {
         // One video: the size limit applies to the joined file; the per-clip files are intermediates.
@@ -317,11 +452,22 @@ pub fn render_highlights(input: RenderJobInput) -> Result<RenderResult> {
         stage("encoding: merging");
         // Record chronologically, then restore rule groups for the final video.
         if preserve_merge_order {
-            muxed = merge_order.iter().filter_map(|id| result.clips.iter().find(|c| c.highlight_id == *id).and_then(|c| c.file.clone())).collect();
+            muxed = merge_order
+                .iter()
+                .filter_map(|id| {
+                    result
+                        .clips
+                        .iter()
+                        .find(|c| c.highlight_id == *id)
+                        .and_then(|c| c.file.clone())
+                })
+                .collect();
         }
         concat_clips(ffmpeg, &muxed, &merged)?;
         stage("encoding: fitting");
-        let merged = fit_to_size(merged, log, &mut |p| progress(muxing_end + (0.99 - muxing_end) * p))?;
+        let merged = fit_to_size(merged, log, &mut |p| {
+            progress(muxing_end + (0.99 - muxing_end) * p)
+        })?;
         result.final_bytes = Some(std::fs::metadata(&merged)?.len());
         result.final_video = Some(merged);
         for c in &mut result.clips {
@@ -334,10 +480,17 @@ pub fn render_highlights(input: RenderJobInput) -> Result<RenderResult> {
     } else {
         let mut completed_seconds = 0.0;
         for (i, c) in result.clips.iter_mut().enumerate() {
-            let seconds = (highlights[i].end_tick - highlights[i].start_tick) as f64 / demo.tick_rate;
+            let seconds =
+                (highlights[i].end_tick - highlights[i].start_tick) as f64 / demo.tick_rate;
             if let Some(file) = c.file.take() {
                 stage(&format!("encoding {}/{}: fitting", i + 1, highlights.len()));
-                let fitted = fit_to_size(file, log, &mut |p| progress(muxing_end + (0.99 - muxing_end) * (completed_seconds + seconds * p) / total_seconds.max(0.001)))?;
+                let fitted = fit_to_size(file, log, &mut |p| {
+                    progress(
+                        muxing_end
+                            + (0.99 - muxing_end) * (completed_seconds + seconds * p)
+                                / total_seconds.max(0.001),
+                    )
+                })?;
                 c.bytes = Some(std::fs::metadata(&fitted)?.len());
                 c.file = Some(fitted);
             }
@@ -360,7 +513,12 @@ mod tests {
     #[test]
     fn setup_only_selected_tool() {
         let dir = tempfile::tempdir().unwrap();
-        for file in ["hlae/HLAE.exe", "hlae/x64/AfxHookSource2.dll", "ffmpeg/ffmpeg.exe", "ffmpeg/ffprobe.exe"] {
+        for file in [
+            "hlae/HLAE.exe",
+            "hlae/x64/AfxHookSource2.dll",
+            "ffmpeg/ffmpeg.exe",
+            "ffmpeg/ffprobe.exe",
+        ] {
             let path = dir.path().join(file);
             std::fs::create_dir_all(path.parent().unwrap()).unwrap();
             std::fs::write(path, []).unwrap();
@@ -368,9 +526,16 @@ mod tests {
         let vrf = dir.path().join("vrf").join(super::setup::vrf_exe_name());
         std::fs::create_dir_all(vrf.parent().unwrap()).unwrap();
         std::fs::write(vrf, []).unwrap();
-        for (tool, name) in [(super::SetupTool::Hlae, "HLAE"), (super::SetupTool::Ffmpeg, "FFmpeg"), (super::SetupTool::Vrf, "Source 2 Viewer CLI")] {
+        for (tool, name) in [
+            (super::SetupTool::Hlae, "HLAE"),
+            (super::SetupTool::Ffmpeg, "FFmpeg"),
+            (super::SetupTool::Vrf, "Source 2 Viewer CLI"),
+        ] {
             let mut log = Vec::new();
-            super::run_setup(dir.path(), &Default::default(), tool, false, &mut |line| log.push(line)).unwrap();
+            super::run_setup(dir.path(), &Default::default(), tool, false, &mut |line| {
+                log.push(line)
+            })
+            .unwrap();
             assert_eq!(log, vec![format!("{name} already installed")]);
         }
         assert!(serde_json::from_str::<super::SetupTool>("\"unknown\"").is_err());
@@ -382,7 +547,10 @@ mod tests {
     fn old_game_mute_setting_cannot_silence_new_recordings() {
         let options: RenderOptions = serde_json::from_str(r#"{"muteMode":"game"}"#).unwrap();
         assert!(!options.show_game);
-        assert!(serde_json::to_value(options).unwrap().get("muteMode").is_none());
+        assert!(serde_json::to_value(options)
+            .unwrap()
+            .get("muteMode")
+            .is_none());
     }
 
     #[test]
@@ -390,9 +558,13 @@ mod tests {
         for mode in ["event", "minimized", "hidden", "synchronous"] {
             let options: RenderOptions = serde_json::from_value(serde_json::json!({
                 "hiddenStartup": mode, "showGame": false
-            })).unwrap();
+            }))
+            .unwrap();
             assert!(!options.show_game);
-            assert!(serde_json::to_value(options).unwrap().get("hiddenStartup").is_none());
+            assert!(serde_json::to_value(options)
+                .unwrap()
+                .get("hiddenStartup")
+                .is_none());
         }
     }
 
@@ -407,7 +579,10 @@ mod tests {
     #[test]
     fn game_visibility_survives_job_serialization() {
         for show_game in [false, true] {
-            let options = RenderOptions { show_game, ..RenderOptions::default() };
+            let options = RenderOptions {
+                show_game,
+                ..RenderOptions::default()
+            };
             let saved = serde_json::to_value(&options).unwrap();
             assert_eq!(saved["showGame"], show_game);
             let restored: RenderOptions = serde_json::from_value(saved).unwrap();

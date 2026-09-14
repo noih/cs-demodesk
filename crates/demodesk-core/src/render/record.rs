@@ -7,8 +7,8 @@
 //! to work under HLAE by `-afxFixNetCon`) is the game's own remote console.
 
 use super::actions::{mirv_cmd_xml, sequence_folder_name, Scheduled, MARK};
-use super::setup::register_ffmpeg_with_hlae;
 use super::hide;
+use super::setup::register_ffmpeg_with_hlae;
 use anyhow::{anyhow, Result};
 use std::io::{BufRead, BufReader, Write};
 use std::net::TcpStream;
@@ -52,7 +52,10 @@ fn tasklist(image: &str, verbose: bool) -> String {
     if verbose {
         cmd.arg("/v");
     }
-    hide(&mut cmd).output().map(|o| String::from_utf8_lossy(&o.stdout).to_string()).unwrap_or_default()
+    hide(&mut cmd)
+        .output()
+        .map(|o| String::from_utf8_lossy(&o.stdout).to_string())
+        .unwrap_or_default()
 }
 
 pub(super) fn is_process_running(image: &str) -> Result<bool> {
@@ -62,28 +65,47 @@ pub(super) fn is_process_running(image: &str) -> Result<bool> {
 #[cfg(windows)]
 pub(super) fn pid_of(image: &str) -> std::io::Result<Option<u32>> {
     use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
-    use windows_sys::Win32::Foundation::{ERROR_NO_MORE_FILES, ERROR_INVALID_PARAMETER, INVALID_HANDLE_VALUE, WAIT_OBJECT_0, WAIT_TIMEOUT};
-    use windows_sys::Win32::System::Threading::{OpenProcess, WaitForSingleObject, PROCESS_SYNCHRONIZE};
-    use windows_sys::Win32::System::Diagnostics::ToolHelp::{CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W, TH32CS_SNAPPROCESS};
+    use windows_sys::Win32::Foundation::{
+        ERROR_INVALID_PARAMETER, ERROR_NO_MORE_FILES, INVALID_HANDLE_VALUE, WAIT_OBJECT_0,
+        WAIT_TIMEOUT,
+    };
+    use windows_sys::Win32::System::Diagnostics::ToolHelp::{
+        CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W,
+        TH32CS_SNAPPROCESS,
+    };
+    use windows_sys::Win32::System::Threading::{
+        OpenProcess, WaitForSingleObject, PROCESS_SYNCHRONIZE,
+    };
     unsafe {
         let raw = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-        if raw == INVALID_HANDLE_VALUE { return Err(std::io::Error::last_os_error()); }
+        if raw == INVALID_HANDLE_VALUE {
+            return Err(std::io::Error::last_os_error());
+        }
         let snapshot = OwnedHandle::from_raw_handle(raw);
-        let mut entry = PROCESSENTRY32W { dwSize: std::mem::size_of::<PROCESSENTRY32W>() as u32, ..Default::default() };
+        let mut entry = PROCESSENTRY32W {
+            dwSize: std::mem::size_of::<PROCESSENTRY32W>() as u32,
+            ..Default::default()
+        };
         let mut found = Process32FirstW(snapshot.as_raw_handle(), &mut entry);
         while found != 0 {
-            let len = entry.szExeFile.iter().position(|&c| c == 0).unwrap_or(entry.szExeFile.len());
+            let len = entry
+                .szExeFile
+                .iter()
+                .position(|&c| c == 0)
+                .unwrap_or(entry.szExeFile.len());
             if String::from_utf16_lossy(&entry.szExeFile[..len]).eq_ignore_ascii_case(image) {
                 // ToolHelp can briefly retain a terminated process after job cleanup.
                 let process = OpenProcess(PROCESS_SYNCHRONIZE, 0, entry.th32ProcessID);
                 if process.is_null() {
                     let error = std::io::Error::last_os_error();
-                    if error.raw_os_error() != Some(ERROR_INVALID_PARAMETER as i32) { return Err(error); }
+                    if error.raw_os_error() != Some(ERROR_INVALID_PARAMETER as i32) {
+                        return Err(error);
+                    }
                 } else {
                     let process = OwnedHandle::from_raw_handle(process);
                     match WaitForSingleObject(process.as_raw_handle(), 0) {
                         WAIT_TIMEOUT => return Ok(Some(entry.th32ProcessID)),
-                        WAIT_OBJECT_0 => {},
+                        WAIT_OBJECT_0 => {}
                         _ => return Err(std::io::Error::last_os_error()),
                     }
                 }
@@ -91,20 +113,35 @@ pub(super) fn pid_of(image: &str) -> std::io::Result<Option<u32>> {
             found = Process32NextW(snapshot.as_raw_handle(), &mut entry);
         }
         let error = std::io::Error::last_os_error();
-        if error.raw_os_error() == Some(ERROR_NO_MORE_FILES as i32) { Ok(None) } else { Err(error) }
+        if error.raw_os_error() == Some(ERROR_NO_MORE_FILES as i32) {
+            Ok(None)
+        } else {
+            Err(error)
+        }
     }
 }
 
 #[cfg(not(windows))]
 pub(super) fn pid_of(_image: &str) -> std::io::Result<Option<u32>> {
-    Err(std::io::Error::new(std::io::ErrorKind::Unsupported, "CS2 recording requires Windows"))
+    Err(std::io::Error::new(
+        std::io::ErrorKind::Unsupported,
+        "CS2 recording requires Windows",
+    ))
 }
 
 fn newest_crash_dump(cs2_exe: &Path, since: std::time::SystemTime) -> Option<PathBuf> {
     let dir = cs2_exe.parent()?;
-    std::fs::read_dir(dir).ok()?.flatten().map(|e| e.path()).find(|p| {
-        p.extension().map(|e| e == "mdmp").unwrap_or(false) && p.metadata().and_then(|m| m.modified()).map(|m| m > since).unwrap_or(false)
-    })
+    std::fs::read_dir(dir)
+        .ok()?
+        .flatten()
+        .map(|e| e.path())
+        .find(|p| {
+            p.extension().map(|e| e == "mdmp").unwrap_or(false)
+                && p.metadata()
+                    .and_then(|m| m.modified())
+                    .map(|m| m > since)
+                    .unwrap_or(false)
+        })
 }
 
 fn console_log_path(cs2_dir: &Path) -> PathBuf {
@@ -119,9 +156,31 @@ pub fn summarize_console_log(cs2_dir: &Path, log: &mut dyn FnMut(String)) {
         log(format!("game console log not found ({})", path.display()));
         return;
     };
-    let keys = ["demo", "Demo", "playdemo", "rror", "ailed", "ouldn't", "Unable", "Host_", "Connect", "Disconnect", "mirv", "netcon", MARK];
-    let lines: Vec<&str> = text.lines().filter(|l| keys.iter().any(|k| l.contains(k))).collect();
-    log(format!("game console log: {} ({} lines, {} relevant)", path.display(), text.lines().count(), lines.len()));
+    let keys = [
+        "demo",
+        "Demo",
+        "playdemo",
+        "rror",
+        "ailed",
+        "ouldn't",
+        "Unable",
+        "Host_",
+        "Connect",
+        "Disconnect",
+        "mirv",
+        "netcon",
+        MARK,
+    ];
+    let lines: Vec<&str> = text
+        .lines()
+        .filter(|l| keys.iter().any(|k| l.contains(k)))
+        .collect();
+    log(format!(
+        "game console log: {} ({} lines, {} relevant)",
+        path.display(),
+        text.lines().count(),
+        lines.len()
+    ));
     for l in lines.iter().rev().take(25).rev() {
         log(format!("  {}", l.trim()));
     }
@@ -186,18 +245,25 @@ struct Netcon {
 
 impl Netcon {
     fn connect(port: u16) -> Result<Self> {
-        let stream = TcpStream::connect_timeout(&format!("127.0.0.1:{port}").parse().unwrap(), Duration::from_secs(2))?;
+        let stream = TcpStream::connect_timeout(
+            &format!("127.0.0.1:{port}").parse().unwrap(),
+            Duration::from_secs(2),
+        )?;
         stream.set_nodelay(true)?;
         let reader = BufReader::new(stream.try_clone()?);
         let (tx, rx) = mpsc::channel();
-        std::thread::Builder::new().name("netcon-reader".into()).spawn(move || {
-            for line in reader.split(b'\n').flatten() {
-                let text = String::from_utf8_lossy(&line).trim_end_matches('\r').to_string();
-                if tx.send(text).is_err() {
-                    break;
+        std::thread::Builder::new()
+            .name("netcon-reader".into())
+            .spawn(move || {
+                for line in reader.split(b'\n').flatten() {
+                    let text = String::from_utf8_lossy(&line)
+                        .trim_end_matches('\r')
+                        .to_string();
+                    if tx.send(text).is_err() {
+                        break;
+                    }
                 }
-            }
-        })?;
+            })?;
         Ok(Self { stream, lines: rx })
     }
     fn send(&mut self, cmd: &str) -> Result<()> {
@@ -249,59 +315,84 @@ impl GameWindowGuard {
         let window = match super::window::EventHider::start(pid, hidden.clone(), tx.clone()) {
             Ok(window) => Some(window),
             Err(e) => {
-                let _ = tx.send(format!("warning: window event listener could not start: {e}"));
+                let _ = tx.send(format!(
+                    "warning: window event listener could not start: {e}"
+                ));
                 None
             }
         };
         #[cfg(windows)]
         {
             let (s, audio_tx) = (stop.clone(), tx.clone());
-            match std::thread::Builder::new().name("game-audio-mute".into()).spawn(move || {
-                let mut audio = match super::audio::GameAudioMute::new() {
-                    Ok(audio) => audio,
-                    Err(e) => {
-                        let _ = audio_tx.send(format!("warning: Windows audio mute unavailable: {e}"));
-                        return;
-                    }
-                };
-                let mut reported_error = false;
-                let mut muted_sessions = 0;
-                while !s.load(Ordering::Relaxed) {
-                    match audio.poll(pid) {
-                        Ok(n) if n > 0 => {
-                            muted_sessions += n;
-                            let _ = audio_tx.send(format!("CS2 Windows playback muted ({n} audio sessions)"));
+            match std::thread::Builder::new()
+                .name("game-audio-mute".into())
+                .spawn(move || {
+                    let mut audio = match super::audio::GameAudioMute::new() {
+                        Ok(audio) => audio,
+                        Err(e) => {
+                            let _ = audio_tx
+                                .send(format!("warning: Windows audio mute unavailable: {e}"));
+                            return;
                         }
-                        Err(e) if !reported_error => {
-                            let _ = audio_tx.send(format!("warning: Windows audio mute failed: {e}"));
-                            reported_error = true;
+                    };
+                    let mut reported_error = false;
+                    let mut muted_sessions = 0;
+                    while !s.load(Ordering::Relaxed) {
+                        match audio.poll(pid) {
+                            Ok(n) if n > 0 => {
+                                muted_sessions += n;
+                                let _ = audio_tx.send(format!(
+                                    "CS2 Windows playback muted ({n} audio sessions)"
+                                ));
+                            }
+                            Err(e) if !reported_error => {
+                                let _ = audio_tx
+                                    .send(format!("warning: Windows audio mute failed: {e}"));
+                                reported_error = true;
+                            }
+                            _ => {}
                         }
-                        _ => {}
+                        std::thread::sleep(Duration::from_millis(200));
                     }
-                    std::thread::sleep(Duration::from_millis(200));
-                }
-                if muted_sessions == 0 {
-                    let _ = audio_tx.send("warning: no CS2 Windows audio session was muted".into());
-                }
-                let errors = audio.restore();
-                if muted_sessions > 0 && errors.is_empty() {
-                    let _ = audio_tx.send("CS2 Windows mute state restored".into());
-                }
-                for error in errors { let _ = audio_tx.send(error); }
-            }) {
+                    if muted_sessions == 0 {
+                        let _ =
+                            audio_tx.send("warning: no CS2 Windows audio session was muted".into());
+                    }
+                    let errors = audio.restore();
+                    if muted_sessions > 0 && errors.is_empty() {
+                        let _ = audio_tx.send("CS2 Windows mute state restored".into());
+                    }
+                    for error in errors {
+                        let _ = audio_tx.send(error);
+                    }
+                }) {
                 Ok(worker) => workers.push(worker),
-                Err(e) => { let _ = tx.send(format!("warning: audio worker could not start: {e}")); }
+                Err(e) => {
+                    let _ = tx.send(format!("warning: audio worker could not start: {e}"));
+                }
             }
         }
-        Self { stop, hidden, window, workers, messages }
+        Self {
+            stop,
+            hidden,
+            window,
+            workers,
+            messages,
+        }
     }
     fn report(&self, log: &mut dyn FnMut(String)) {
-        for message in self.messages.try_iter() { log(message); }
+        for message in self.messages.try_iter() {
+            log(message);
+        }
     }
     fn stop(&mut self) {
         self.stop.store(true, Ordering::Relaxed);
-        if let Some(mut window) = self.window.take() { window.stop(); }
-        for worker in self.workers.drain(..) { let _ = worker.join(); }
+        if let Some(mut window) = self.window.take() {
+            window.stop();
+        }
+        for worker in self.workers.drain(..) {
+            let _ = worker.join();
+        }
     }
     fn hidden(&self) -> u32 {
         self.hidden.load(Ordering::Relaxed)
@@ -309,7 +400,9 @@ impl GameWindowGuard {
 }
 
 impl Drop for GameWindowGuard {
-    fn drop(&mut self) { self.stop(); }
+    fn drop(&mut self) {
+        self.stop();
+    }
 }
 
 /// Progress derived from the `[demodesk] seq i of n …` markers.
@@ -342,22 +435,47 @@ impl RecordSession<'_> {
 
     /// Start CS2 through HLAE and wait until the injected process is up; the
     /// returned guard handles background hiding/muting.
-    fn launch(&mut self, processes: &super::process::ProcessTree) -> Result<Option<GameWindowGuard>> {
+    fn launch(
+        &mut self,
+        processes: &super::process::ProcessTree,
+    ) -> Result<Option<GameWindowGuard>> {
         // Keep the player's real config untouched: the game reads/writes cfg under USRLOCALCSGO.
         std::fs::create_dir_all(&self.cfg_dir)?;
         let launcher = &self.hlae_exe;
-        if self.cancelled() { return Err(anyhow!("cancelled")); }
+        if self.cancelled() {
+            return Err(anyhow!("cancelled"));
+        }
         let hook = if !self.show_game {
             std::fs::write(self.output_dir.join("window-hook.log"), "")?;
             Some(super::startup::prepare_hook(&self.cfg_dir)?)
-        } else { None };
+        } else {
+            None
+        };
         let args = hlae_args(self, hook.as_deref());
-        (self.log)(format!("launching HLAE: {} {}", launcher.display(), args.iter().map(|a| if a.contains(' ') { format!("\"{a}\"") } else { a.clone() }).collect::<Vec<_>>().join(" ")));
+        (self.log)(format!(
+            "launching HLAE: {} {}",
+            launcher.display(),
+            args.iter()
+                .map(|a| if a.contains(' ') {
+                    format!("\"{a}\"")
+                } else {
+                    a.clone()
+                })
+                .collect::<Vec<_>>()
+                .join(" ")
+        ));
         let mut cmd = Command::new(launcher);
-        cmd.args(&args).env("USRLOCALCSGO", &self.cfg_dir).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
+        cmd.args(&args)
+            .env("USRLOCALCSGO", &self.cfg_dir)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
         cmd.env_remove("DEMODESK_WINDOW_HOOK_LOG");
         if hook.is_some() {
-            cmd.env("DEMODESK_WINDOW_HOOK_LOG", self.output_dir.join("window-hook.log"));
+            cmd.env(
+                "DEMODESK_WINDOW_HOOK_LOG",
+                self.output_dir.join("window-hook.log"),
+            );
         }
         let mut hlae = processes.spawn(&mut cmd)?;
 
@@ -383,10 +501,16 @@ impl RecordSession<'_> {
             std::thread::sleep(Duration::from_millis(250));
         };
         // Retain event hiding as a fallback alongside the synchronous DLL and audio mute.
-        let hider = if self.show_game { None } else { Some(GameWindowGuard::start(pid)) };
+        let hider = if self.show_game {
+            None
+        } else {
+            Some(GameWindowGuard::start(pid))
+        };
         std::thread::sleep(Duration::from_secs(3));
         if tasklist("cs2.exe", true).contains("Error - AfxHookSource") {
-            return Err(anyhow!("HLAE injection failed (AfxHookSource error window)"));
+            return Err(anyhow!(
+                "HLAE injection failed (AfxHookSource error window)"
+            ));
         }
         if let Ok(Some(status)) = hlae.try_wait() {
             if !status.success() {
@@ -398,7 +522,9 @@ impl RecordSession<'_> {
 
     /// Connect to the game's netcon once the engine answers.
     fn connect_netcon(&mut self, hider: Option<&GameWindowGuard>) -> Result<Netcon> {
-        (self.log)(format!("game running, connecting to netcon on port {NETCON_PORT}…"));
+        (self.log)(format!(
+            "game running, connecting to netcon on port {NETCON_PORT}…"
+        ));
         let deadline = Instant::now() + Duration::from_secs(120);
         let con = loop {
             if !is_process_running("cs2.exe")? {
@@ -418,9 +544,13 @@ impl RecordSession<'_> {
             std::thread::sleep(Duration::from_secs(1));
         };
         (self.log)("netcon connected".into());
-        if let Some(hider) = hider { hider.report(self.log); }
+        if let Some(hider) = hider {
+            hider.report(self.log);
+        }
         match hider.map(GameWindowGuard::hidden) {
-            Some(0) => (self.log)("no fallback window hiding needed (native hook handles startup)".into()),
+            Some(0) => {
+                (self.log)("no fallback window hiding needed (native hook handles startup)".into())
+            }
             Some(n) => (self.log)(format!("game window hidden ({n} times)")),
             None => {}
         }
@@ -436,10 +566,16 @@ impl RecordSession<'_> {
             (self.log)("warning: console did not acknowledge the schedule load".into());
         }
         let noise = con.drain();
-        if let Some(err) = noise.iter().find(|l| l.to_lowercase().contains("unknown command") && l.contains("mirv_cmd")) {
+        if let Some(err) = noise
+            .iter()
+            .find(|l| l.to_lowercase().contains("unknown command") && l.contains("mirv_cmd"))
+        {
             return Err(anyhow!("HLAE is not active in this game process ({err})"));
         }
-        (self.log)(format!("schedule loaded ({} commands)", self.schedule.len()));
+        (self.log)(format!(
+            "schedule loaded ({} commands)",
+            self.schedule.len()
+        ));
         con.send("demo_ui_mode 0")?;
         self.playdemo(con)?;
         (self.log)("playdemo sent, waiting for the demo to start…".into());
@@ -469,14 +605,19 @@ impl RecordSession<'_> {
             }
             if !progress.seen_marker && Instant::now() > demo_deadline {
                 if replayed {
-                    return Err(anyhow!("the demo did not reach the first clip within 4 minutes — see the log"));
+                    return Err(anyhow!(
+                        "the demo did not reach the first clip within 4 minutes — see the log"
+                    ));
                 }
                 replayed = true;
                 (self.log)("no marker yet — sending playdemo again".into());
                 self.playdemo(con)?;
             }
             if Instant::now() > timeout_at {
-                return Err(anyhow!("recording timed out after {} s", self.timeout_seconds));
+                return Err(anyhow!(
+                    "recording timed out after {} s",
+                    self.timeout_seconds
+                ));
             }
             std::thread::sleep(Duration::from_millis(500));
         }
@@ -484,7 +625,13 @@ impl RecordSession<'_> {
     }
 
     fn handle_console_line(&mut self, line: &str, progress: &mut Progress) {
-        if let Some(value) = line.split(MARK).nth(1).and_then(|s| s.trim().strip_prefix("progress ")).and_then(|s| s.trim().parse::<f64>().ok()).filter(|v| v.is_finite() && (0.0..=1.0).contains(v)) {
+        if let Some(value) = line
+            .split(MARK)
+            .nth(1)
+            .and_then(|s| s.trim().strip_prefix("progress "))
+            .and_then(|s| s.trim().parse::<f64>().ok())
+            .filter(|v| v.is_finite() && (0.0..=1.0).contains(v))
+        {
             (self.progress)(value);
         } else if let Some((i, n, what)) = parse_marker(line) {
             progress.seen_marker = true;
@@ -503,17 +650,25 @@ impl RecordSession<'_> {
             (self.log)("all clips recorded, waiting for the game to quit".into());
         } else if line.contains("single_player_pause") {
             // the engine runs this Source-1 leftover whenever the window loses focus (we hide it); noise
-        } else if line.contains("Unknown command") || (line.contains("mirv_streams") && line.to_lowercase().contains("error")) {
+        } else if line.contains("Unknown command")
+            || (line.contains("mirv_streams") && line.to_lowercase().contains("error"))
+        {
             (self.log)(format!("console: {}", line.trim()));
         }
     }
 
-    fn run(&mut self, schedule_file: &Path, started_at: std::time::SystemTime, processes: &super::process::ProcessTree) -> Result<()> {
+    fn run(
+        &mut self,
+        schedule_file: &Path,
+        started_at: std::time::SystemTime,
+        processes: &super::process::ProcessTree,
+    ) -> Result<()> {
         let mut hider = self.launch(processes)?;
         let result = (|| {
             let mut con = self.connect_netcon(hider.as_ref())?;
             if !self.show_game {
-                let evidence = std::fs::read_to_string(self.output_dir.join("window-hook.log")).unwrap_or_default();
+                let evidence = std::fs::read_to_string(self.output_dir.join("window-hook.log"))
+                    .unwrap_or_default();
                 if !evidence.lines().any(|line| line == "installed") {
                     return Err(anyhow!("Synchronous window hook did not report successful installation; see window-hook.log."));
                 }
@@ -524,7 +679,10 @@ impl RecordSession<'_> {
                 (self.log)("game exited before the schedule finished".into());
             }
             if let Some(dump) = newest_crash_dump(&self.cs2_exe, started_at) {
-                (self.log)(format!("warning: CS2 wrote a crash dump ({}) — HLAE may be out of date", dump.file_name().unwrap().to_string_lossy()));
+                (self.log)(format!(
+                    "warning: CS2 wrote a crash dump ({}) — HLAE may be out of date",
+                    dump.file_name().unwrap().to_string_lossy()
+                ));
             }
             Ok(())
         })();
@@ -534,7 +692,9 @@ impl RecordSession<'_> {
         }
         if !self.show_game {
             if let Ok(evidence) = std::fs::read_to_string(self.output_dir.join("window-hook.log")) {
-                for line in evidence.lines() { (self.log)(format!("window hook: {line}")); }
+                for line in evidence.lines() {
+                    (self.log)(format!("window hook: {line}"));
+                }
             }
         }
         result
@@ -555,7 +715,9 @@ pub fn run_recording_session(s: &mut RecordSession) -> Result<()> {
     let processes = super::process::ProcessTree::new()?;
     let result = s.run(&schedule_file, started_at, &processes);
     let cleanup = processes.finish();
-    if let Err(error) = &cleanup { (s.log)(format!("process cleanup failed: {error}")); }
+    if let Err(error) = &cleanup {
+        (s.log)(format!("process cleanup failed: {error}"));
+    }
     let result = result.and(cleanup.map_err(Into::into));
     if result.is_err() {
         summarize_console_log(&s.cs2_dir, s.log);
@@ -577,11 +739,28 @@ pub fn collect_clip_outputs(output_dir: &Path, count: usize, container: &str) ->
             let dir = output_dir.join(sequence_folder_name(i));
             let video = dir.join(format!("video.{container}"));
             let mut takes: Vec<PathBuf> = std::fs::read_dir(&dir)
-                .map(|rd| rd.flatten().map(|e| e.path()).filter(|p| p.is_dir() && p.file_name().map(|f| f.to_string_lossy().to_lowercase().starts_with("take")).unwrap_or(false)).collect())
+                .map(|rd| {
+                    rd.flatten()
+                        .map(|e| e.path())
+                        .filter(|p| {
+                            p.is_dir()
+                                && p.file_name()
+                                    .map(|f| f.to_string_lossy().to_lowercase().starts_with("take"))
+                                    .unwrap_or(false)
+                        })
+                        .collect()
+                })
                 .unwrap_or_default();
             takes.sort();
-            let audio = takes.last().map(|t| t.join("audio.wav")).filter(|p| p.is_file());
-            ClipOutput { index: i, video: video.is_file().then_some(video), audio }
+            let audio = takes
+                .last()
+                .map(|t| t.join("audio.wav"))
+                .filter(|p| p.is_file());
+            ClipOutput {
+                index: i,
+                video: video.is_file().then_some(video),
+                audio,
+            }
         })
         .collect()
 }
@@ -595,7 +774,10 @@ mod tests {
     fn native_pid_lookup_matches_full_image_name_case_insensitively() {
         let exe = std::env::current_exe().unwrap();
         let name = exe.file_name().unwrap().to_string_lossy();
-        assert_eq!(pid_of(&name.to_ascii_uppercase()).unwrap(), Some(std::process::id()));
+        assert_eq!(
+            pid_of(&name.to_ascii_uppercase()).unwrap(),
+            Some(std::process::id())
+        );
         assert_eq!(pid_of("").unwrap(), None);
         assert_eq!(pid_of(&format!("{name}.missing")).unwrap(), None);
         assert_eq!(pid_of(&name[..name.len() - 4]).unwrap(), None);
@@ -603,8 +785,14 @@ mod tests {
 
     #[test]
     fn markers_parse() {
-        assert_eq!(parse_marker("[demodesk] seq 2 of 5 start"), Some((2, 5, "start")));
-        assert_eq!(parse_marker("some prefix [demodesk] seq 1 of 1 end "), Some((1, 1, "end")));
+        assert_eq!(
+            parse_marker("[demodesk] seq 2 of 5 start"),
+            Some((2, 5, "start"))
+        );
+        assert_eq!(
+            parse_marker("some prefix [demodesk] seq 1 of 1 end "),
+            Some((1, 1, "end"))
+        );
         assert_eq!(parse_marker("[demodesk] done"), None);
         assert_eq!(parse_marker("unrelated"), None);
     }

@@ -51,8 +51,22 @@ impl VelocitySample {
     }
 }
 
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AnalysisUserCmd {
+    pub ordinal: u32,
+    pub player_slot: Option<i32>,
+    pub command_number: Option<i32>,
+    pub server_tick_executed: Option<i32>,
+    pub client_tick: Option<i32>,
+    pub protobuf: Option<Vec<u8>>,
+    pub invalid: Option<&'static str>,
+}
+
 #[derive(Default)]
 pub struct AnalysisChanges {
+    pub user_cmds: Vec<AnalysisUserCmd>,
+    pub user_cmd_count: u32,
     pub properties: AHashSet<(i32, u32)>,
     pub poses: AHashSet<(i32, Vec<i32>)>,
     pub pose_removals: Vec<(i32, Vec<i32>, String)>,
@@ -60,6 +74,8 @@ pub struct AnalysisChanges {
 }
 impl AnalysisChanges {
     pub fn clear(&mut self) {
+        self.user_cmds.clear();
+        self.user_cmd_count = 0;
         self.properties.clear();
         self.poses.clear();
         self.pose_removals.clear();

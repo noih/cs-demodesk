@@ -4,6 +4,7 @@ use super::{
     animation_clip::Clip,
     kv3_text,
     model_hitboxes::{self, HitboxSet},
+    smoke::noise,
 };
 use anyhow::{ensure, Context, Result};
 use serde::{Deserialize, Serialize};
@@ -15,10 +16,16 @@ use std::{
     process::Command,
 };
 
+pub const WEAPONS: &str = "scripts/weapons.vdata";
+pub const SURFACES: &str = "surfaceproperties/surfaceproperties.vsurf";
+pub const SURFACE_GAME: &str = "scripts/surfaceproperties_game.txt";
 const SKELETON: &str = "animation/skeletons/characters/worldmodel.vnmskel";
-const FORMAT: u32 = 3;
+const FORMAT: u32 = 6;
 
 pub struct Assets {
+    pub weapons: Option<serde_json::Value>,
+    pub smoke_noise_rgba: Option<Vec<u8>>,
+    pub surfaces: Option<BTreeMap<u32, super::ballistics::Surface>>,
     pub clips: BTreeMap<String, Clip>,
     pub skeleton: serde_json::Value,
     pub model_skeletons: BTreeMap<u64, Vec<String>>,
@@ -131,9 +138,17 @@ fn run(vrf: &Path, command: &mut Command) -> Result<String> {
     String::from_utf8(output.stdout).context("asset decoder output is not UTF-8")
 }
 
+fn stored_name(resource: &str) -> String {
+    if resource == SURFACE_GAME {
+        resource.into()
+    } else {
+        format!("{resource}_c")
+    }
+}
+
 // Broader directory selectors keep the single extraction below Windows' command-line limit.
 fn selectors(paths: &[String]) -> Result<String> {
-    let mut selected: BTreeSet<String> = paths.iter().map(|p| format!("{p}_c")).collect();
+    let mut selected: BTreeSet<String> = paths.iter().map(|p| stored_name(p)).collect();
     // VRF treats an exact single-file selector's output as a file, not a directory.
     if selected.len() == 1 {
         let only = selected
@@ -283,13 +298,29 @@ fn load(cache: &Path, source_key: &str, requested: &[String]) -> Result<Assets> 
     );
     let mut clips = BTreeMap::new();
     let mut skeleton = None;
+    let mut weapons = None;
+    let mut smoke_noise_rgba = None;
+    let mut physical_surfaces = None;
+    let mut game_surfaces = None;
     let mut model_skeletons = BTreeMap::new();
     let mut model_hitboxes = BTreeMap::new();
     for resource in requested {
+        if resource == noise::RESOURCE {
+            let raw_path = format!("raw/{}", stored_name(resource));
+            ensure!(
+                manifest.files.contains_key(&raw_path),
+                "smoke noise resource is missing"
+            );
+            let raw = fs::read(cache.join(raw_path))?;
+            smoke_noise_rgba = Some(noise::rgba(&raw)?.to_vec());
+            continue;
+        }
         let text_path = format!("data/{resource}.kv3");
         ensure!(
             manifest.files.contains_key(&text_path)
-                && manifest.files.contains_key(&format!("raw/{resource}_c")),
+                && manifest
+                    .files
+                    .contains_key(&format!("raw/{}", stored_name(resource))),
             "animation asset cache is missing a requested resource"
         );
         let text = fs::read_to_string(cache.join(text_path))?;
@@ -315,9 +346,25 @@ fn load(cache: &Path, source_key: &str, requested: &[String]) -> Result<Assets> 
             );
         } else if resource == SKELETON {
             skeleton = Some(kv3_text::parse(&text)?);
+        } else if resource == WEAPONS {
+            weapons = Some(kv3_text::parse(&text)?);
+        } else if resource == SURFACES {
+            physical_surfaces = Some(kv3_text::parse(&text)?);
+        } else if resource == SURFACE_GAME {
+            game_surfaces = Some(kv3_text::parse(&text)?);
         }
     }
+    let surfaces = match (physical_surfaces, game_surfaces) {
+        (Some(physical), Some(game)) => {
+            Some(super::ballistics::materials::resolve(&physical, &game)?)
+        }
+        (None, None) => None,
+        _ => anyhow::bail!("incomplete surface property dependencies"),
+    };
     Ok(Assets {
+        weapons,
+        smoke_noise_rgba,
+        surfaces,
         clips,
         model_skeletons,
         model_hitboxes,
@@ -471,11 +518,19 @@ fn prepare_resources(
         if resource.ends_with(".vnmclip")
             || resource.ends_with(".vnmskel")
             || resource.ends_with(".vmdl")
+            || resource == WEAPONS
+            || resource == SURFACES
+            || resource == SURFACE_GAME
+            || resource == noise::RESOURCE
         {
             requested.insert(resource.to_owned());
         }
     }
     requested.insert(SKELETON.to_owned());
+    if requested.contains(SURFACES) || requested.contains(SURFACE_GAME) {
+        requested.insert(SURFACES.into());
+        requested.insert(SURFACE_GAME.into());
+    }
     let requested: Vec<_> = requested.into_iter().collect();
     let pak = crate::radar::pak_path(game);
     let mut hash = sha1_smol::Sha1::new();
@@ -504,13 +559,13 @@ fn prepare_resources(
             .arg("-f")
             .arg(selectors(&requested)?)
             .arg("-e")
-            .arg("vnmclip_c,vnmskel_c,vmdl_c")
+            .arg("vnmclip_c,vnmskel_c,vmdl_c,vdata_c,vsurf_c,txt,vtex_c")
             .arg("-o")
             .arg(&raw),
     )?;
     for resource in &requested {
         ensure!(
-            raw.join(format!("{resource}_c")).is_file(),
+            raw.join(stored_name(resource)).is_file(),
             "recorded animation asset is unavailable: {resource}"
         );
     }
@@ -520,6 +575,8 @@ fn prepare_resources(
             .arg("-i")
             .arg(&raw)
             .arg("--recursive")
+            .arg("-e")
+            .arg("vnmclip_c,vnmskel_c,vmdl_c,vdata_c,vsurf_c")
             .arg("-b")
             .arg("DATA")
             .arg("--threads")
@@ -565,6 +622,21 @@ fn prepare_resources(
         let dest = staging.path().join("data").join(format!("{resource}.kv3"));
         fs::create_dir_all(dest.parent().context("asset output has no parent")?)?;
         fs::write(dest, text)?;
+    }
+    if requested.iter().any(|resource| resource == SURFACE_GAME) {
+        let text = fs::read_to_string(raw.join(SURFACE_GAME))?;
+        kv3_text::parse(&text).context("decoding surface game properties")?;
+        let destination = staging
+            .path()
+            .join("data")
+            .join(format!("{SURFACE_GAME}.kv3"));
+        fs::create_dir_all(destination.parent().context("surface output directory")?)?;
+        fs::write(destination, text)?;
+        found.insert(SURFACE_GAME.into());
+    }
+    if requested.iter().any(|resource| resource == noise::RESOURCE) {
+        noise::rgba(&fs::read(raw.join(stored_name(noise::RESOURCE)))?)?;
+        found.insert(noise::RESOURCE.into());
     }
     ensure!(
         found.len() == requested.len(),

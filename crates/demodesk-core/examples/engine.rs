@@ -6,7 +6,14 @@ struct Print;
 impl Notify for Print {
     fn notify(&self, e: Event) {
         if let Event::DemoChanged { demo } = e {
-            println!("event: {} {:?} {:?}", demo.name, demo.status, demo.summary.as_ref().map(|s| (s.score_a, s.score_b, s.highlights)));
+            println!(
+                "event: {} {:?} {:?}",
+                demo.name,
+                demo.status,
+                demo.summary
+                    .as_ref()
+                    .map(|s| (s.score_a, s.score_b, s.highlights))
+            );
         }
     }
 }
@@ -28,9 +35,25 @@ fn main() {
         while engine.is_parsing(&meta.id) {
             std::thread::sleep(std::time::Duration::from_millis(200));
         }
-        println!("parsed in {:.1}s: {} highlights", t.elapsed().as_secs_f64(), engine.parsed(&meta.id).unwrap().highlights.len());
+        println!(
+            "parsed in {:.1}s: {} highlights",
+            t.elapsed().as_secs_f64(),
+            engine.parsed(&meta.id).unwrap().highlights.len()
+        );
     }
-    let list = |p: &Path| std::fs::read_dir(p).unwrap().flatten().map(|e| format!("{} ({} B)", e.file_name().to_string_lossy(), e.metadata().map(|m| m.len()).unwrap_or(0))).collect::<Vec<_>>();
+    let list = |p: &Path| {
+        std::fs::read_dir(p)
+            .unwrap()
+            .flatten()
+            .map(|e| {
+                format!(
+                    "{} ({} B)",
+                    e.file_name().to_string_lossy(),
+                    e.metadata().map(|m| m.len()).unwrap_or(0)
+                )
+            })
+            .collect::<Vec<_>>()
+    };
     println!("parsed dir: {:?}", list(&data.join("parsed")));
 
     // second "session": must come back parsed without parsing
@@ -38,13 +61,28 @@ fn main() {
     let t = std::time::Instant::now();
     let demos = engine.list_demos();
     let m = demos.iter().find(|m| m.id == id).unwrap();
-    println!("after restart: status {:?} summary {:?} (list took {:.0} ms)", m.status, m.summary.as_ref().map(|s| (s.score_a, s.score_b, s.highlights)), t.elapsed().as_millis());
+    println!(
+        "after restart: status {:?} summary {:?} (list took {:.0} ms)",
+        m.status,
+        m.summary
+            .as_ref()
+            .map(|s| (s.score_a, s.score_b, s.highlights)),
+        t.elapsed().as_millis()
+    );
     assert_eq!(m.status, DemoStatus::Parsed);
     let t = std::time::Instant::now();
     let parsed = engine.parsed(&id).unwrap();
-    println!("lazy load: {} highlights in {:.0} ms", parsed.highlights.len(), t.elapsed().as_millis());
+    println!(
+        "lazy load: {} highlights in {:.0} ms",
+        parsed.highlights.len(),
+        t.elapsed().as_millis()
+    );
 
     engine.clear_analysis(&id).unwrap();
-    println!("after clear: {:?}, parsed dir {:?}", engine.get_demo(&id).unwrap().0.status, list(&data.join("parsed")));
+    println!(
+        "after clear: {:?}, parsed dir {:?}",
+        engine.get_demo(&id).unwrap().0.status,
+        list(&data.join("parsed"))
+    );
     println!("clear_all freed {} B", engine.clear_all_analysis().unwrap());
 }

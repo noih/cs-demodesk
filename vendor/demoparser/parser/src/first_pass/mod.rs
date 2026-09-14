@@ -1,3 +1,5 @@
+pub mod convars;
+pub mod animation_strings;
 pub mod fallbackbytes;
 pub mod frameparser;
 pub mod parser;
@@ -6,4 +8,3 @@ pub mod prop_controller;
 pub mod read_bits;
 pub mod sendtables;
 pub mod stringtables;
-pub mod animation_strings;

@@ -150,7 +150,12 @@ impl<'a> Bitreader<'a> {
         Ok(self.read_bit_coord())?
     }
     pub fn decode_simul_time(&mut self) -> Result<f32, DemoParserError> {
-        Ok(self.read_varint()? as f32 * (1.0 / 30.0))
+        Ok(self.decode_simul_time_with_raw()?.0)
+    }
+    /// Preserve the wire integer alongside the unchanged legacy seconds conversion.
+    pub fn decode_simul_time_with_raw(&mut self) -> Result<(f32, u32), DemoParserError> {
+        let raw = self.read_varint()?;
+        Ok((raw as f32 * (1.0 / 30.0), raw))
     }
     pub fn decode_normal(&mut self) -> Result<f32, DemoParserError> {
         let is_neg = self.read_boolean()?;

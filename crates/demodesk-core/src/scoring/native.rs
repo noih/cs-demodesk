@@ -35,7 +35,14 @@ pub fn evaluate(
     players: &[String],
     rounds: &[crate::model::RoundInfo],
     kills: &[crate::model::KillEvent],
+    visibility: Option<&crate::analysis::visibility_assets::Prepared>,
 ) -> Result<(BTreeMap<String, Vec<super::Check>>, native_body::Coverage)> {
+    let mut ttd = super::time_to_damage::Stream::new(
+        prepared.header.data.tick_rate,
+        visibility.map(|p| &p.world),
+        &prepared.events.raw,
+        rounds,
+    )?;
     let mut evaluator = Match::new(
         fingerprint,
         players,
@@ -47,15 +54,35 @@ pub fn evaluate(
     let mut shot_views = super::shot_view::Match::new(players, prepared.header.data.tick_rate)?;
     shot_views.register_shots(&prepared.events.shots, rounds);
     let mut movement = super::movement::Match::new(players, prepared.header.data.tick_rate)?;
+    let mut smoke_shots = BTreeMap::new();
+    let smoke_estimate =
+        super::smoke_estimate::Estimator::new(&prepared.events.raw, prepared.header.data.tick_rate);
     let mut round_cursor = 0;
     let mut measurement_cursor = 0;
-    let coverage = native_body::visit_when(
+    let coverage = native_body::visit_scene(
         path,
         prepared,
         &prepared.skeleton,
         |tick| live_round(rounds, &mut measurement_cursor, tick).is_some(),
-        |tick, frame| {
+        |tick, frame, scene| {
             let round = live_round(rounds, &mut round_cursor, tick);
+            if round.is_some() {
+                for shot in prepared.events.shots.get(&tick).into_iter().flatten() {
+                    smoke_shots.insert(
+                        super::combat_stats::SmokeShotKey::new(&shot.player_id, tick, &shot.weapon),
+                        smoke_estimate.classify(
+                            shot,
+                            &prepared.events,
+                            prepared.assets.weapons.as_ref(),
+                            frame,
+                            scene,
+                            &scene.cpu_smoke,
+                            visibility.map(|v| &v.world),
+                        ),
+                    );
+                }
+            }
+            ttd.push(tick, frame, round, scene)?;
             views.push(tick, frame, round)?;
             movement.push(tick, frame, round)?;
             shot_views.push(
@@ -81,6 +108,7 @@ pub fn evaluate(
         players,
         rounds,
         prepared.header.data.tick_rate,
+        &smoke_shots,
     );
     let measurements = BTreeMap::new();
     let checks = evaluator
@@ -104,6 +132,21 @@ pub fn evaluate(
             }
             if let Some(context) = combat.get(&player) {
                 checks.extend(context.iter().cloned());
+            }
+            if let Some(check) = checks
+                .iter_mut()
+                .find(|c| c.definition.id == "time-to-damage")
+            {
+                *check = ttd.clocks.check(&player);
+                if visibility.is_none() {
+                    check.reason_code = "visibilityAssetsMissing".into();
+                    check.reason = "Map obstruction data could not be loaded.".into();
+                }
+                check.diagnostics = serde_json::json!({
+                    "playerId": player, "demoFingerprint": fingerprint,
+                    "unknownPairs": ttd.unknown_pairs, "unknownReasons": ttd.unknown_reasons,
+                    "staticGeometryFingerprint": visibility.map(|p| &p.fingerprint),
+                });
             }
             (player, checks)
         })
@@ -386,6 +429,10 @@ mod tests {
         };
         vec![
             PlayerFrame {
+                simulation_tick: None,
+                hitbox_set: None,
+                hitbox_transforms: vec![],
+                capsules: vec![],
                 movement: None,
                 player_id: "a".into(),
                 identity: "1:0:2".into(),
@@ -396,6 +443,10 @@ mod tests {
                 points: vec![Some([0., 0., 0.])],
             },
             PlayerFrame {
+                simulation_tick: None,
+                hitbox_set: None,
+                hitbox_transforms: vec![],
+                capsules: vec![],
                 movement: None,
                 player_id: "b".into(),
                 identity: format!("2:{generation}:{team}"),

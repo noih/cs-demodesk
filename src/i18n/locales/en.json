@@ -1,5 +1,7 @@
 {
-  "errors": { "app-closed": "Job interrupted because the app was closed" },
+  "errors": {
+    "app-closed": "Job interrupted because the app was closed"
+  },
   "startup": {
     "title": "Data directory unavailable",
     "hint": "Choose another data directory or restore the default data directory. The app will restart; existing data stays in place.",
@@ -94,7 +96,7 @@
     "reparse": "Parse again",
     "parse": "Parse",
     "parsing": "Parsing...",
-    "clearAnalysis": "Clear analysis",
+    "clearAnalysis": "Delete all analysis data",
     "deleteDemo": "Delete demo file",
     "rounds_one": "{{count}} round",
     "rounds_other": "{{count}} rounds",
@@ -108,7 +110,9 @@
     "activeJobs": "{{n}} running",
     "deleteTitle": "Delete the demo file?",
     "deleteBody": "Deletes <path/>, its analysis data, and all exported videos and export records. This cannot be undone. Back up any videos you want to keep before continuing.",
-    "deleteConfirm": "Delete file"
+    "deleteConfirm": "Delete file",
+    "deleteVideos": "Delete videos",
+    "deleteAnomaly": "Delete anomaly data"
   },
   "players": {
     "aim": "Aim",
@@ -275,7 +279,7 @@
     "visibleGame": "CS2 remains visible while recording; do not close it manually.",
     "hiddenGame": "CS2 runs hidden while recording; do not close it manually.",
     "submitting": "Submitting...",
-    "resolutionLimit": "Recording resolution is limited by device and game support."
+    "resolutionLimit": "Resolution depends on device and game support"
   },
   "renders": {
     "overallProgress": "Overall progress (estimated)",
@@ -427,7 +431,7 @@
     "parsedDir": "Parsed data",
     "clipsDir": "Videos",
     "radarDir": "Radar images",
-    "clearParsedConfirm": "Deletes saved analysis; demos without errors are parsed again automatically. Failed demos still require a manual retry. Demo files and videos are kept.",
+    "clearParsedConfirm": "Deletes parsed data, anomaly data and videos. Keeps demo files. Demos without errors are parsed again automatically.",
     "clearClipsConfirm": "Deletes every exported video and job record; demo files and parsed data are kept.",
     "clearRadarConfirm": "Extracted again from the game files the next time the 2D replay opens.",
     "clearParsedWhat": "parsed data",
@@ -566,11 +570,12 @@
       "bhop-speed-retention": "Repeated jumps with sustained takeoff speed; initial acceleration is considered separately.",
       "shot-synchronous-view-turn": "Requires a shot-tick turn of at least 30 degrees and a next-tick turn of at least 30 degrees back within 3 degrees of the original view.",
       "fixed-view-air-strafe": "Repeated alternating horizontal movement in the air while recorded view direction stays stable and speed increases.",
-      "smoke-hit-rate": "Counts confirmed hits through smoke; the paths of missed shots are incomplete, so no hit rate is calculated.",
-      "penetration-hit-rate": "Counts confirmed hits through surfaces; the paths of missed shots are incomplete, so no hit rate is calculated."
+      "smoke-hit-rate": "Estimates smoke hit rate from shot directions, excluding HE disturbances and uncertain obstructions.",
+      "penetration-hit-rate": "Counts confirmed hits through surfaces.",
+      "time-to-damage": "Estimated time from first unobstructed forward enemy hitbox to first firearm damage, using demo poses and installed map physics. Excludes targets behind the eyes; includes tick uncertainty."
     },
     "reasons": {
-      "visibilityOnsetMissing": "First actual visibility of any enemy body surface is unavailable; TTD has not been calculated.",
+      "visibilityOnsetMissing": "No qualified first-damage encounters.",
       "missing": "Measured body-point tracking data is missing.",
       "failed": "The rule could not be evaluated.",
       "rapidAcquisition": "Rapid acquisition of a fixed body point.",
@@ -590,7 +595,8 @@
       "experimentalMeasurements": "Behavior observations for review.",
       "shotViewMissing": "No firearm shots have consecutive same-life, live-round view samples.",
       "movementMissing": "Required movement data is missing.",
-      "shotPathsMissing": "Confirmed hits are counted; complete paths for missed shots are unavailable, so hit rate cannot yet be calculated."
+      "shotPathsMissing": "Confirmed hits are counted; complete paths for missed shots are unavailable, so hit rate cannot yet be calculated.",
+      "visibilityAssetsMissing": "Map obstruction data could not be loaded."
     },
     "metrics": {
       "speed": "Acquisition speed",
@@ -642,8 +648,17 @@
       "maximumViewStep": "Maximum view step",
       "unmeasuredShots": "Shots without measured view",
       "smokeHits": "Smoke-path hits",
+      "smokeShots": "Shots in estimated sample",
+      "smokeHitRate": "Smoke hit rate (estimated)",
       "penetrationHits": "Penetrating hits",
-      "unclassifiedShots": "Other shots"
+      "unclassifiedShots": "Other shots",
+      "measuredTtdEncounters": "Measured TTD encounters",
+      "shortTtdEncounters": "TTD ≤150 ms",
+      "shortTtdPercent": "Short TTD rate",
+      "medianTtdUpperMs": "Median TTD upper bound",
+      "ttdLowerMs": "TTD lower bound",
+      "ttdUpperMs": "TTD upper bound",
+      "estimatedSmokeHits": "Hits in estimated sample"
     },
     "sourceUnverified": "Source demo not verified. Showing saved analysis.",
     "ruleCounts": "Occurrences by behavior",
@@ -665,6 +680,15 @@
       "errors": "{{count}} failed"
     },
     "detailsShort": "Details",
-    "restart": "Reanalyze"
+    "deleteData": "Delete data",
+    "restart": "Reanalyze",
+    "previousPage": "Previous",
+    "nextPage": "Next",
+    "ttdSamples": "TTD samples",
+    "units": {
+      "encounters": "encounters",
+      "percent": "%",
+      "shots": "shots"
+    }
   }
 }

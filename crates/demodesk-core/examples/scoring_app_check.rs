@@ -39,10 +39,7 @@ impl Quiet {
 }
 fn main() -> Result<()> {
     let args: Vec<_> = std::env::args().skip(1).collect();
-    ensure!(
-        args.len() == 2,
-        "expected DEMO ISOLATED_DATA_DIRECTORY"
-    );
+    ensure!(args.len() == 2, "expected DEMO ISOLATED_DATA_DIRECTORY");
     let root = Path::new(&args[1]).to_path_buf();
     let store = Store::open(root.clone())?;
     store.save_settings(&Settings {
@@ -97,10 +94,27 @@ fn main() -> Result<()> {
             "assessment does not contain the exact match roster"
         );
     }
-    let enabled = first.players.values().next().expect("match roster")[0].checks.iter()
-        .map(|check| check.definition.id.clone()).collect::<BTreeSet<_>>();
-    for required in ["shot-hit-rate", "first-shot-hit-rate", "unbroken-hit-sequence", "rapid-multikill", "flashed-hit-rate", "shot-synchronous-view-turn", "bhop-speed-retention", "fixed-view-air-strafe", "smoke-hit-rate", "penetration-hit-rate"] {
-        ensure!(enabled.contains(required), "missing behavior rule: {required}");
+    let enabled = first.players.values().next().expect("match roster")[0]
+        .checks
+        .iter()
+        .map(|check| check.definition.id.clone())
+        .collect::<BTreeSet<_>>();
+    for required in [
+        "shot-hit-rate",
+        "first-shot-hit-rate",
+        "unbroken-hit-sequence",
+        "rapid-multikill",
+        "flashed-hit-rate",
+        "shot-synchronous-view-turn",
+        "bhop-speed-retention",
+        "fixed-view-air-strafe",
+        "smoke-hit-rate",
+        "penetration-hit-rate",
+    ] {
+        ensure!(
+            enabled.contains(required),
+            "missing behavior rule: {required}"
+        );
     }
     let retry_runs = retry
         .players
@@ -153,20 +167,34 @@ fn main() -> Result<()> {
             "history reuse created duplicates"
         );
         ensure!(
-            retry_records.len() == 1 && again_records.len() == 1
+            retry_records.len() == 1
+                && again_records.len() == 1
                 && retry_records[0].id != again_records[0].id,
             "retry did not replace latest result"
         );
         let saved = engine.scoring_history(&meta.id, &player.steamid)?;
-        ensure!(saved.len() == 1 && saved[0].id == retry_records[0].id, "stored latest differs from response");
+        ensure!(
+            saved.len() == 1 && saved[0].id == retry_records[0].id,
+            "stored latest differs from response"
+        );
         let encoded = serde_json::to_value(&retry_records[0])?;
-        ensure!(encoded.get("score").is_none() && encoded.get("deductions").is_none()
-            && encoded.get("minorCap").is_none(), "statistics published score fields");
-        ensure!(retry_records[0].schema_version == 2, "unexpected statistics schema");
+        ensure!(
+            encoded.get("score").is_none()
+                && encoded.get("deductions").is_none()
+                && encoded.get("minorCap").is_none(),
+            "statistics published score fields"
+        );
+        ensure!(
+            retry_records[0].schema_version == 2,
+            "unexpected statistics schema"
+        );
         let mut independently_summarized = retry_records[0].checks.clone();
         demodesk_core::scoring::statistics::summarize(&mut independently_summarized);
-        ensure!(serde_json::to_value(&independently_summarized)?
-            == serde_json::to_value(&retry_records[0].checks)?, "occurrence counts are not stable");
+        ensure!(
+            serde_json::to_value(&independently_summarized)?
+                == serde_json::to_value(&retry_records[0].checks)?,
+            "occurrence counts are not stable"
+        );
         ensure!(
             retry_records[0]
                 .checks
@@ -197,6 +225,7 @@ fn main() -> Result<()> {
         "sharedAssetBytes":first.players.values().next().map(|r|r[0].input_provenance["native"]["sharedAssetBytes"].clone()),"sharedBytes":first.shared_bytes,"genericBytes":first.generic_bytes,"diagnosticBytes":first.diagnostic_bytes,"historyReuseSeconds":reused_seconds,"warmReassessmentSeconds":retry_seconds,
         "warmPreparationSeconds":retry.preparation_seconds,"warmAnalysisSeconds":retry.analysis_seconds,
         "players":parsed.info.players.len(),"samples":samples,"findings":findings,
+        "ttd":retry.players.iter().map(|(id, records)|serde_json::json!({"playerId":id,"samples":records[0].checks.iter().find(|c|c.definition.id=="time-to-damage").map(|c|c.evaluated_samples)})).collect::<Vec<_>>(),
         "mode":if cfg!(debug_assertions) {"debug"} else {"release"}})
     );
     ensure!(

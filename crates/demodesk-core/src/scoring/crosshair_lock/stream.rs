@@ -211,7 +211,9 @@ impl Held {
             let ratio = (moved / travel(&acquisition[candidate..], view)).min(1.0);
             let velocity = moved / dt;
             if velocity >= p.snap_speed
-                || (acquisition.len() - candidate >= 3 && velocity >= p.min_acquisition_speed && ratio >= p.min_straightness)
+                || (acquisition.len() - candidate >= 3
+                    && velocity >= p.min_acquisition_speed
+                    && ratio >= p.min_straightness)
             {
                 e.start_tick = first.tick;
                 e.acquisition_degrees = moved;

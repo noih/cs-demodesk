@@ -210,7 +210,14 @@ pub struct DetectOptions {
 
 impl Default for DetectOptions {
     fn default() -> Self {
-        Self { players: vec![], cluster_gap_seconds: 20.0, lead_in_seconds: 5.0, lead_out_seconds: 3.0, min_score: 3.0, top_n: 20 }
+        Self {
+            players: vec![],
+            cluster_gap_seconds: 20.0,
+            lead_in_seconds: 5.0,
+            lead_out_seconds: 3.0,
+            min_score: 3.0,
+            top_n: 20,
+        }
     }
 }
 

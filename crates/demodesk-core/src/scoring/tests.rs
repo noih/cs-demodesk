@@ -223,7 +223,10 @@ fn match_stream_routes_all_players_once_and_rejects_partial_results() {
     std::fs::write(path, &bytes).unwrap();
     let inputs = history::measurements(root.path(), "demo", "").unwrap();
     let checks = evaluate_match("demo", &players, &inputs, &BTreeMap::new());
-    assert!(checks["one"][0].findings.is_empty(), "a gap cannot extend a brief acquisition into a hold");
+    assert!(
+        checks["one"][0].findings.is_empty(),
+        "a gap cannot extend a brief acquisition into a hold"
+    );
     assert!(checks["two"][0].findings.is_empty());
     assert_eq!(checks["missing"][0].evaluated_samples, 0);
     assert_eq!(
@@ -263,24 +266,44 @@ fn match_history_replaces_all_players_together_and_removes_old_runs() {
     let mut batch = vec![make("one"), make("two")];
     history::save_match(root.path(), &mut batch).unwrap();
     let first = batch.clone();
-    let dir = root.path().join("behavior-analysis/matches").join(sha1_smol::Sha1::from("match").digest().to_string());
-    std::fs::write(dir.join("match-old.json"), serde_json::to_vec(&first).unwrap()).unwrap();
+    let dir = root
+        .path()
+        .join("behavior-analysis/matches")
+        .join(sha1_smol::Sha1::from("match").digest().to_string());
+    std::fs::write(
+        dir.join("match-old.json"),
+        serde_json::to_vec(&first).unwrap(),
+    )
+    .unwrap();
     history::save_match(root.path(), &mut batch).unwrap();
     for player in ["one", "two"] {
         let records = history::list(root.path(), "match", player).unwrap();
         assert_eq!(records.len(), 1);
-        assert_ne!(records[0].id, first.iter().find(|r| r.player_id == player).unwrap().id);
-        assert_eq!(records[0].id, batch.iter().find(|r| r.player_id == player).unwrap().id);
+        assert_ne!(
+            records[0].id,
+            first.iter().find(|r| r.player_id == player).unwrap().id
+        );
+        assert_eq!(
+            records[0].id,
+            batch.iter().find(|r| r.player_id == player).unwrap().id
+        );
     }
     assert!(history::save_match(root.path(), &mut [make("one"), make("one")]).is_err());
-    assert_eq!(history::list(root.path(), "match", "two").unwrap()[0].id, batch[1].id);
+    assert_eq!(
+        history::list(root.path(), "match", "two").unwrap()[0].id,
+        batch[1].id
+    );
     assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 1);
     assert!(dir.join("latest.json").is_file());
     let latest = history::list_match(root.path(), "match").unwrap();
     assert_eq!(latest.len(), 2);
     assert_eq!(latest["one"][0].id, batch[0].id);
     assert_eq!(latest["two"][0].id, batch[1].id);
-    std::fs::write(dir.join("latest.json"), serde_json::to_vec(&vec![make("one"), make("one")]).unwrap()).unwrap();
+    std::fs::write(
+        dir.join("latest.json"),
+        serde_json::to_vec(&vec![make("one"), make("one")]).unwrap(),
+    )
+    .unwrap();
     assert!(history::list_match(root.path(), "match").is_err());
 }
 

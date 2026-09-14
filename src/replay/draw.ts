@@ -43,7 +43,7 @@ export const COLORS = {
   ct: '#5fa8ff',
   t: '#f2b134',
   dead: 'rgba(255,255,255,0.45)',
-  smoke: 'rgba(200,205,215,0.55)',
+  smoke: 'rgba(235,240,245,0.75)',
   fire: 'rgba(255,120,30,0.5)',
   flash: 'rgba(255,255,255,0.9)',
   he: 'rgba(255,80,80,0.8)',
@@ -129,6 +129,7 @@ export function draw(ctx: CanvasRenderingContext2D, width: number, height: numbe
       ctx.beginPath();
       switch (e.kind) {
         case 'smoke':
+          if (state.smokeCells !== undefined) break;
           ctx.fillStyle = COLORS.smoke;
           ctx.arc(x, y, 144 / m.scale * k, 0, Math.PI * 2);
           ctx.fill();
@@ -157,6 +158,17 @@ export function draw(ctx: CanvasRenderingContext2D, width: number, height: numbe
         }
       }
     }
+  }
+
+  if (tg.grenades && state.smokeCells) {
+    ctx.fillStyle = COLORS.smoke;
+    const cell = 20 / m.scale * k;
+    for (const [wx,wy,wz,length,alpha] of state.smokeCells) {
+      const [x,y] = place(m,lay,wx!,wy!+20,wz!);
+      ctx.globalAlpha = alpha! / 15;
+      ctx.fillRect(x,y,cell*length!,cell);
+    }
+    ctx.globalAlpha = 1;
   }
 
   if (tg.grenades && state.fireCells) {

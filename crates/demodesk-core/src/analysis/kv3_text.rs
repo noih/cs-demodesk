@@ -3,10 +3,37 @@ use anyhow::{bail, ensure, Context, Result};
 use serde_json::{Map, Value};
 
 pub fn parse(text: &str) -> Result<Value> {
-    ensure!(
-        text.len() <= 64 * 1024 * 1024,
-        "KV3 text exceeds size limit"
-    );
+    parse_document(text, None, 64 * 1024 * 1024)
+}
+
+/// Keep large PHYS blobs as bytes instead of allocating one JSON value per byte.
+pub struct BinaryDocument {
+    pub value: Value,
+    blobs: Vec<Vec<u8>>,
+}
+impl BinaryDocument {
+    pub fn binary(&self, reference: &Value) -> Result<&[u8]> {
+        let object = reference
+            .as_object()
+            .context("expected KV3 binary reference")?;
+        ensure!(object.len() == 1, "invalid KV3 binary reference");
+        let index = object
+            .get("$binary")
+            .and_then(Value::as_u64)
+            .context("invalid KV3 binary reference")?;
+        self.blobs
+            .get(usize::try_from(index)?)
+            .map(Vec::as_slice)
+            .context("KV3 binary reference out of range")
+    }
+}
+pub fn parse_binary(text: &str) -> Result<BinaryDocument> {
+    let mut blobs = Vec::new();
+    let value = parse_document(text, Some(&mut blobs), 256 * 1024 * 1024)?;
+    Ok(BinaryDocument { value, blobs })
+}
+fn parse_document(text: &str, blobs: Option<&mut Vec<Vec<u8>>>, limit: usize) -> Result<Value> {
+    ensure!(text.len() <= limit, "KV3 text exceeds size limit");
     let text = if let Some(header) = text.find("<!-- kv3 ") {
         let end = text[header..].find("-->").context("Truncated KV3 header")?;
         &text[header + end + 3..]
@@ -17,6 +44,7 @@ pub fn parse(text: &str) -> Result<Value> {
         text,
         at: 0,
         nodes: 0,
+        blobs,
     };
     let value = parser.value(0)?;
     parser.space()?;
@@ -25,13 +53,14 @@ pub fn parse(text: &str) -> Result<Value> {
     Ok(value)
 }
 
-struct Parser<'a> {
+struct Parser<'a, 'b> {
     text: &'a str,
     at: usize,
     nodes: usize,
+    blobs: Option<&'b mut Vec<Vec<u8>>>,
 }
 
-impl Parser<'_> {
+impl Parser<'_, '_> {
     fn space(&mut self) -> Result<()> {
         loop {
             while self.byte().is_some_and(u8::is_ascii_whitespace) {
@@ -125,6 +154,7 @@ impl Parser<'_> {
                     } else {
                         self.word()?.to_owned()
                     };
+                    ensure!(self.blobs.is_none() || key != "$binary", "reserved KV3 binary key");
                     self.take(b'=')?;
                     ensure!(!result.contains_key(&key), "Duplicate KV3 key {key}");
                     result.insert(key, self.value(depth + 1)?);
@@ -167,10 +197,16 @@ impl Parser<'_> {
                         token.len() == 2 && token.bytes().all(|b| b.is_ascii_hexdigit()),
                         "Invalid KV3 binary byte"
                     );
-                    bytes.push(Value::from(u8::from_str_radix(token, 16)?));
+                    bytes.push(u8::from_str_radix(token, 16)?);
                     ensure!(bytes.len() <= 16 * 1024 * 1024, "KV3 binary exceeds limit");
                 }
-                Ok(Value::Array(bytes))
+                if let Some(blobs) = self.blobs.as_mut() {
+                    let index = blobs.len();
+                    blobs.push(bytes);
+                    Ok(serde_json::json!({"$binary": index}))
+                } else {
+                    Ok(Value::Array(bytes.into_iter().map(Value::from).collect()))
+                }
             }
             b'"' => Ok(Value::String(self.string()?)),
             _ => {
@@ -208,6 +244,23 @@ impl Parser<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn packed_binary_preserves_bytes_without_json_byte_arrays() {
+        let text = "{ data=#[ 00 1f FF ] nested=[{data=#[ 02 03 ]}] }";
+        let packed = parse_binary(text).unwrap();
+        assert_eq!(packed.binary(&packed.value["data"]).unwrap(), &[0, 31, 255]);
+        assert_eq!(
+            packed.binary(&packed.value["nested"][0]["data"]).unwrap(),
+            &[2, 3]
+        );
+        assert_eq!(
+            parse(text).unwrap()["data"],
+            serde_json::json!([0, 31, 255])
+        );
+        assert!(packed.binary(&serde_json::json!({"$binary":99})).is_err());
+        assert!(parse_binary("{data=#[ FF}").is_err());
+        assert!(parse_binary("{fake={ $binary=0 } data=#[ 00 ]}").is_err());
+    }
     #[test]
     fn reads_embedded_model_multiline_kv3() {
         let value = parse(

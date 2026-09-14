@@ -229,6 +229,9 @@ fn sanitize_message(mut bytes: &[u8], schema: MessageSchema) -> Option<Vec<u8>> 
         }
 
         if wire_type == 7 {
+            if matches!(schema, MessageSchema::InputHistory) && matches!(field, 2 | 12..=15 | 66..=69) {
+                continue; // Cleared on the typed baseline before this merge.
+            }
             let normal_wire_type = schema.field_wire_type(field)?;
             write_varint((field << 3) | u64::from(normal_wire_type), &mut out);
             schema.write_default(field, normal_wire_type, &mut out)?;
@@ -272,7 +275,7 @@ fn sanitize_message(mut bytes: &[u8], schema: MessageSchema) -> Option<Vec<u8>> 
 /// Reconstructs the codegen-delta list from its per-player-slot baseline.
 /// The leading wire-type 7 key declares the target length; following field
 /// numbers are zero-based element indices and may be sparse.
-fn decode_repeated<M>(payloads: &[prost::bytes::Bytes], schema: MessageSchema, previous: &[M]) -> Option<Vec<M>>
+fn decode_repeated<M>(payloads: &[prost::bytes::Bytes], schema: MessageSchema, previous: &[M], reset: impl Fn(&mut M, &[u8]) -> Option<()>) -> Option<Vec<M>>
 where
     M: Message + Default + Clone,
 {
@@ -301,12 +304,47 @@ where
             let index = usize::try_from(key >> 3).ok()?;
             let length = usize::try_from(read_varint(&mut bytes)?).ok()?;
             let (message, rest) = bytes.split_at_checked(length)?;
+            reset(messages.get_mut(index)?, message)?;
             let message = sanitize_message(message, schema)?;
             messages.get_mut(index)?.merge(message.as_slice()).ok()?;
             bytes = rest;
         }
     }
     Some(messages)
+}
+
+// Prost merges an empty embedded message into the old value; codegen reset must remove it first.
+fn clear_history_resets(history: &mut csgoproto::CsgoInputHistoryEntryPb, mut bytes: &[u8]) -> Option<()> {
+    while !bytes.is_empty() {
+        let key = read_varint(&mut bytes)?;
+        let field = key >> 3;
+        match key & 7 {
+            7 => match field {
+                0 => *history = Default::default(),
+                2 => history.view_angles = None,
+                12 => history.cl_interp = None,
+                13 => history.sv_interp0 = None,
+                14 => history.sv_interp1 = None,
+                15 => history.player_interp = None,
+                66 => history.shoot_position = None,
+                67 => history.target_head_pos_check = None,
+                68 => history.target_abs_pos_check = None,
+                69 => history.target_abs_ang_check = None,
+                _ => {}
+            },
+            0 => {
+                read_varint(&mut bytes)?;
+            }
+            1 => bytes = bytes.get(8..)?,
+            2 => {
+                let n = usize::try_from(read_varint(&mut bytes)?).ok()?;
+                bytes = bytes.get(n..)?;
+            }
+            5 => bytes = bytes.get(4..)?,
+            _ => return None,
+        }
+    }
+    Some(())
 }
 
 fn replace_if_some<T>(target: &mut Option<T>, value: Option<T>) {
@@ -335,7 +373,12 @@ pub(super) fn apply_delta(baseline: &CsgoUserCmdPb, delta_data: &[u8]) -> Option
     let mut next = baseline.clone();
 
     if !delta.input_history_delta.is_empty() {
-        next.input_history = decode_repeated(&delta.input_history_delta, MessageSchema::InputHistory, &next.input_history)?;
+        next.input_history = decode_repeated(
+            &delta.input_history_delta,
+            MessageSchema::InputHistory,
+            &next.input_history,
+            clear_history_resets,
+        )?;
     }
     replace_if_some(&mut next.attack1_start_history_index, delta.attack1_start_history_index);
     replace_if_some(&mut next.attack2_start_history_index, delta.attack2_start_history_index);
@@ -371,7 +414,12 @@ pub(super) fn apply_delta(baseline: &CsgoUserCmdPb, delta_data: &[u8]) -> Option
             base.execution_notes = Some(CBaseUserCmdExecutionNotes::decode(notes).ok()?);
         }
         if !delta_base.subtick_moves_delta.is_empty() {
-            base.subtick_moves = decode_repeated(&delta_base.subtick_moves_delta, MessageSchema::SubtickMove, &base.subtick_moves)?;
+            base.subtick_moves = decode_repeated(
+                &delta_base.subtick_moves_delta,
+                MessageSchema::SubtickMove,
+                &base.subtick_moves,
+                |_, _| Some(()),
+            )?;
         }
     }
 
@@ -417,7 +465,7 @@ mod tests {
             0x17, 0x02, 0x09, 0x08, 0x01, 0x10, 0x01, 0x1d, 0x00, 0x00, 0xb0, 0x3e, 0x0a, 0x0a, 0x08, 0x80, 0x10, 0x10, 0x01, 0x1d, 0x00, 0x00, 0xb0, 0x3e,
         ]);
 
-        let decoded = decode_repeated::<csgoproto::CSubtickMoveStep>(&[payload], MessageSchema::SubtickMove, &[]).unwrap();
+        let decoded = decode_repeated::<csgoproto::CSubtickMoveStep>(&[payload], MessageSchema::SubtickMove, &[], |_, _| Some(())).unwrap();
 
         assert_eq!(decoded.len(), 2);
         assert_eq!(decoded[0].button, Some(1));
@@ -437,7 +485,7 @@ mod tests {
         ];
         let payload = prost::bytes::Bytes::from_static(&[0x17, 0x0a, 0x02, 0x08, 0x04]);
 
-        let decoded = decode_repeated(&[payload], MessageSchema::SubtickMove, &previous).unwrap();
+        let decoded = decode_repeated(&[payload], MessageSchema::SubtickMove, &previous, |_, _| Some(())).unwrap();
 
         assert_eq!(decoded.len(), 2);
         assert_eq!(decoded[0], csgoproto::CSubtickMoveStep::default());

@@ -1,21 +1,23 @@
 //! Versioned per-demo/player assessments; analysis producers remain independent.
+pub mod clips;
+pub mod combat_stats;
 pub mod crosshair_lock;
 pub mod engagement_context;
 pub mod history;
-pub mod queue;
-pub mod clips;
+pub mod movement;
 pub mod native;
+mod smoke_estimate;
+pub mod queue;
 mod rules;
 pub mod shot_view;
-pub mod movement;
-pub mod combat_stats;
 pub mod statistics;
+pub mod time_to_damage;
 pub mod view_angles;
 pub use rules::evaluate_match;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
-pub const RULESET_VERSION: &str = "12-match-audit";
+pub const RULESET_VERSION: &str = "16-estimated-smoke-rate";
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub enum State {
@@ -130,16 +132,9 @@ pub fn evaluate(context: &Context<'_>) -> Vec<Check> {
             .map(<[Check]>::to_vec)
             .unwrap_or_else(engagement_context::unavailable),
     );
-    checks.push(Check {
-        definition: Definition {
-            id: "time-to-damage".into(), version: "1-visibility-required".into(), name: "TTD".into(),
-            description: "Time from the first actually visible part of an enemy to first damage to that same enemy.".into(),
-            category: "reaction".into(), parameters: serde_json::json!({"requiresVisibleBodySurface":true,"allowsBodyEdge":true,"requiresOcclusionAndFov":true}),
-        },
-        state: State::Unavailable, reason_code: "visibilityOnsetMissing".into(),
-        reason: "Verified first visible body-surface times are unavailable; TTD is not calculated.".into(),
-        evaluated_samples: 0, findings: vec![], observations: vec![], occurrences: vec![], summary: vec![], diagnostics: serde_json::Value::Null,
-    });
+    checks.push(time_to_damage::unavailable(
+        "Qualified body line-of-sight onsets are unavailable.",
+    ));
     checks
 }
 

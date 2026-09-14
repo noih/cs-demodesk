@@ -26,7 +26,7 @@ pub fn contract() -> Contract {
     Contract {
         module: "match-state".into(),
         schema_version: 7,
-        implementation_version: "0.17.0".into(),
+        implementation_version: "0.24.0".into(),
     }
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -562,7 +562,36 @@ impl<W: Write> Writer<W> {
                 self.array(entity, class, &path)?;
             }
         }
+        self.user_commands(parser.tick, parser.net_tick, &updates.user_cmds)?;
         self.frame(parser.tick, parser.net_tick)
+    }
+    fn user_commands(
+        &mut self,
+        tick: i32,
+        net_tick: u32,
+        commands: &[parser::second_pass::parser_settings::AnalysisUserCmd],
+    ) -> Result<()> {
+        use std::fmt::Write as _;
+        for command in commands {
+            let encoded = command.protobuf.as_ref().map(|bytes| {
+                let mut hex = String::with_capacity(bytes.len() * 2);
+                for byte in bytes {
+                    write!(&mut hex, "{byte:02x}").unwrap();
+                }
+                hex
+            });
+            let event = serde_json::json!({
+                "event_name": "analysis_user_cmd", "tick": tick, "net_tick": net_tick,
+                "ordinal": command.ordinal, "player_slot": command.player_slot,
+                "command_number": command.command_number,
+                "server_tick_executed": command.server_tick_executed,
+                "client_tick": command.client_tick, "protobuf_hex": encoded,
+                "invalid": command.invalid,
+            });
+            self.output.write_all(&[3])?;
+            blob(&mut self.output, &serde_json::to_vec(&event)?)?;
+        }
+        Ok(())
     }
     fn remove(&mut self, key: &(i32, u32, String)) -> Result<()> {
         let previous = self.fields.remove(key).context("undefined removed field")?;

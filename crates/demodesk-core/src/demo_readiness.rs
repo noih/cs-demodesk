@@ -17,9 +17,13 @@ pub(crate) fn varint(reader: &mut impl Read, position: &mut u64) -> io::Result<O
         let mut byte = [0];
         reader.read_exact(&mut byte)?;
         *position += 1;
-        if shift == 28 && byte[0] > 15 { return Ok(None); }
+        if shift == 28 && byte[0] > 15 {
+            return Ok(None);
+        }
         value |= u32::from(byte[0] & 127) << shift;
-        if byte[0] & 128 == 0 { return Ok(Some(value)); }
+        if byte[0] & 128 == 0 {
+            return Ok(Some(value));
+        }
     }
     Ok(None)
 }
@@ -27,16 +31,28 @@ pub(crate) fn varint(reader: &mut impl Read, position: &mut u64) -> io::Result<O
 fn check(reader: &mut BufReader<impl Read + Seek>, length: u64) -> io::Result<bool> {
     let mut header = [0; 16];
     reader.read_exact(&mut header)?;
-    if &header[..8] != b"PBDEMS2\0" { return Ok(false); }
+    if &header[..8] != b"PBDEMS2\0" {
+        return Ok(false);
+    }
     let mut position = 16;
     while position < length {
-        let Some(command) = varint(reader, &mut position)? else { return Ok(false); };
-        let Some(_) = varint(reader, &mut position)? else { return Ok(false); };
-        let Some(size) = varint(reader, &mut position)? else { return Ok(false); };
+        let Some(command) = varint(reader, &mut position)? else {
+            return Ok(false);
+        };
+        let Some(_) = varint(reader, &mut position)? else {
+            return Ok(false);
+        };
+        let Some(size) = varint(reader, &mut position)? else {
+            return Ok(false);
+        };
         position += u64::from(size);
-        if position > length { return Ok(false); }
+        if position > length {
+            return Ok(false);
+        }
         // DEM_Stop terminates the gameplay stream; metadata may follow it.
-        if command & !64 == 0 { return Ok(true); }
+        if command & !64 == 0 {
+            return Ok(true);
+        }
         reader.seek_relative(i64::from(size))?;
     }
     Ok(false)
@@ -58,7 +74,11 @@ mod tests {
             let mut file = tempfile::tempfile().unwrap();
             file.write_all(&bytes[..end]).unwrap();
             file.rewind().unwrap();
-            assert_eq!(is_complete(&mut file).unwrap(), end == bytes.len(), "prefix {end}");
+            assert_eq!(
+                is_complete(&mut file).unwrap(),
+                end == bytes.len(),
+                "prefix {end}"
+            );
         }
         bytes.extend_from_slice(&[255, 255]); // Trailer is outside the gameplay stream.
         let mut file = tempfile::tempfile().unwrap();

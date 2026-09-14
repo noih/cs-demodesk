@@ -297,9 +297,10 @@ impl<'a> FirstPassParser<'a> {
 
             let ok = match NetMessageType::from(msg_type as i32) {
                 svc_ServerInfo => {
-                    self.server_infos.push(csgoproto::CsvcMsgServerInfo::decode(msg_bytes.as_slice()).map_err(|_| DemoParserError::MalformedMessage)?);
+                    self.server_infos
+                        .push(csgoproto::CsvcMsgServerInfo::decode(msg_bytes.as_slice()).map_err(|_| DemoParserError::MalformedMessage)?);
                     Ok(())
-                },
+                }
                 GE_Source1LegacyGameEventList => self.parse_game_event_list(&msg_bytes),
                 svc_CreateStringTable => self.parse_create_stringtable(&msg_bytes),
                 svc_UpdateStringTable => self.update_string_table(&msg_bytes),

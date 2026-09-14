@@ -62,7 +62,10 @@ pub enum Kv {
 impl Kv {
     pub fn get(&self, key: &str) -> Option<&Kv> {
         match self {
-            Kv::Obj(items) => items.iter().find(|(k, _)| k.eq_ignore_ascii_case(key)).map(|(_, v)| v),
+            Kv::Obj(items) => items
+                .iter()
+                .find(|(k, _)| k.eq_ignore_ascii_case(key))
+                .map(|(_, v)| v),
             _ => None,
         }
     }
@@ -135,7 +138,9 @@ fn parse_obj(tokens: &[String], pos: &mut usize) -> Result<Kv> {
             return Ok(Kv::Obj(items));
         }
         *pos += 1;
-        let val = tokens.get(*pos).ok_or_else(|| anyhow!("KeyValues: value missing after {key}"))?;
+        let val = tokens
+            .get(*pos)
+            .ok_or_else(|| anyhow!("KeyValues: value missing after {key}"))?;
         *pos += 1;
         if val == "{" {
             items.push((key.clone(), parse_obj(tokens, pos)?));
@@ -148,14 +153,20 @@ fn parse_obj(tokens: &[String], pos: &mut usize) -> Result<Kv> {
 
 /// The map's own overview block (the file is `"de_x" { … }`; fall back to the first object).
 fn overview_block<'a>(root: &'a Kv, map: &str) -> Option<&'a Kv> {
-    root.get(map).or_else(|| root.entries().iter().find(|(_, v)| matches!(v, Kv::Obj(_))).map(|(_, v)| v))
+    root.get(map).or_else(|| {
+        root.entries()
+            .iter()
+            .find(|(_, v)| matches!(v, Kv::Obj(_)))
+            .map(|(_, v)| v)
+    })
 }
 
 /// Numbers + layers from overview.txt. Layers without a matching png are dropped
 /// by [`ensure_map_assets`]; here every section is listed with its expected file name.
 pub fn parse_overview(text: &str, map: &str) -> Result<(f64, f64, f64, Vec<MapLayer>)> {
     let root = parse_kv(text)?;
-    let ov = overview_block(&root, map).ok_or_else(|| anyhow!("overview.txt has no {map} block"))?;
+    let ov =
+        overview_block(&root, map).ok_or_else(|| anyhow!("overview.txt has no {map} block"))?;
     let pos_x = ov.num("pos_x").ok_or_else(|| anyhow!("pos_x missing"))?;
     let pos_y = ov.num("pos_y").ok_or_else(|| anyhow!("pos_y missing"))?;
     let scale = ov.num("scale").ok_or_else(|| anyhow!("scale missing"))?;
@@ -164,7 +175,11 @@ pub fn parse_overview(text: &str, map: &str) -> Result<(f64, f64, f64, Vec<MapLa
         for (name, sec) in sections.entries() {
             layers.push(MapLayer {
                 name: name.clone(),
-                image: if name.eq_ignore_ascii_case("default") { "default.png".into() } else { format!("{}.png", name.to_ascii_lowercase()) },
+                image: if name.eq_ignore_ascii_case("default") {
+                    "default.png".into()
+                } else {
+                    format!("{}.png", name.to_ascii_lowercase())
+                },
                 path: PathBuf::new(),
                 altitude_min: sec.num("AltitudeMin").unwrap_or(-1.0e6),
                 altitude_max: sec.num("AltitudeMax").unwrap_or(1.0e6),
@@ -172,7 +187,13 @@ pub fn parse_overview(text: &str, map: &str) -> Result<(f64, f64, f64, Vec<MapLa
         }
     }
     if layers.is_empty() {
-        layers.push(MapLayer { name: "default".into(), image: "default.png".into(), path: PathBuf::new(), altitude_min: -1.0e6, altitude_max: 1.0e6 });
+        layers.push(MapLayer {
+            name: "default".into(),
+            image: "default.png".into(),
+            path: PathBuf::new(),
+            altitude_min: -1.0e6,
+            altitude_max: 1.0e6,
+        });
     }
     layers.sort_by(|a, b| b.altitude_max.total_cmp(&a.altitude_max));
     Ok((pos_x, pos_y, scale, layers))
@@ -183,11 +204,18 @@ pub fn pak_path(cs2_dir: &Path) -> PathBuf {
 }
 
 fn run_vrf(vrf: &Path, args: &[&str]) -> Result<String> {
-    let out = crate::render::process::ProcessTree::new()?.output(Command::new(vrf).args(args)).with_context(|| format!("running {}", vrf.display()))?;
+    let out = crate::render::process::ProcessTree::new()?
+        .output(Command::new(vrf).args(args))
+        .with_context(|| format!("running {}", vrf.display()))?;
     let stdout = String::from_utf8_lossy(&out.stdout).to_string();
     if !out.status.success() {
         let stderr = String::from_utf8_lossy(&out.stderr);
-        return Err(anyhow!("Source2Viewer-CLI {} failed: {}{}", args.join(" "), stdout.trim(), stderr.trim()));
+        return Err(anyhow!(
+            "Source2Viewer-CLI {} failed: {}{}",
+            args.join(" "),
+            stdout.trim(),
+            stderr.trim()
+        ));
     }
     Ok(stdout)
 }
@@ -196,7 +224,18 @@ fn run_vrf(vrf: &Path, args: &[&str]) -> Result<String> {
 fn extract(vrf: &Path, pak: &Path, inner: &str, dest: &Path) -> Result<()> {
     fs::create_dir_all(dest.parent().unwrap())?;
     let _ = fs::remove_file(dest);
-    let out = run_vrf(vrf, &["-i", &pak.to_string_lossy(), "-f", inner, "-o", &dest.to_string_lossy(), "-d"])?;
+    let out = run_vrf(
+        vrf,
+        &[
+            "-i",
+            &pak.to_string_lossy(),
+            "-f",
+            inner,
+            "-o",
+            &dest.to_string_lossy(),
+            "-d",
+        ],
+    )?;
     if !dest.is_file() {
         return Err(anyhow!("{inner} not extracted: {}", out.trim()));
     }
@@ -213,18 +252,25 @@ fn radar_layer(map: &str, file_name: &str) -> Option<String> {
     if rest.is_empty() {
         Some("default".into())
     } else {
-        rest.strip_prefix('_').filter(|r| !r.is_empty() && !r.contains('_')).map(|r| r.to_string())
+        rest.strip_prefix('_')
+            .filter(|r| !r.is_empty() && !r.contains('_'))
+            .map(|r| r.to_string())
     }
 }
 
 /// Radar image files for `map` inside the vpk, keyed by layer name ("default" for the main one).
 fn list_radar_images(vrf: &Path, pak: &Path, map: &str) -> Result<BTreeMap<String, String>> {
     let prefix = format!("panorama/images/overheadmaps/{map}");
-    let out = run_vrf(vrf, &["-i", &pak.to_string_lossy(), "--vpk_list", "-f", &prefix])?;
+    let out = run_vrf(
+        vrf,
+        &["-i", &pak.to_string_lossy(), "--vpk_list", "-f", &prefix],
+    )?;
     let mut found = BTreeMap::new();
     for line in out.lines() {
         // the path may be surrounded by other columns; take it from the prefix to the next blank
-        let Some(start) = line.find(&prefix) else { continue };
+        let Some(start) = line.find(&prefix) else {
+            continue;
+        };
         let path = line[start..].split_whitespace().next().unwrap_or("");
         let file_name = path.rsplit('/').next().unwrap_or(path);
         if let Some(layer) = radar_layer(map, file_name) {
@@ -240,10 +286,16 @@ pub fn assets_path(radar_dir: &Path, map: &str) -> PathBuf {
 
 /// The stored assets, only if they are complete, current, and (when the game
 /// version is known) were extracted from this game version.
-pub fn read_map_assets(radar_dir: &Path, map: &str, patch_version: Option<u32>) -> Option<MapAssets> {
-    let mut a: MapAssets = serde_json::from_str(&fs::read_to_string(assets_path(radar_dir, map)).ok()?).ok()?;
+pub fn read_map_assets(
+    radar_dir: &Path,
+    map: &str,
+    patch_version: Option<u32>,
+) -> Option<MapAssets> {
+    let mut a: MapAssets =
+        serde_json::from_str(&fs::read_to_string(assets_path(radar_dir, map)).ok()?).ok()?;
     a.dir = radar_dir.join(map);
-    let current = a.schema_version == RADAR_SCHEMA_VERSION && (patch_version.is_none() || a.patch_version == patch_version);
+    let current = a.schema_version == RADAR_SCHEMA_VERSION
+        && (patch_version.is_none() || a.patch_version == patch_version);
     for l in &mut a.layers {
         l.path = a.dir.join(&l.image);
     }
@@ -252,7 +304,13 @@ pub fn read_map_assets(radar_dir: &Path, map: &str, patch_version: Option<u32>) 
 
 /// Make sure `radar/<map>/` holds the radar png(s) and overview.json, extracting
 /// them with Source2Viewer-CLI when missing or stale.
-pub fn ensure_map_assets(radar_dir: &Path, cs2_dir: &Path, vrf: &Path, map: &str, patch_version: Option<u32>) -> Result<MapAssets> {
+pub fn ensure_map_assets(
+    radar_dir: &Path,
+    cs2_dir: &Path,
+    vrf: &Path,
+    map: &str,
+    patch_version: Option<u32>,
+) -> Result<MapAssets> {
     if let Some(a) = read_map_assets(radar_dir, map, patch_version) {
         return Ok(a);
     }
@@ -271,24 +329,49 @@ pub fn ensure_map_assets(radar_dir: &Path, cs2_dir: &Path, vrf: &Path, map: &str
     }
     let mut layers = vec![];
     for layer in wanted {
-        let Some(inner) = images.get(&layer.name.to_ascii_lowercase()) else { continue };
+        let Some(inner) = images.get(&layer.name.to_ascii_lowercase()) else {
+            continue;
+        };
         extract(vrf, &pak, inner, &dir.join(&layer.image))?;
         layers.push(layer);
     }
     if layers.is_empty() {
         // overview lists no usable sections: take the main image as one layer
-        let inner = images.get("default").or_else(|| images.values().next()).unwrap();
+        let inner = images
+            .get("default")
+            .or_else(|| images.values().next())
+            .unwrap();
         extract(vrf, &pak, inner, &dir.join("default.png"))?;
-        layers.push(MapLayer { name: "default".into(), image: "default.png".into(), path: PathBuf::new(), altitude_min: -1.0e6, altitude_max: 1.0e6 });
+        layers.push(MapLayer {
+            name: "default".into(),
+            image: "default.png".into(),
+            path: PathBuf::new(),
+            altitude_min: -1.0e6,
+            altitude_max: 1.0e6,
+        });
     }
     for l in &mut layers {
         l.path = dir.join(&l.image);
     }
-    let assets = MapAssets { schema_version: RADAR_SCHEMA_VERSION, patch_version, map_name: map.to_string(), dir, pos_x, pos_y, scale, layers };
+    let assets = MapAssets {
+        schema_version: RADAR_SCHEMA_VERSION,
+        patch_version,
+        map_name: map.to_string(),
+        dir,
+        pos_x,
+        pos_y,
+        scale,
+        layers,
+    };
     let mut stored = assets.clone();
     stored.dir = PathBuf::from(".");
-    for layer in &mut stored.layers { layer.path = PathBuf::from(&layer.image); }
-    fs::write(assets_path(radar_dir, map), serde_json::to_string_pretty(&stored)?)?;
+    for layer in &mut stored.layers {
+        layer.path = PathBuf::from(&layer.image);
+    }
+    fs::write(
+        assets_path(radar_dir, map),
+        serde_json::to_string_pretty(&stored)?,
+    )?;
     Ok(assets)
 }
 
@@ -304,11 +387,26 @@ mod tests {
         fs::create_dir_all(&map).unwrap();
         fs::write(map.join("default.png"), b"image").unwrap();
         let assets = MapAssets {
-            schema_version: RADAR_SCHEMA_VERSION, patch_version: Some(1),
-            map_name: "de_dust2".into(), dir: map.clone(), pos_x: 0.0, pos_y: 0.0, scale: 1.0,
-            layers: vec![MapLayer { name: "default".into(), image: "default.png".into(), path: map.join("default.png"), altitude_min: 0.0, altitude_max: 1.0 }],
+            schema_version: RADAR_SCHEMA_VERSION,
+            patch_version: Some(1),
+            map_name: "de_dust2".into(),
+            dir: map.clone(),
+            pos_x: 0.0,
+            pos_y: 0.0,
+            scale: 1.0,
+            layers: vec![MapLayer {
+                name: "default".into(),
+                image: "default.png".into(),
+                path: map.join("default.png"),
+                altitude_min: 0.0,
+                altitude_max: 1.0,
+            }],
         };
-        fs::write(assets_path(&old, "de_dust2"), serde_json::to_vec(&assets).unwrap()).unwrap();
+        fs::write(
+            assets_path(&old, "de_dust2"),
+            serde_json::to_vec(&assets).unwrap(),
+        )
+        .unwrap();
         let next = temp.path().join("new/radar");
         fs::create_dir_all(next.parent().unwrap()).unwrap();
         fs::rename(&old, &next).unwrap();
@@ -354,16 +452,32 @@ mod tests {
 
     #[test]
     fn radar_layer_names() {
-        assert_eq!(radar_layer("de_nuke", "de_nuke_radar_psd.vtex_c").as_deref(), Some("default"));
-        assert_eq!(radar_layer("de_nuke", "de_nuke_lower_radar_psd.vtex_c").as_deref(), Some("lower"));
-        assert_eq!(radar_layer("de_nuke", "de_nuke_lower_radar.ctex_c").as_deref(), Some("lower"));
-        assert_eq!(radar_layer("de_nuke", "de_nuke_radar_spectate.vtex_c"), None);
+        assert_eq!(
+            radar_layer("de_nuke", "de_nuke_radar_psd.vtex_c").as_deref(),
+            Some("default")
+        );
+        assert_eq!(
+            radar_layer("de_nuke", "de_nuke_lower_radar_psd.vtex_c").as_deref(),
+            Some("lower")
+        );
+        assert_eq!(
+            radar_layer("de_nuke", "de_nuke_lower_radar.ctex_c").as_deref(),
+            Some("lower")
+        );
+        assert_eq!(
+            radar_layer("de_nuke", "de_nuke_radar_spectate.vtex_c"),
+            None
+        );
         assert_eq!(radar_layer("de_nuke", "de_nuke_vanity.vtex_c"), None);
     }
 
     #[test]
     fn parses_overview_without_sections() {
-        let (x, _, s, layers) = parse_overview("\"de_mirage\" { \"pos_x\" \"-3230\" \"pos_y\" \"1713\" \"scale\" \"5\" }", "de_mirage").unwrap();
+        let (x, _, s, layers) = parse_overview(
+            "\"de_mirage\" { \"pos_x\" \"-3230\" \"pos_y\" \"1713\" \"scale\" \"5\" }",
+            "de_mirage",
+        )
+        .unwrap();
         assert_eq!((x, s), (-3230.0, 5.0));
         assert_eq!(layers.len(), 1);
     }

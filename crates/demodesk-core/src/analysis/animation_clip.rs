@@ -103,7 +103,10 @@ impl Clip {
             source.offsets.len() == source.num_frames,
             "Clip frame offsets are missing"
         );
-        ensure!(source.data.len().is_multiple_of(2), "Truncated clip sample word");
+        ensure!(
+            source.data.len().is_multiple_of(2),
+            "Truncated clip sample word"
+        );
         let words_per_frame: usize = source
             .tracks
             .iter()
@@ -168,7 +171,9 @@ impl Clip {
             num_frames: source.num_frames,
             duration: source.duration,
             is_additive: source.is_additive,
-            frames: (0..source.num_frames).map(|_|std::sync::OnceLock::new()).collect(),
+            frames: (0..source.num_frames)
+                .map(|_| std::sync::OnceLock::new())
+                .collect(),
             tracks: source.tracks,
             samples: source
                 .data
@@ -183,8 +188,10 @@ impl Clip {
 
     pub fn frame(&self, index: usize) -> Result<Vec<Transform>> {
         let cached = self.frames.get(index).context("Clip frame outside range")?;
-        cached.get_or_init(|| self.decode_frame(index).map_err(|e| e.to_string()))
-            .clone().map_err(anyhow::Error::msg)
+        cached
+            .get_or_init(|| self.decode_frame(index).map_err(|e| e.to_string()))
+            .clone()
+            .map_err(anyhow::Error::msg)
     }
 
     fn decode_frame(&self, index: usize) -> Result<Vec<Transform>> {
@@ -469,7 +476,7 @@ mod tests {
             num_frames: 2,
             duration: 1.,
             is_additive: false,
-            frames: (0..2).map(|_|std::sync::OnceLock::new()).collect(),
+            frames: (0..2).map(|_| std::sync::OnceLock::new()).collect(),
             tracks: vec![track, rotating, child],
             samples: vec![0xbfff, 0xbfff, 0x3fff, 0xbfff, 0x3fff, 0x3fff],
             offsets: vec![0, 3],

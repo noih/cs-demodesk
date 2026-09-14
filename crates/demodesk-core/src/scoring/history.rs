@@ -1,4 +1,4 @@
-//! Latest complete match assessment, outside disposable parse/replay caches.
+//! Latest complete match assessment and its owned intermediate data.
 use super::*;
 use anyhow::{ensure, Context as _, Result};
 use std::{
@@ -12,7 +12,9 @@ fn key(demo_id: &str, player_id: &str) -> String {
         .to_string()
 }
 pub fn list(root: &Path, demo_id: &str, player_id: &str) -> Result<Vec<Assessment>> {
-    Ok(list_match(root, demo_id)?.remove(player_id).unwrap_or_default())
+    Ok(list_match(root, demo_id)?
+        .remove(player_id)
+        .unwrap_or_default())
 }
 /// Read and decode the complete latest result once for all players.
 pub fn list_match(root: &Path, demo_id: &str) -> Result<BTreeMap<String, Vec<Assessment>>> {
@@ -25,8 +27,14 @@ pub fn list_match(root: &Path, demo_id: &str) -> Result<BTreeMap<String, Vec<Ass
     let records: Vec<Assessment> = serde_json::from_slice(&bytes)?;
     let mut players = BTreeMap::new();
     for record in records {
-        ensure!(record.schema_version == 2 && record.demo_id == demo_id, "invalid match history");
-        ensure!(!players.contains_key(&record.player_id), "duplicate player in match history");
+        ensure!(
+            record.schema_version == 2 && record.demo_id == demo_id,
+            "invalid match history"
+        );
+        ensure!(
+            !players.contains_key(&record.player_id),
+            "duplicate player in match history"
+        );
         players.insert(record.player_id.clone(), vec![record]);
     }
     Ok(players)
@@ -167,8 +175,13 @@ pub fn save_match(root: &Path, records: &mut [Assessment]) -> Result<()> {
     // Remove former append-only runs only after the complete replacement is durable.
     for entry in fs::read_dir(&dir)? {
         let path = entry?.path();
-        if path != latest && path.extension().and_then(|s| s.to_str()) == Some("json")
-            && path.file_name().and_then(|s| s.to_str()).is_some_and(|s| s.starts_with("match-")) {
+        if path != latest
+            && path.extension().and_then(|s| s.to_str()) == Some("json")
+            && path
+                .file_name()
+                .and_then(|s| s.to_str())
+                .is_some_and(|s| s.starts_with("match-"))
+        {
             fs::remove_file(path)?;
         }
     }
@@ -184,4 +197,53 @@ pub struct MatchResponse {
     pub shared_bytes: u64,
     pub generic_bytes: u64,
     pub diagnostic_bytes: u64,
+}
+
+/// Track ownership before conversion, including attempts that fail before saving results.
+pub fn track_source(root: &Path, demo_id: &str, fingerprint: &str) -> Result<()> {
+    let dir = match_directory(root, demo_id);
+    fs::create_dir_all(&dir)?;
+    let path = dir.join("sources.json");
+    let mut sources: Vec<String> = match fs::read(&path) {
+        Ok(bytes) => serde_json::from_slice(&bytes)?,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Vec::new(),
+        Err(e) => return Err(e.into()),
+    };
+    if !sources.iter().any(|s| s == fingerprint) {
+        sources.push(fingerprint.into());
+        crate::store::write_atomic(&path, &serde_json::to_vec(&sources)?)?;
+    }
+    Ok(())
+}
+
+pub fn delete_match(root: &Path, demo_id: &str) -> Result<()> {
+    let dir = match_directory(root, demo_id);
+    let mut sources: Vec<String> = match fs::read(dir.join("sources.json")) {
+        Ok(bytes) => serde_json::from_slice(&bytes)?,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Vec::new(),
+        Err(e) => return Err(e.into()),
+    };
+    for records in list_match(root, demo_id)?.values() {
+        sources.extend(records.iter().map(|r| r.demo_fingerprint.clone()));
+    }
+    for source in sources {
+        let prefix = format!("{}-", sha1_smol::Sha1::from(source.as_str()).digest());
+        match fs::read_dir(root.join("analysis/match-state")) {
+            Ok(entries) => {
+                for entry in entries {
+                    let entry = entry?;
+                    if entry.file_name().to_string_lossy().starts_with(&prefix) {
+                        fs::remove_file(entry.path())?;
+                    }
+                }
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(e.into()),
+        }
+    }
+    match fs::remove_dir_all(dir) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(e.into()),
+    }
 }
