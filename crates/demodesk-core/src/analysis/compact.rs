@@ -11,6 +11,8 @@ use std::{
 
 const MAGIC: &[u8; 8] = b"DDSTATE7";
 const LIMIT: usize = 16 * 1024 * 1024;
+// ponytail: bounded cumulative definitions; recycle retired IDs if long matches outgrow this.
+const MAX_FIELDS: u32 = 5_000_000;
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Metadata {
@@ -252,11 +254,9 @@ impl<W: Write> Writer<W> {
             Self::change(&mut self.changes, previous.id, &previous.bytes, &bytes)?;
             previous.bytes = bytes;
         } else {
+            ensure!(self.next_id < MAX_FIELDS, "too many compact fields");
             let id = self.next_id;
-            self.next_id = self
-                .next_id
-                .checked_add(1)
-                .context("too many compact fields")?;
+            self.next_id += 1;
             let mut definition = vec![];
             number(
                 &mut definition,
@@ -691,7 +691,10 @@ pub fn visit(
                 return Ok((header, summary));
             }
             1 => {
-                ensure!(fields.len() < 1_000_000, "too many compact fields");
+                ensure!(
+                    fields.len() < MAX_FIELDS as usize,
+                    "too many compact fields"
+                );
                 let definition = read_blob(&mut input)?;
                 let field: Field = if schema >= 7 {
                     let mut cursor = definition.as_slice();
@@ -977,6 +980,86 @@ mod tests {
         };
         blob(&mut bytes, &serde_json::to_vec(&header).unwrap()).unwrap();
         bytes
+    }
+
+    #[test]
+    fn reads_more_than_a_million_field_definitions() {
+        let mut bytes = fixture_prefix(7);
+        for text in ["CPhysicsPropMultiplayer", "$present"] {
+            bytes.push(4);
+            blob(&mut bytes, text.as_bytes()).unwrap();
+        }
+        let count = MAX_FIELDS;
+        for serial in 0..count {
+            let mut definition = Vec::new();
+            for n in [1, serial, 0, 1] {
+                number(&mut definition, n).unwrap();
+            }
+            bytes.push(1);
+            blob(&mut bytes, &definition).unwrap();
+        }
+        let mut changes = Vec::new();
+        number(&mut changes, count - 1).unwrap();
+        number(&mut changes, 2).unwrap();
+        number(&mut changes, 0).unwrap();
+        blob(&mut changes, &[0, 1]).unwrap();
+        bytes.push(2);
+        bytes.extend(1i32.to_le_bytes());
+        bytes.extend(1u32.to_le_bytes());
+        blob(&mut bytes, &changes).unwrap();
+        bytes.push(0);
+        number(&mut bytes, 1).unwrap();
+        bytes.extend(1i32.to_le_bytes());
+        let (_, summary) = visit(
+            bytes.as_slice(),
+            |frame| {
+                assert_eq!(frame.changed, &[count - 1]);
+                assert_eq!(frame.fields[(count - 1) as usize].serial, count - 1);
+                assert_eq!(frame.values[&(count - 1)], [0, 1]);
+                Ok(())
+            },
+            |_| Ok(()),
+        )
+        .unwrap();
+        assert_eq!(summary.fields, count as usize);
+        assert_eq!(summary.packets, 1);
+        bytes.truncate(bytes.len() - 6);
+        bytes.push(1);
+        blob(&mut bytes, &[1, 0, 0, 1]).unwrap();
+        assert!(visit(bytes.as_slice(), |_| Ok(()), |_| Ok(()))
+            .unwrap_err()
+            .to_string()
+            .contains("too many compact fields"));
+    }
+
+    #[test]
+    fn writer_rejects_fields_beyond_reader_limit() {
+        let mut writer = Writer::new(
+            Vec::new(),
+            Source {
+                demo_fingerprint: Some("synthetic".into()),
+                game_build: None,
+                game_patch: None,
+                map_content_fingerprint: None,
+            },
+            64.,
+        )
+        .unwrap();
+        writer.next_id = MAX_FIELDS;
+        let before = writer.output.len();
+        let error = writer
+            .field(
+                Field {
+                    entity: 1,
+                    serial: 0,
+                    class: "CCSPlayerPawn".into(),
+                    name: "$present".into(),
+                },
+                &Variant::Bool(true),
+            )
+            .unwrap_err();
+        assert!(error.to_string().contains("too many compact fields"));
+        assert_eq!(writer.output.len(), before);
     }
 
     #[test]
