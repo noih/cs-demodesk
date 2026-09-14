@@ -186,11 +186,15 @@ test('smoke coverage seeks independently and distinguishes unavailable from empt
 
 test('smoke runs draw density coverage instead of a circle and retain empty gaps', () => {
   const calls=[];
-  const ctx=new Proxy({}, {get(target,key) {return key in target?target[key]:(...args)=>calls.push({key,args});}});
+  const ctx=new Proxy({}, {get(target,key) {return key in target?target[key]:(...args)=>calls.push({key,args,alpha:target.globalAlpha});}});
   const map={posX:0,posY:0,scale:1,layers:[{altitudeMin:-100,altitudeMax:100}]};
-  const state={tick:1,players:[],grenades:[],shots:[],deaths:[],smokeCells:[[100,100,0,2,15],[180,100,0,1,5]],effects:[{kind:'smoke',x:100,y:100,z:0,start:0,end:10}]};
+  const state={tick:1,players:[],grenades:[],shots:[],deaths:[],smokeCells:[[100,100,0,2,15],[180,100,0,1,5],[220,100,0,1,0]],effects:[{kind:'smoke',x:100,y:100,z:0,start:0,end:10}]};
   draw(ctx,500,500,map,[{width:2048,height:2048}],state,DEFAULT_TOGGLES,{zoom:1,panX:0,panY:0});
   assert.equal(calls.filter(c=>c.key==='arc').length,0);
-  assert.equal(calls.filter(c=>c.key==='fillRect').length,2);
+  const fills=calls.filter(c=>c.key==='fillRect');
+  assert.equal(fills.length,3);
+  assert.equal(fills[0].alpha,1,'Dense smoke retains its maximum opacity');
+  assert.ok(fills[1].alpha>0.5 && fills[1].alpha<1,'Partial density becomes visible earlier without becoming solid');
+  assert.equal(fills[2].alpha,0,'Empty smoke remains fully transparent');
   assert.equal(ctx.globalAlpha,1);
 });

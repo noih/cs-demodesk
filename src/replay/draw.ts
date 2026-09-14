@@ -165,7 +165,8 @@ export function draw(ctx: CanvasRenderingContext2D, width: number, height: numbe
     const cell = 20 / m.scale * k;
     for (const [wx,wy,wz,length,alpha] of state.smokeCells) {
       const [x,y] = place(m,lay,wx!,wy!+20,wz!);
-      ctx.globalAlpha = alpha! / 15;
+      // ponytail: display-only density curve; exact POV opacity requires raymarching.
+      ctx.globalAlpha = Math.sqrt(alpha! / 15);
       ctx.fillRect(x,y,cell*length!,cell);
     }
     ctx.globalAlpha = 1;
