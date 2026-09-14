@@ -54,6 +54,7 @@
     "goToSettings": "前往设置"
   },
   "about": {
+    "updateChecking": "正在检查更新…",
     "updateAvailable": "有新版本 {{version}}",
     "updateFailed": "无法检查更新，请重新打开关于窗口再试一次。",
     "button": "关于",

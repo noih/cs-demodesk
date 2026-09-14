@@ -54,6 +54,7 @@
     "goToSettings": "Go to Settings"
   },
   "about": {
+    "updateChecking": "Checking for updates…",
     "updateAvailable": "Version {{version}} available",
     "updateFailed": "Unable to check for updates. Reopen About to try again.",
     "button": "About",

@@ -54,6 +54,7 @@
     "goToSettings": "設定へ"
   },
   "about": {
+    "updateChecking": "更新を確認中…",
     "updateAvailable": "新しいバージョン {{version}}",
     "updateFailed": "更新を確認できませんでした。「このアプリについて」を開き直して再試行してください。",
     "button": "情報",

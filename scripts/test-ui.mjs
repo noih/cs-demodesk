@@ -51,7 +51,7 @@ try {
       if(cmd==='browse_directory')return args.path ? 'E:/tools' : 'E:/Desktop';
       if(cmd==='plugin:dialog|open')return null;
       if(cmd==='run_setup')return true;
-      if(cmd==='check_for_updates'){if(window.failUpdate)throw new Error('offline');return {status:'available',version:'1.0.10'};}
+      if(cmd==='check_for_updates'){if(window.holdUpdate)await new Promise(resolve=>window.releaseUpdate=resolve);if(window.failUpdate)throw new Error('offline');return window.updateStatus ?? {status:'available',version:'1.0.10'};}
       if(cmd==='open_url'){window.openedUrl=args.url;return;}
       if(cmd==='open_path'){window.openedPath=args.path;return;}
       if(cmd==='get_status')return window.missingTools ? {...status,ok:false,missingRenderTools:window.missingRenderTools ?? ['HLAE','ffmpeg']} : status;
@@ -269,34 +269,60 @@ try {
   const aboutBounds = await about.boundingBox();
   const settingsBounds = await page.getByRole('button', { name: 'Settings', exact: true }).boundingBox();
   assert.ok(settingsBounds.x + settingsBounds.width + 7 <= aboutBounds.x, 'About and Settings hit areas stay separated');
+  await page.evaluate(() => window.holdUpdate = true);
   await about.click();
   await page.getByRole('dialog').waitFor();
+  const checkingAbout = page.getByRole('button', {name:'About: Checking for updates…',exact:true,includeHidden:true});
+  await checkingAbout.locator('.app-spinner').waitFor();
+  assert.equal(await checkingAbout.locator('.app-spinner').evaluate(el=>getComputedStyle(el).animationName), 'app-spinner-rotate');
+  const checkingNotice = page.getByRole('dialog').getByRole('status').filter({hasText:'Checking for updates…'});
+  await checkingNotice.waitFor();
+  assert.equal(await checkingNotice.locator('.app-spinner').count(), 1);
+  await page.evaluate(() => { window.holdUpdate = false; window.releaseUpdate(); });
+  await page.getByRole('button', {name:'GitHub: Version 1.0.10 available',exact:true}).waitFor();
+  await checkingNotice.waitFor({state:'detached'});
+  const githubLink = page.getByRole('dialog').getByRole('button', {name:/^GitHub/});
+  assert.match(await githubLink.innerText(), /v1\.0\.10/, 'GitHub link displays the available version');
+  assert.equal(await githubLink.getAttribute('data-accent-color'), 'green', 'GitHub link highlights an available update');
   const storeLink = page.getByRole('dialog').getByRole('button', {name:'Microsoft Store',exact:true});
+  assert.equal(await storeLink.getAttribute('data-accent-color'), 'gray', 'GitHub updates do not highlight Microsoft Store');
   const sourceBoxes = await page.getByRole('dialog').evaluate(el => {
-    const rect = name => { const r = [...el.querySelectorAll('button')].find(b => b.textContent.trim() === name).getBoundingClientRect(); return { y:r.y, height:r.height }; };
+    const rect = name => { const r = [...el.querySelectorAll('button')].find(b => b.textContent.trim().startsWith(name)).getBoundingClientRect(); return { y:r.y, height:r.height }; };
     return {github:rect('GitHub'),store:rect('Microsoft Store')};
   });
   assert.equal(sourceBoxes.github.y, sourceBoxes.store.y, 'Distribution links share a row');
   assert.equal(sourceBoxes.github.height, sourceBoxes.store.height, 'Distribution links have equal prominence');
   await storeLink.click();
   assert.equal(await page.evaluate(() => window.openedUrl), 'https://apps.microsoft.com/detail/9N5G4VXSDGS5');
-  const updateNotice = page.getByText('Version 1.0.10 available', { exact: true });
-  await updateNotice.waitFor();
-  await updateNotice.locator('..').getByRole('button').click();
+  await page.getByRole('button', {name:'GitHub: Version 1.0.10 available',exact:true}).click();
   assert.equal(await page.evaluate(() => window.openedUrl), 'https://github.com/noih/cs-demodesk/releases/latest');
   await page.getByRole('button', { name: 'Close', exact: true }).click();
   const updateCount = () => page.evaluate(() => window.testCalls.filter(c => c.cmd === 'check_for_updates').length);
   const initialChecks = await updateCount();
-  await page.evaluate(() => window.failUpdate = true);
+  await page.evaluate(() => { window.failUpdate = true; window.holdUpdate = true; });
   await about.click();
+  await checkingNotice.waitFor();
+  await page.evaluate(() => { window.holdUpdate = false; window.releaseUpdate(); });
+  await page.getByText('Unable to check for updates. Reopen About to try again.', {exact:true}).waitFor();
+  await checkingNotice.waitFor({state:'detached'});
   await page.waitForFunction(n => window.testCalls.filter(c => c.cmd === 'check_for_updates').length === n + 1, initialChecks);
   await page.getByRole('dialog').getByRole('button', {name:'Close',exact:true}).click();
   assert.equal(await updateCount(), initialChecks + 1, 'Closing About does not check again');
   await page.evaluate(() => window.failUpdate = false);
   await page.getByRole('button', {name:'About',exact:true}).click();
-  await page.getByText('Version 1.0.10 available', {exact:true}).waitFor();
+  await page.getByRole('button', {name:'GitHub: Version 1.0.10 available',exact:true}).waitFor();
   assert.equal(await updateCount(), initialChecks + 2, 'Reopening About retries after failure');
   await page.getByRole('dialog').getByRole('button', {name:'Close',exact:true}).click();
+  for (const status of ['current', 'packaged']) {
+    await page.evaluate(status => window.updateStatus = {status}, status);
+    await page.getByRole('button', {name:/^About/}).click();
+    const github = page.getByRole('dialog').getByRole('button', {name:'GitHub',exact:true});
+    await github.waitFor();
+    assert.equal(await github.getAttribute('data-accent-color'), 'gray');
+    await github.click();
+    assert.equal(await page.evaluate(() => window.openedUrl), 'https://github.com/noih/cs-demodesk');
+    await page.getByRole('dialog').getByRole('button', {name:'Close',exact:true}).click();
+  }
   await page.getByRole('tab').filter({hasText:'Players'}).click();
   const tables = page.getByRole('table');
   assert.equal(await tables.count(), 2);

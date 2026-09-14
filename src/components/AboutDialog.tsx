@@ -36,16 +36,19 @@ export function AboutDialog() {
     checkUpdates();
     return () => { updateRequest.current++; };
   }, [checkUpdates]);
+  const checking = update === undefined;
   const available = update !== 'failed' && update?.status === 'available' ? update.version : undefined;
+  const updateLabel = checking ? t('about.updateChecking') : available ? t('about.updateAvailable', { version: available }) : undefined;
   const [version, setVersion] = useState<string>();
   useEffect(() => {
     void api.status().then((s) => setVersion(s.version)).catch(() => undefined);
   }, []);
   return (
     <Dialog.Root onOpenChange={open => { if (open) checkUpdates(); }}>
-      <Tooltip delayDuration={150} content={t('about.button')}><Dialog.Trigger>
-        <IconButton variant="ghost" color="gray" aria-label={available ? t('about.button') + ': ' + t('about.updateAvailable', { version: available }) : t('about.button')} >
-          <i aria-hidden="true" className={available ? "bi bi-arrow-up-circle-fill app-icon" : "bi bi-info-circle app-icon"} style={available ? { color: "var(--green-11)" } : undefined} />
+      <Tooltip delayDuration={150} content={updateLabel ?? t('about.button')}><Dialog.Trigger>
+        <IconButton variant="ghost" color="gray" aria-label={updateLabel ? `${t('about.button')}: ${updateLabel}` : t('about.button')} >
+          {checking ? <span aria-hidden="true" className="app-spinner app-spinner-1" /> :
+            <i aria-hidden="true" className={available ? "bi bi-arrow-up-circle-fill app-icon" : "bi bi-info-circle app-icon"} style={available ? { color: "var(--green-11)" } : undefined} />}
 
         </IconButton>
       </Dialog.Trigger></Tooltip>
@@ -55,33 +58,32 @@ export function AboutDialog() {
             <img src={logo} alt="" width="48" height="48" style={{ background: 'var(--app-logo-background, #121518)', borderRadius: 10, padding: 4 }} />
             <Dialog.Title mb="0">CS DemoDesk</Dialog.Title>
           </Flex>
-          <Text size="2" color="gray" className="mono">
-            v{version ?? '…'}
-          </Text>
+          <Text size="2" color="gray" className="mono">v{version ?? '…'}</Text>
         </Flex>
         <Dialog.Description size="2" color="gray" mt="4" mb="0" style={{ lineHeight: 1.7 }}>
           {t('about.tagline')}
         </Dialog.Description>
 
-        {update === 'failed' && <Text as="p" size="2" color="gray">{t('about.updateFailed')}</Text>}
-        {update !== 'failed' && update?.status === 'available' && (
-          <Flex align="center" gap="2" mt="3">
-            <Text size="2">{t('about.updateAvailable', { version: update.version })}</Text>
-            <LinkIcon url="https://github.com/noih/cs-demodesk/releases/latest" label={t('about.openGithub')} />
-          </Flex>
-        )}
         <Flex align="center" gap="2" mt="5" wrap="wrap">
           <Text size="2">{t('about.author')}</Text>
           <Text size="2" color="gray">· AGPL-3.0</Text>
         </Flex>
         <Flex align="center" gap="4" mt="3" wrap="wrap">
-          <Button size="2" variant="soft" color="gray" onClick={() => void api.openUrl('https://github.com/noih/cs-demodesk')}>
-            GitHub <i aria-hidden="true" className="bi bi-box-arrow-up-right app-icon" />
+          <Button size="2" variant="soft" color={available ? 'green' : 'gray'}
+            aria-label={available ? `GitHub: ${t('about.updateAvailable', { version: available })}` : 'GitHub'}
+            onClick={() => void api.openUrl(available ? 'https://github.com/noih/cs-demodesk/releases/latest' : 'https://github.com/noih/cs-demodesk')}>
+            GitHub {available && <><i aria-hidden="true" className="bi bi-arrow-up-circle-fill app-icon" />v{available}</>}
+            <i aria-hidden="true" className="bi bi-box-arrow-up-right app-icon" />
           </Button>
           <Button size="2" variant="soft" color="gray" onClick={() => void api.openUrl('https://apps.microsoft.com/detail/9N5G4VXSDGS5')}>
             Microsoft Store <i aria-hidden="true" className="bi bi-box-arrow-up-right app-icon" />
           </Button>
         </Flex>
+        {checking && <Flex role="status" align="center" gap="2" mt="3">
+          <span aria-hidden="true" className="app-spinner app-spinner-1" />
+          <Text size="2" color="gray">{t('about.updateChecking')}</Text>
+        </Flex>}
+        {update === 'failed' && <Text as="p" size="2" color="gray" mt="3">{t('about.updateFailed')}</Text>}
         <Text as="div" size="2" weight="medium" mt="5" mb="2">
           {t('about.thirdParty')}
         </Text>
