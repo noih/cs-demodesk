@@ -2,7 +2,7 @@
 
 English | [繁體中文](README.zh-TW.md) | [简体中文](README.zh-CN.md) | [日本語](README.ja.md) | [한국어](README.ko.md) | [Русский](README.ru.md)
 
-A Windows desktop tool for Counter-Strike 2 demos: match statistics, highlight video export, and a 2D replay of the whole match from one `.dem` file.
+A Windows desktop tool for managing and analyzing Counter-Strike 2 demos. Explore player statistics, 2D replays and experimental match anomalies, and export highlights or suspicious moments as videos.
 
 ## Download
 
@@ -21,7 +21,9 @@ Review match results and player performance across combat, utility and round sit
 
 ### Anomaly data (experimental)
 
-Manually analyze all players and export behavior clips. This experimental feature is for reference only. It cannot identify cheats deliberately concealed without statistical anomalies; no anomalies does not mean no cheating.
+Analyze aiming, shooting and movement across all players, including TTD and estimated smoke hit rate. Select, merge and export suspicious clips by player and behavior for closer review.
+
+Statistics are for reference, not a cheating verdict. They cannot identify deliberately concealed cheats without statistical anomalies; no anomalies does not mean no cheating.
 
 ![Anomaly data (experimental)](docs/images/en/05-anomaly-data.png)
 
@@ -33,12 +35,16 @@ Manually analyze all players and export behavior clips. This experimental featur
 - Per-element HUD toggles, optional merge into one video
 - File size limit (10 / 20 / 50 MB) for sharing in chat apps
 
+![Highlight videos](docs/images/en/08-video-list.png)
+
 ### 2D replay
 
 - Player positions, view angles, health, armor, weapon, money
 - Grenades, smoke / fire / flash areas, C4 and defuse countdowns, kill feed, hearing range
 - Round navigation, playback speed, follow a player
 - Multi-level maps shown one level per panel; radar images extracted from the local game files
+
+![2D replay](docs/images/en/07-2d-view.png)
 
 ## Game files are never modified
 
