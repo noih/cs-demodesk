@@ -58,7 +58,7 @@
     "updateFailed": "업데이트를 확인할 수 없습니다. 정보 창을 다시 열어 재시도하세요.",
     "button": "정보",
     "tagline": "경기 데이터를 분석하고, 주요 순간을 다시 보며, 하이라이트를 내보내세요.",
-    "author": "제작 NOIH",
+    "author": "제작 noih",
     "openGithub": "GitHub 열기",
     "thirdParty": "서드파티 구성 요소",
     "openSite": "{{name}} 페이지 열기"

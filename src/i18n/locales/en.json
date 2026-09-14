@@ -58,7 +58,7 @@
     "updateFailed": "Unable to check for updates. Reopen About to try again.",
     "button": "About",
     "tagline": "Analyze match stats, replay key moments, and export highlights.",
-    "author": "Author NOIH",
+    "author": "Author noih",
     "openGithub": "Open GitHub",
     "thirdParty": "Third-party components",
     "openSite": "Open the {{name}} page"

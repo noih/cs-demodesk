@@ -58,7 +58,7 @@
     "updateFailed": "无法检查更新，请重新打开关于窗口再试一次。",
     "button": "关于",
     "tagline": "分析对局数据，回放关键时刻，导出精彩片段。",
-    "author": "作者 NOIH",
+    "author": "作者 noih",
     "openGithub": "打开 GitHub",
     "thirdParty": "第三方组件",
     "openSite": "打开 {{name}} 网页"
