@@ -87,11 +87,12 @@ try {
         if(window.failWorker){Object.assign(job,{status:'error',error:'Cannot read source demo',finishedAt:new Date().toISOString(),revision:job.revision+1});emit();return;}
 
         const history=window.scoreHistory ??= {};
+        const index=window.analysisRunIndex ?? 0;
+        window.analysisRunIndex=index+1;
         const players={};
         for(const playerId of ['1','2']) {
           const key=args.id+':'+playerId;
           const records=history[key] ??= [];
-          const index=records[0] ? Number(records[0].id.split('-').at(-1))+1 : 0;
           const occurrence={id:'event-'+playerId,round:1,startTick:64+index*64,endTick:128+index*64,targetId:'1',sourceIds:['raw-a','raw-b'],measurements:[{name:'speed',value:3.123456,unit:'deg/s',threshold:null},{name:'speed',value:4.123456,unit:'deg/s',threshold:null}]};
           const makeCheck = (id,name) => ({definition:{id,version:'test-2',name,description:'Test behavior',category:'aim',parameters:{}},state:playerId==='1'?'passed':'findings',reason:'Observed behavior',reasonCode:'experimentalMeasurements',evaluatedSamples:64,summary:[{name:'shots',value:64,unit:'',threshold:null},{name:'hitRate',value:0.875,unit:'ratio',threshold:null}],occurrences:playerId==='1'?[]:[occurrence],diagnostics:null});
           const contextCheck = (id,metric) => ({...makeCheck(id,id),state:playerId==='1'?'unavailable':'findings',reasonCode:'shotPathsMissing',summary:playerId==='1'?[]:[{name:metric,value:1,unit:'shots',threshold:null},{name:'unclassifiedShots',value:63,unit:'shots',threshold:null}],occurrences:playerId==='1'?[]:[{...occurrence,id:'context-'+id,measurements:[{name:metric,value:1,unit:'shots',threshold:null}]}]});
@@ -1054,6 +1055,11 @@ try {
   await page.getByRole('tab',{name:'Match anomalies',exact:true}).click();
   const scorePanel=page.getByRole('tabpanel');
   const scoreButton=scorePanel.locator('button[aria-busy]');
+  const clearAnomalies = async () => {
+    await page.locator('.demo-heading').getByRole('button',{name:'More',exact:true}).click();
+    await page.getByRole('menuitem',{name:'Delete anomaly data',exact:true}).click();
+    await scorePanel.getByRole('button',{name:'Analyze',exact:true}).waitFor();
+  };
   await scoreButton.waitFor();
   assert.equal(await scorePanel.getByText(/upper right|Use Analyze/).count(),0,'No analysis instructions');
   assert.equal(await page.getByRole('button',{name:'Analyze',exact:true}).count(),1,'Analysis action only appears inside the anomaly tab');
@@ -1187,6 +1193,8 @@ try {
   await page.getByRole('tab',{name:'Match anomalies',exact:true}).click();
   await page.setViewportSize({width:760,height:940});
   assert.ok(await scorePanel.getByRole('table').evaluate(el=>el.scrollWidth<=el.clientWidth),'Behavior labels wrap without horizontal scrolling');
+  assert.equal(await scoreButton.count(),0,'Saved results have no reanalysis action');
+  await clearAnomalies();
   await scoreButton.click();
   await page.waitForFunction(()=>window.scoreHistory && Object.values(window.scoreHistory).every(records=>records.length===1 && records[0].id==='assessment-1'));
   await detailsButton('2').click();
@@ -1197,6 +1205,7 @@ try {
   assert.equal(await analysisDialog.getByText(/Ticks: 64–128/).count(),0,'Dialog shows only the latest result');
   if(process.env.UI_SCREENSHOT_DIR) await analysisDialog.screenshot({path:process.env.UI_SCREENSHOT_DIR+'/scoring-dialog.png'});
   await analysisDialog.getByRole('button',{name:'Close',exact:true}).click();
+  await clearAnomalies();
   await page.evaluate(()=>window.failWorker=true);
   await scoreButton.click();
   await scorePanel.getByRole('alert').filter({hasText:'Cannot read source demo'}).waitFor();
@@ -1208,9 +1217,13 @@ try {
   await failedJob.getByRole('button',{name:'Retry',exact:true}).click();
   await page.getByRole('dialog').locator('[data-analysis-job]').first().getByText('Completed',{exact:true}).waitFor();
   await page.getByRole('dialog').getByRole('button',{name:'Close',exact:true}).click();
+  await clearAnomalies();
   await page.evaluate(()=>window.failScore=true);
   await scoreButton.click();
   await scorePanel.getByRole('alert').filter({hasText:'Source demo unavailable'}).waitFor();
+  assert.equal(await scorePanel.getByRole('table').count(),0,'Cleared results stay absent after submission failure');
+  await page.evaluate(()=>window.failScore=false);
+  await scoreButton.click();
   await behaviorCount('2').filter({hasText:/^1$/}).waitFor();
   await page.getByRole('tab',{name:'Players',exact:true}).click();
   await page.getByRole('tab',{name:'Match anomalies',exact:true}).click();
@@ -1222,10 +1235,11 @@ try {
   await scoreRow('1').waitFor();
   assert.equal(await scoreRow('1').locator('[data-rule-count]').count(),0,'No empty behavior labels');
   await behaviorCount('2').filter({hasText:/^1$/}).waitFor();
-  await scorePanel.getByRole('button',{name:'Reanalyze',exact:true}).waitFor();
+  assert.equal(await scorePanel.getByRole('button',{name:'Reanalyze',exact:true}).count(),0);
+  assert.equal(await scoreButton.count(),0,'Reloaded results have no analysis button');
   assert.equal(await scorePanel.getByText('Completed',{exact:true}).count(),0,'Saved results need no completed label');
   assert.equal(await scorePanel.getByRole('button',{name:'Delete data',exact:true}).count(),0,'Deletion is centralized in the demo menu');
-  assert.equal(await scoreButton.evaluate(el=>getComputedStyle(el.parentElement).justifyContent),'flex-end','Saved actions align right');
+
   await page.locator('.demo-heading').getByRole('button',{name:'More',exact:true}).click();
   assert.deepEqual(await page.getByRole('menuitem').allTextContents(),['Show in Explorer','Delete videos','Delete anomaly data','Delete all analysis data','Delete demo file'],'Demo menu follows the requested order');
   assert.equal(await page.getByRole('menuitem',{name:'Delete videos',exact:true}).getAttribute('aria-disabled'),'true','Running videos cannot be deleted');

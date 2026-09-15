@@ -7,16 +7,16 @@ import { displayPlayerName } from '../playerName.ts';
 
 export function ScoringTab({players,parsed,busy,step,error,job,queuePosition,status,onSetup,onRendered,onAnalyze}: {
   status?:Status;onSetup:()=>void;onRendered:()=>void;onAnalyze:()=>void;
-  players: Record<string, Assessment[]>; parsed: ParsedDemo; busy: boolean; step: ScoringStep; error?: string; job?: AnalysisJob; queuePosition?: number;
+  players: Record<string, Assessment[]> | undefined; parsed: ParsedDemo; busy: boolean; step: ScoringStep; error?: string; job?: AnalysisJob; queuePosition?: number;
 }) {
   const {t} = useTranslation();
   const playerNames = Object.fromEntries(parsed.info.players.map(player => [player.steamid, displayPlayerName(player.name)]));
-  const hasRecords = Object.values(players).some(records => records.length > 0);
+  const hasRecords = Object.values(players ?? {}).some(records => records.length > 0);
   return <Flex direction="column" gap="3">
     <Flex align="center" justify={hasRecords ? "end" : "start"} gap="3" wrap="wrap">
-      <Button size="1" onClick={onAnalyze} disabled={busy} aria-busy={busy}>
-        {busy ? <span role="status">{job?.status==='queued' ? t('scoring.queue.waiting',{position:queuePosition}) : job?.status==='running' ? `${t('scoring.progress',{step,total:3})} · ${t(`scoring.steps.${step}`)}` : t('scoring.queue.submitting')}</span> : t(hasRecords?'scoring.restart':'scoring.start')}
-      </Button>
+      {((players !== undefined && !hasRecords) || busy) && <Button size="1" onClick={onAnalyze} disabled={busy} aria-busy={busy}>
+        {busy ? <span role="status">{job?.status==='queued' ? t('scoring.queue.waiting',{position:queuePosition}) : job?.status==='running' ? `${t('scoring.progress',{step,total:3})} · ${t(`scoring.steps.${step}`)}` : t('scoring.queue.submitting')}</span> : t('scoring.start')}
+      </Button>}
     {!busy && job?.status==='error' && <Text role="alert" color="red">{t('scoring.failed')}{job.step && ` · ${t(`scoring.steps.${job.step}`)}`}: {job.error}</Text>}
     {error && <Text color="red" role="alert">{t('scoring.failed')}: {error}</Text>}
     </Flex>
@@ -28,7 +28,7 @@ export function ScoringTab({players,parsed,busy,step,error,job,queuePosition,sta
       </Table.Row></Table.Header>
       <Table.Body>{parsed.info.players.map(player => <PlayerAnalysis
         key={player.steamid} playerId={player.steamid} name={displayPlayerName(player.name)}
-        records={players[player.steamid]} playerNames={playerNames} status={status} onSetup={onSetup} onRendered={onRendered}
+        records={players?.[player.steamid]} playerNames={playerNames} status={status} onSetup={onSetup} onRendered={onRendered}
       />)}</Table.Body>
     </Table.Root></div>}
   </Flex>;

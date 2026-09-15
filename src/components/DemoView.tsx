@@ -45,7 +45,7 @@ export function DemoView({ analysisJobs, meta, jobs, status, onChanged, onRemove
   const scoringBusy=submitting || analysisJob?.status==='queued' || analysisJob?.status==='running';
   const queuePosition=analysisJob?.status==='queued' ? analysisJobs.filter(job=>job.status==='queued').sort((a,b)=>a.sequence-b.sequence).findIndex(job=>job.id===analysisJob.id)+1 : undefined;
   const scoreMatch=async()=>{
-    if (scoringBusy) return;
+    if (scoringBusy || analysisRecords === undefined || hasAnalysis) return;
     setSubmitting(true);setScoringError(undefined);setTab('scoring');
     try {await api.scoreMatch(meta.id);await onChanged();}
     catch(error){setScoringError(errorText(error));}
@@ -243,7 +243,7 @@ export function DemoView({ analysisJobs, meta, jobs, status, onChanged, onRemove
             <Tabs.Content value="players">
               <PlayersTab parsed={parsed} />
             </Tabs.Content>
-            <Tabs.Content value="scoring"><ScoringTab onAnalyze={()=>void scoreMatch()} status={status} onSetup={()=>onSetup('render')} onRendered={()=>setTab('renders')} key={`${meta.id}:${analysisJob?.finishedAt ?? ''}:${dataRevision}`} players={analysisRecords ?? {}} parsed={parsed} busy={scoringBusy} step={analysisJob?.step ?? 1} job={analysisJob} queuePosition={queuePosition} error={scoringError || historyError}/></Tabs.Content>
+            <Tabs.Content value="scoring"><ScoringTab onAnalyze={()=>void scoreMatch()} status={status} onSetup={()=>onSetup('render')} onRendered={()=>setTab('renders')} key={`${meta.id}:${analysisJob?.finishedAt ?? ''}:${dataRevision}`} players={analysisRecords} parsed={parsed} busy={scoringBusy} step={analysisJob?.step ?? 1} job={analysisJob} queuePosition={queuePosition} error={scoringError || historyError}/></Tabs.Content>
             <Tabs.Content value="charts">
               <ChartsTab parsed={parsed} />
             </Tabs.Content>
