@@ -331,6 +331,8 @@ export interface SettingsResponse {
   doctor: DoctorReport;
   setup: { running: boolean; log: string[] };
   dataDir: string;
+}
+export interface StorageBytes {
   parsedBytes: number;
   anomalyBytes: number;
   clipsBytes: number;
@@ -404,6 +406,7 @@ export const api = {
   startupError: () => invoke<string | null>('get_startup_error'),
   recoverDataDirectory: (path: string | null) => invoke<void>('recover_data_directory', { path }),
   status: () => invoke<Status>('get_status'),
+  storageBytes: () => invoke<StorageBytes>('get_storage_bytes'),
   settings: () => invoke<SettingsResponse>('get_settings'),
   saveSettings: (settings: Settings, dataDirOverride: string | null) => invoke<SettingsResponse>('save_settings', { settings, dataDirOverride }),
   runSetup: (tool: 'hlae' | 'ffmpeg' | 'vrf', force = false) => invoke<boolean>('run_setup', { tool, force }),

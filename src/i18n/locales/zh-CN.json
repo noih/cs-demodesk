@@ -385,6 +385,7 @@
     "money": "金钱"
   },
   "settings": {
+    "calculating": "计算中…",
     "demoSources": "Demo 来源",
     "noExtraFolders": "尚未添加其他目录",
     "steamStoreSource": "下载来源：Steam 的 {{name}} 商店页面",

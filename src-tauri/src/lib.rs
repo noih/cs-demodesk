@@ -55,6 +55,11 @@ struct SettingsResponse {
     data_dir_override: Option<PathBuf>,
     default_data_dir: PathBuf,
     restart_required: bool,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct StorageBytes {
     /// size of the stored parse results (demodesk-data/parsed)
     parsed_bytes: u64,
     anomaly_bytes: u64,
@@ -73,7 +78,6 @@ struct DemoResponse {
 }
 
 fn settings_response(engine: &Engine, directory: &DataDirectory) -> SettingsResponse {
-    let (parsed_bytes, clips_bytes, radar_bytes, anomaly_bytes) = engine.storage_bytes();
     let selected = directory.selected();
     let restart_required = selected.as_ref().unwrap_or(&directory.default) != &directory.active;
     SettingsResponse {
@@ -85,10 +89,6 @@ fn settings_response(engine: &Engine, directory: &DataDirectory) -> SettingsResp
         doctor: engine.doctor(),
         setup: engine.setup_state(),
         data_dir: engine.data_dir().to_path_buf(),
-        parsed_bytes,
-        clips_bytes,
-        radar_bytes,
-        anomaly_bytes,
     }
 }
 
@@ -184,6 +184,20 @@ async fn get_status(engine: State<'_, Eng>) -> CmdResult<Status> {
             data_dir: e.data_dir().to_path_buf(),
             active_render: e.active_job_id(),
             version: env!("CARGO_PKG_VERSION").into(),
+        })
+    })
+    .await
+}
+
+#[tauri::command]
+async fn get_storage_bytes(engine: State<'_, Eng>) -> CmdResult<StorageBytes> {
+    blocking(&engine, |e| {
+        let (parsed_bytes, clips_bytes, radar_bytes, anomaly_bytes) = e.storage_bytes();
+        Ok(StorageBytes {
+            parsed_bytes,
+            clips_bytes,
+            radar_bytes,
+            anomaly_bytes,
         })
     })
     .await
@@ -489,6 +503,7 @@ pub fn run() {
             recover_data_directory,
             get_status,
             get_settings,
+            get_storage_bytes,
             save_settings,
             run_setup,
             list_demos,

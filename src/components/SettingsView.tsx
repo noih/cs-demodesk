@@ -5,7 +5,7 @@ import { driver } from 'driver.js';
 import 'driver.js/dist/driver.css';
 import { open } from '@tauri-apps/plugin-dialog';
 import { useTranslation } from 'react-i18next';
-import { api, errorText, mb, type Settings, type ToolPaths, type SettingsResponse } from '../api.ts';
+import { api, errorText, mb, type Settings, type ToolPaths, type SettingsResponse, type StorageBytes } from '../api.ts';
 import { LogView } from './LogView.tsx';
 import i18n, { applyLanguage, translateProblem, detectLanguage, LANGUAGE_NAMES, LANGUAGES } from '../i18n/index.ts';
 
@@ -70,17 +70,17 @@ function PathField({ label, value, placeholder, hint, description, action, sourc
 }
 
 /** Storage categories share the data folder selected above them. */
-function StorageRow({ label, what, path, bytes, confirm, onClear }: { label: string; what: string; path: string; bytes: number; confirm: string; onClear: () => Promise<void> }) {
+function StorageRow({ label, what, path, bytes, confirm, onClear }: { label: string; what: string; path: string; bytes: number | undefined; confirm: string; onClear: () => Promise<void> }) {
   const { t } = useTranslation();
   return (
     <>
       <Text size="2" weight="medium" style={{ minWidth: 0 }}>{label}</Text>
-      <Text size="2" color="gray" align="right" style={{ fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>{mb(bytes)}</Text>
+      <Text size="2" color="gray" align="right" style={{ fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>{bytes === undefined ? t('settings.calculating') : mb(bytes)}</Text>
       <IconButton size="2" variant="outline" color="gray" aria-label={t('common.openInExplorer')} onClick={() => void api.open(path)}>
         <i aria-hidden="true" className="bi bi-folder2-open app-icon"  />
       </IconButton>
       <ConfirmDialog title={t('settings.emptyTitle', { what })} description={confirm} confirmLabel={t('settings.empty')}
-        onConfirm={() => void onClear()} trigger={<Button size="2" variant="outline" color="red" disabled={bytes === 0}>{t('settings.empty')}</Button>} />
+        onConfirm={() => void onClear()} trigger={<Button size="2" variant="outline" color="red" disabled={bytes === undefined || bytes === 0}>{t('settings.empty')}</Button>} />
     </>
   );
 }
@@ -97,6 +97,20 @@ const SOURCES = {
 export function SettingsView({ onChanged, toolsRequest = 0, toolsTarget = 'render' }: { onChanged: () => Promise<void>; toolsRequest?: number; toolsTarget?: 'render' | 'replay' }) {
   const { t } = useTranslation();
   const [data, setData] = useState<SettingsResponse>();
+  const [storage, setStorage] = useState<StorageBytes>();
+  const [storageError, setStorageError] = useState<string>();
+  useEffect(() => {
+    if (!data) return;
+    let disposed = false;
+    setStorage(undefined);
+    setStorageError(undefined);
+    void api.storageBytes().then(value => {
+      if (!disposed) setStorage(value);
+    }).catch(error => {
+      if (!disposed) setStorageError(errorText(error));
+    });
+    return () => { disposed = true; };
+  }, [data]);
   const toolsRef = useRef<HTMLDivElement>(null);
   const toolGuide = useRef<ReturnType<typeof driver> | null>(null);
   const dismissedRequest = useRef(0);
@@ -221,7 +235,7 @@ export function SettingsView({ onChanged, toolsRequest = 0, toolsTarget = 'rende
     }
   };
 
-  if (!data) return <Text color="gray">{t('settings.loading')}</Text>;
+  if (!data) return <Text color="gray">{message?.text ?? t('settings.loading')}</Text>;
   const d = data.doctor;
   const toolsReady = toolsInstalled(d.paths);
   const ready = { steam: Boolean(d.paths.steamDir), cs2: Boolean(d.paths.cs2Exe), hlae: Boolean(d.paths.hlaeExe && d.paths.hlaeDll), ffmpeg: Boolean(d.paths.ffmpegExe), vrf: Boolean(d.paths.vrfExe) };
@@ -357,10 +371,11 @@ export function SettingsView({ onChanged, toolsRequest = 0, toolsTarget = 'rende
                 </Callout.Root>
               )}
               <Grid columns="minmax(0, 1fr) max-content max-content max-content" gapX="3" gapY="3" align="center">
-                <StorageRow label={t('settings.parsedDir')} what={t('settings.clearParsedWhat')} path={`${data.dataDir}\\parsed`} bytes={data.parsedBytes} confirm={t('settings.clearParsedConfirm')} onClear={clear(t('settings.clearParsedWhat'), api.clearAllAnalysis)} />
-                <StorageRow label={t('settings.anomalyDir')} what={t('settings.anomalyDir')} path={`${data.dataDir}\\analysis`} bytes={data.anomalyBytes} confirm={t('settings.clearAnomalyConfirm')} onClear={clear(t('settings.anomalyDir'), api.clearAnomalyData)} />
-                <StorageRow label={t('settings.clipsDir')} what={t('settings.clearClipsWhat')} path={`${data.dataDir}\\clips`} bytes={data.clipsBytes} confirm={t('settings.clearClipsConfirm')} onClear={clear(t('settings.clearClipsWhat'), api.clearAllClips)} />
-                <StorageRow label={t('settings.radarDir')} what={t('settings.clearRadarWhat')} path={`${data.dataDir}\\radar`} bytes={data.radarBytes} confirm={t('settings.clearRadarConfirm')} onClear={clear(t('settings.clearRadarWhat'), api.clearRadar)} />
+                {storageError && <Text color="red" style={{ gridColumn: '1 / -1' }}>{storageError}</Text>}
+                <StorageRow label={t('settings.parsedDir')} what={t('settings.clearParsedWhat')} path={`${data.dataDir}\\parsed`} bytes={storage?.parsedBytes} confirm={t('settings.clearParsedConfirm')} onClear={clear(t('settings.clearParsedWhat'), api.clearAllAnalysis)} />
+                <StorageRow label={t('settings.anomalyDir')} what={t('settings.anomalyDir')} path={`${data.dataDir}\\analysis`} bytes={storage?.anomalyBytes} confirm={t('settings.clearAnomalyConfirm')} onClear={clear(t('settings.anomalyDir'), api.clearAnomalyData)} />
+                <StorageRow label={t('settings.clipsDir')} what={t('settings.clearClipsWhat')} path={`${data.dataDir}\\clips`} bytes={storage?.clipsBytes} confirm={t('settings.clearClipsConfirm')} onClear={clear(t('settings.clearClipsWhat'), api.clearAllClips)} />
+                <StorageRow label={t('settings.radarDir')} what={t('settings.clearRadarWhat')} path={`${data.dataDir}\\radar`} bytes={storage?.radarBytes} confirm={t('settings.clearRadarConfirm')} onClear={clear(t('settings.clearRadarWhat'), api.clearRadar)} />
               </Grid>
             </Flex>
           </Card>

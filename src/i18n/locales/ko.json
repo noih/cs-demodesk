@@ -385,6 +385,7 @@
     "money": "보유 금액"
   },
   "settings": {
+    "calculating": "계산 중…",
     "demoSources": "데모 소스",
     "noExtraFolders": "추가된 폴더가 없습니다",
     "steamStoreSource": "다운로드 출처: Steam의 {{name}} 상점 페이지",

@@ -389,6 +389,7 @@
     "money": "Money"
   },
   "settings": {
+    "calculating": "Calculating…",
     "demoSources": "Demo sources",
     "noExtraFolders": "No additional folders added",
     "steamStoreSource": "Download source: {{name}} on the Steam Store",

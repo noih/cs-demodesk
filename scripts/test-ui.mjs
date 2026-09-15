@@ -55,6 +55,7 @@ try {
       if(cmd==='open_url'){window.openedUrl=args.url;return;}
       if(cmd==='open_path'){window.openedPath=args.path;return;}
       if(cmd==='get_status')return window.missingTools ? {...status,ok:false,missingRenderTools:window.missingRenderTools ?? ['HLAE','ffmpeg']} : status;
+      if(cmd==='get_storage_bytes'){if(window.holdStorage)await new Promise(resolve=>window.releaseStorage=resolve);return {parsedBytes:1048576,anomalyBytes:0,clipsBytes:0,radarBytes:0};}
       if(cmd==='get_settings')return { settings:{language:'en',replayFolders:[],scanGameReplays:true},doctor:{ok:true,problems:[],paths:window.toolPaths || {}},detected:{},setup:{running:false,log:[]},dataDir:'E:/data',defaultDataDir:'E:/data',parsedBytes:0,anomalyBytes:0,clipsBytes:0,radarBytes:0 };
       if(cmd==='list_demos'){if(window.holdRefresh)await new Promise(resolve=>window.releaseRefresh=resolve);return demos;}
       if(cmd==='delete_job') { window.queueJobs=(window.queueJobs ?? jobs).filter(job=>job.id!==args.id); return; }
@@ -656,8 +657,14 @@ try {
   const detailHeaderBounds = await headerButtonBounds();
   assert.ok(detailHeaderBounds.every(b => b.height === 32), 'All header buttons share a 32px height');
   assert.ok(await page.locator('.app-header .rt-IconButton').evaluateAll(buttons => buttons.every(b => b.getBoundingClientRect().width === 32)), 'Header icon buttons are square');
+  await page.evaluate(() => { window.holdStorage = true; });
   await page.getByRole('button',{name:'Settings',exact:true}).click();
   await page.getByText('Language',{exact:true}).waitFor();
+  await page.getByText('Calculating…', {exact:true}).first().waitFor();
+  await page.getByLabel('Data directory', {exact:true}).fill('E:/still-responsive');
+  await page.evaluate(() => { window.holdStorage = false; window.releaseStorage(); });
+  await page.getByText('Calculating…', {exact:true}).first().waitFor({state:'hidden'});
+
   const settingsPage = page.locator('.settings-page');
   assert.equal(await settingsPage.getByText('Anomaly data', {exact:true}).count(), 1);
   await settingsPage.getByText('Anomaly data', {exact:true}).locator('xpath=following-sibling::button[1]').click();

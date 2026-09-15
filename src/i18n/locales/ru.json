@@ -397,6 +397,7 @@
     "money": "Деньги"
   },
   "settings": {
+    "calculating": "Вычисление…",
     "demoSources": "Источники демо",
     "noExtraFolders": "Дополнительные папки не добавлены",
     "steamStoreSource": "Источник загрузки: страница {{name}} в магазине Steam",

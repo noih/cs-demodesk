@@ -385,6 +385,7 @@
     "money": "所持金"
   },
   "settings": {
+    "calculating": "計算中…",
     "demoSources": "デモの読み込み元",
     "noExtraFolders": "追加のフォルダーはありません",
     "steamStoreSource": "ダウンロード元：Steam の {{name}} ストアページ",
