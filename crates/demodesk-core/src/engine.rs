@@ -337,6 +337,9 @@ impl Engine {
         source_file.read_to_end(&mut bytes)?;
         let fingerprint = format!("sha1:{}", sha1_smol::Sha1::from(bytes.as_slice()).digest());
         crate::scoring::history::track_source(&self.data_dir, id, &fingerprint)?;
+        if let Err(error) = scoring::history::clear_intermediates(&self.data_dir, &fingerprint) {
+            eprintln!("could not clean old analysis intermediates for {id}: {error:#}");
+        }
         let mut histories = self.scoring_match_history(id)?;
         histories.retain(|player, _| players.contains(player));
         for player in &players {
@@ -371,11 +374,20 @@ impl Engine {
                 diagnostic_bytes,
             });
         }
-        let (path, shared_bytes) =
-            crate::analysis::compact::prepare(&self.parser, &bytes, &self.data_dir, &fingerprint)?;
+        let mut shared_file = crate::analysis::compact::prepare(
+            &self.parser,
+            &bytes,
+            &self.data_dir,
+            crate::analysis::compact::memory_limit(),
+        )?;
         drop(bytes);
-        let mut shared_file = options.open(&path)?;
+        let shared_storage = if shared_file.is_rolled() {
+            "temporaryFile"
+        } else {
+            "memory"
+        };
         let mut shared_hash = sha1_smol::Sha1::new();
+        let mut shared_bytes = 0;
         let mut buffer = [0; 65536];
         loop {
             let n = shared_file.read(&mut buffer)?;
@@ -383,13 +395,21 @@ impl Engine {
                 break;
             }
             shared_hash.update(&buffer[..n]);
+            shared_bytes += n as u64;
         }
+        shared_file.rewind()?;
         let tools = self.tool_paths();
         let game = tools.cs2_dir.ok_or_else(|| anyhow!("CS2 folder not set"))?;
         let vrf = tools
             .vrf_exe
             .ok_or_else(|| anyhow!("Source 2 Viewer CLI not installed"))?;
-        let native = crate::analysis::native_body::prepare(&path, &self.data_dir, &game, &vrf)?;
+        let native = crate::analysis::native_body::prepare_reader(
+            &mut shared_file,
+            &self.data_dir,
+            &game,
+            &vrf,
+        )?;
+        shared_file.rewind()?;
         let visibility_result = crate::analysis::visibility_assets::prepare(
             &self.data_dir,
             &game,
@@ -407,7 +427,7 @@ impl Engine {
         progress(2);
         let started = Instant::now();
         let (mut checks, body_coverage) = scoring::native::evaluate(
-            &path,
+            &mut shared_file,
             &native,
             &fingerprint,
             &players,
@@ -415,9 +435,11 @@ impl Engine {
             &parsed.kills,
             visibility.as_ref(),
         )?;
+        drop(shared_file);
         let provenance = serde_json::json!({
             "shared":{"contract":header.contract,"source":header.source,"availability":header.data,
-                "coverage":native.coverage,"bytes":shared_bytes,"contentFingerprint":format!("sha1:{}", shared_hash.digest())},
+                "coverage":native.coverage,"bytes":shared_bytes,"contentFingerprint":format!("sha1:{}", shared_hash.digest()),
+                "storage":shared_storage,"retained":false},
             "visibilityError":visibility_error,
             "visibilityAssets":visibility.as_ref().map(|p|serde_json::json!({"bytes":p.bytes,"fingerprint":p.fingerprint})),
             "diagnosticBytes":0,

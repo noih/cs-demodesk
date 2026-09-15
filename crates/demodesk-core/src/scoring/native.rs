@@ -4,7 +4,7 @@ use crate::analysis::native_body::{self, PlayerFrame, Prepared};
 use anyhow::Result;
 use std::{
     collections::{BTreeMap, HashMap, VecDeque},
-    path::Path,
+    io::Read,
 };
 
 type Pair = ((i32, u32, u32), (i32, u32, u32), i32);
@@ -29,7 +29,7 @@ fn live_round(rounds: &[crate::model::RoundInfo], cursor: &mut usize, tick: i32)
         .map(|r| r.round)
 }
 pub fn evaluate(
-    path: &Path,
+    input: impl Read,
     prepared: &Prepared,
     fingerprint: &str,
     players: &[String],
@@ -59,8 +59,8 @@ pub fn evaluate(
         super::smoke_estimate::Estimator::new(&prepared.events.raw, prepared.header.data.tick_rate);
     let mut round_cursor = 0;
     let mut measurement_cursor = 0;
-    let coverage = native_body::visit_scene(
-        path,
+    let coverage = native_body::visit_scene_reader(
+        input,
         prepared,
         &prepared.skeleton,
         |tick| live_round(rounds, &mut measurement_cursor, tick).is_some(),

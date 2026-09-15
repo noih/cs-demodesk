@@ -921,39 +921,86 @@ fn validate_value(bytes: &[u8]) -> Result<()> {
     ensure!(valid, "invalid compact value");
     Ok(())
 }
-/// Content-addressed cache; only explicit match scoring calls this producer.
+fn memory_budget(available: u64) -> usize {
+    // Leave headroom for pose reconstruction and other applications.
+    (available.saturating_sub(512 * 1024 * 1024) / 8).min(512 * 1024 * 1024) as usize
+}
+
+pub fn memory_limit() -> usize {
+    #[cfg(windows)]
+    {
+        use windows_sys::Win32::System::SystemInformation::{GlobalMemoryStatusEx, MEMORYSTATUSEX};
+        let mut status = MEMORYSTATUSEX {
+            dwLength: std::mem::size_of::<MEMORYSTATUSEX>() as u32,
+            ..Default::default()
+        };
+        // SAFETY: status is writable and its size is supplied as required by Windows.
+        if unsafe { GlobalMemoryStatusEx(&mut status) } != 0 {
+            return memory_budget(status.ullAvailPhys);
+        }
+    }
+    // If available RAM cannot be established, use the temporary-file fallback.
+    0
+}
+
+/// Compressed, seekable input for one analysis. Spilled files are removed on close,
+/// including error paths; the persistent assessment contains the source fingerprint.
 pub fn prepare(
     parser: &crate::parser::DemoParser,
     bytes: &[u8],
     root: &std::path::Path,
-    fingerprint: &str,
-) -> Result<(std::path::PathBuf, u64)> {
-    let dir = root.join("analysis/match-state");
-    std::fs::create_dir_all(&dir)?;
-    let path = dir.join(format!(
-        "{}-v{}-{}.gz",
-        sha1_smol::Sha1::from(fingerprint).digest(),
-        contract().schema_version,
-        contract().implementation_version
-    ));
-    if !path.try_exists()? {
-        let mut temp = tempfile::NamedTempFile::new_in(&dir)?;
-        let mut encoder = flate2::write::GzEncoder::new(
-            std::io::BufWriter::new(&mut temp),
-            flate2::Compression::default(),
-        );
-        parser.write_match_state(bytes, &mut encoder)?;
-        encoder.finish()?.flush()?;
-        temp.as_file().sync_all()?;
-        temp.persist_noclobber(&path)?;
-    }
-    let size = std::fs::metadata(&path)?.len();
-    Ok((path, size))
+    memory_limit: usize,
+) -> Result<tempfile::SpooledTempFile> {
+    use std::io::Seek;
+    let mut temp = tempfile::spooled_tempfile_in(memory_limit, root);
+    let mut encoder = flate2::write::GzEncoder::new(
+        std::io::BufWriter::new(&mut temp),
+        flate2::Compression::default(),
+    );
+    parser.write_match_state(bytes, &mut encoder)?;
+    encoder.finish()?.flush()?;
+    temp.rewind()?;
+    Ok(temp)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn intermediate_memory_budget_reserves_headroom_and_caps_growth() {
+        assert_eq!(memory_budget(0), 0);
+        assert_eq!(memory_budget(512 * 1024 * 1024), 0);
+        assert_eq!(memory_budget(768 * 1024 * 1024), 32 * 1024 * 1024);
+        assert_eq!(memory_budget(8 * 1024 * 1024 * 1024), 512 * 1024 * 1024);
+    }
+
+    #[test]
+    fn intermediate_spills_automatically_and_removes_its_file() {
+        use std::io::{Read, Seek};
+        let directory = tempfile::tempdir().unwrap();
+        let mut file = tempfile::spooled_tempfile_in(4, directory.path());
+        file.write_all(b"1234").unwrap();
+        assert!(!file.is_rolled());
+        file.write_all(b"5").unwrap();
+        assert!(file.is_rolled());
+        file.rewind().unwrap();
+        let mut content = String::new();
+        file.read_to_string(&mut content).unwrap();
+        assert_eq!(content, "12345");
+        drop(file);
+        assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 0);
+    }
+
+    #[test]
+    fn failed_intermediate_production_leaves_no_files() {
+        let directory = tempfile::tempdir().unwrap();
+        let parser = crate::parser::DemoParser::new();
+        for limit in [0, 1024 * 1024] {
+            assert!(prepare(&parser, &[0; 16], directory.path(), limit).is_err());
+            assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 0);
+        }
+    }
 
     fn fixture_prefix(schema: u32) -> Vec<u8> {
         let writer = Writer::new(

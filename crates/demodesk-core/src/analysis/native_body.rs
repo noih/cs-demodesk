@@ -8,7 +8,7 @@ use anyhow::{ensure, Context, Result};
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap},
     fs::File,
-    io::BufReader,
+    io::{BufReader, Read},
     path::Path,
 };
 
@@ -22,10 +22,8 @@ pub struct Prepared {
     pub point_names: Vec<String>,
     hitbox_points: super::model_hitboxes::Points,
 }
-fn reader(path: &Path) -> Result<flate2::read::MultiGzDecoder<BufReader<File>>> {
-    Ok(flate2::read::MultiGzDecoder::new(BufReader::new(
-        File::open(path)?,
-    )))
+fn reader(input: impl Read) -> flate2::read::MultiGzDecoder<BufReader<impl Read>> {
+    flate2::read::MultiGzDecoder::new(BufReader::new(input))
 }
 fn strings(data: &[u8], cursor: &mut usize) -> Result<Vec<String>> {
     let count = u32::from_le_bytes(
@@ -64,6 +62,10 @@ fn dictionary(data: &[u8]) -> Result<(Vec<String>, Vec<String>)> {
     Ok((names, masks))
 }
 pub fn prepare(path: &Path, root: &Path, game: &Path, vrf: &Path) -> Result<Prepared> {
+    prepare_reader(File::open(path)?, root, game, vrf)
+}
+
+pub fn prepare_reader(input: impl Read, root: &Path, game: &Path, vrf: &Path) -> Result<Prepared> {
     let mut raw_events = Vec::new();
     let mut seen = BTreeSet::new();
     let mut resources = BTreeSet::new();
@@ -72,7 +74,7 @@ pub fn prepare(path: &Path, root: &Path, game: &Path, vrf: &Path) -> Result<Prep
     let mut secondary_entities = BTreeSet::new();
     let mut pawn_models = BTreeSet::new();
     let (header, coverage) = compact::visit(
-        reader(path)?,
+        reader(input),
         |frame| {
             let mut changed_secondary = BTreeSet::new();
             for id in frame.changed {
@@ -745,6 +747,22 @@ pub fn visit_scene(
     path: &Path,
     prepared: &Prepared,
     skeleton: &super::animation_pose::Skeleton,
+    should_measure: impl FnMut(i32) -> bool,
+    consume: impl FnMut(i32, &[PlayerFrame], &SceneOcclusion) -> Result<()>,
+) -> Result<Coverage> {
+    visit_scene_reader(
+        File::open(path)?,
+        prepared,
+        skeleton,
+        should_measure,
+        consume,
+    )
+}
+
+pub fn visit_scene_reader(
+    input: impl Read,
+    prepared: &Prepared,
+    skeleton: &super::animation_pose::Skeleton,
     mut should_measure: impl FnMut(i32) -> bool,
     mut consume: impl FnMut(i32, &[PlayerFrame], &SceneOcclusion) -> Result<()>,
 ) -> Result<Coverage> {
@@ -765,7 +783,7 @@ pub fn visit_scene(
     let mut scene = SceneOcclusion::default();
     let mut scene_dirty = true;
     compact::visit(
-        reader(path)?,
+        reader(input),
         |frame| {
             scene.cpu_smoke.begin_packet(&frame);
             let mut context_changed = false;

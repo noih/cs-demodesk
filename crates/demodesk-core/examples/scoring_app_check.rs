@@ -61,10 +61,50 @@ fn main() -> Result<()> {
         .ok_or_else(|| anyhow::anyhow!("parse did not succeed"))?;
     let parse_seconds = parse_started.elapsed().as_secs_f64();
     notify.assert_steps(&meta.id, &[])?;
+    let replay_path = engine.replay_file(&meta.id)?;
+    let replay_before = std::fs::read(&replay_path)?;
+    let replay: demodesk_core::replay::ReplayData = serde_json::from_slice(&replay_before)?;
+    let smoke_snapshots = replay.smoke.len();
     let started = std::time::Instant::now();
     let first = engine.score_match(&meta.id, true)?;
     let first_seconds = started.elapsed().as_secs_f64();
     notify.assert_steps(&meta.id, &[1, 2, 3])?;
+    let states = engine.data_dir().join("analysis/match-state");
+    let state_prefix = format!(
+        "{}-",
+        sha1_smol::Sha1::from(first.source_fingerprint.as_str()).digest()
+    );
+    let assert_no_state = || -> Result<()> {
+        if states.exists() {
+            for entry in std::fs::read_dir(&states)? {
+                ensure!(
+                    !entry?
+                        .file_name()
+                        .to_string_lossy()
+                        .starts_with(&state_prefix),
+                    "retained match intermediate"
+                );
+            }
+        }
+        Ok(())
+    };
+    assert_no_state()?;
+    // A cached assessment also retires intermediates left by older versions.
+    std::fs::create_dir_all(&states)?;
+    std::fs::write(
+        states.join(format!("{state_prefix}v7-legacy.gz")),
+        b"obsolete",
+    )?;
+    #[cfg(windows)]
+    let locked_legacy = {
+        use std::os::windows::fs::OpenOptionsExt;
+        let path = states.join(format!("{state_prefix}v7-locked.gz"));
+        std::fs::write(&path, b"locked obsolete input")?;
+        std::fs::OpenOptions::new()
+            .read(true)
+            .share_mode(1)
+            .open(path)?
+    };
     let started = std::time::Instant::now();
     let again = engine.score_match(&meta.id, false)?;
     let reused_seconds = started.elapsed().as_secs_f64();
@@ -77,6 +117,53 @@ fn main() -> Result<()> {
     let retry = engine.score_match(&meta.id, true)?;
     let retry_seconds = started.elapsed().as_secs_f64();
     notify.assert_steps(&meta.id, &[1, 2, 3])?;
+    #[cfg(windows)]
+    {
+        ensure!(
+            states.join(format!("{state_prefix}v7-locked.gz")).exists(),
+            "locked fixture vanished"
+        );
+        drop(locked_legacy);
+    }
+    let cleaned = engine.score_match(&meta.id, false)?;
+    notify.assert_steps(&meta.id, &[1])?;
+    ensure!(cleaned.analysis_seconds == 0., "cleanup retried analysis");
+    assert_no_state()?;
+    ensure!(
+        std::fs::read(engine.replay_file(&meta.id)?)? == replay_before,
+        "scoring changed the 2D replay or smoke snapshots"
+    );
+    // Compare the same encoded stream across a spill; independent parser runs
+    // can assign field IDs in different iteration orders.
+    let fallback_dir = tempfile::tempdir()?;
+    let mut disk = demodesk_core::analysis::compact::prepare(
+        &demodesk_core::parser::DemoParser::new(),
+        &std::fs::read(&args[0])?,
+        fallback_dir.path(),
+        512 * 1024 * 1024,
+    )?;
+    ensure!(!disk.is_rolled(), "fixture exceeds memory budget");
+    use std::io::{Read, Seek};
+    let mut before = Vec::new();
+    disk.read_to_end(&mut before)?;
+    disk.roll()?;
+    ensure!(disk.is_rolled(), "disk fallback was not exercised");
+    disk.rewind()?;
+    let mut after = Vec::new();
+    disk.read_to_end(&mut after)?;
+    ensure!(before == after, "spilling changed compressed input");
+    let shared = &first.players.values().next().expect("roster")[0].input_provenance["shared"];
+    disk.rewind()?;
+    demodesk_core::analysis::compact::visit(
+        flate2::read::MultiGzDecoder::new(&mut disk),
+        |_| Ok(()),
+        |_| Ok(()),
+    )?;
+    drop(disk);
+    ensure!(
+        std::fs::read_dir(fallback_dir.path())?.next().is_none(),
+        "disk fallback left a file behind"
+    );
     let roster = parsed
         .info
         .players
@@ -226,6 +313,7 @@ fn main() -> Result<()> {
         "warmPreparationSeconds":retry.preparation_seconds,"warmAnalysisSeconds":retry.analysis_seconds,
         "players":parsed.info.players.len(),"samples":samples,"findings":findings,
         "ttd":retry.players.iter().map(|(id, records)|serde_json::json!({"playerId":id,"samples":records[0].checks.iter().find(|c|c.definition.id=="time-to-damage").map(|c|c.evaluated_samples)})).collect::<Vec<_>>(),
+        "intermediateStorage":shared["storage"],"smokeSnapshotsPreserved":smoke_snapshots,
         "mode":if cfg!(debug_assertions) {"debug"} else {"release"}})
     );
     ensure!(

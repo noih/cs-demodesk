@@ -216,6 +216,24 @@ pub fn track_source(root: &Path, demo_id: &str, fingerprint: &str) -> Result<()>
     Ok(())
 }
 
+/// Only legacy per-demo packet intermediates; results, replay and shared assets remain.
+pub fn clear_intermediates(root: &Path, fingerprint: &str) -> Result<()> {
+    let prefix = format!("{}-", sha1_smol::Sha1::from(fingerprint).digest());
+    match fs::read_dir(root.join("analysis/match-state")) {
+        Ok(entries) => {
+            for entry in entries {
+                let entry = entry?;
+                if entry.file_name().to_string_lossy().starts_with(&prefix) {
+                    fs::remove_file(entry.path())?;
+                }
+            }
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => return Err(e.into()),
+    }
+    Ok(())
+}
+
 pub fn delete_match(root: &Path, demo_id: &str) -> Result<()> {
     let dir = match_directory(root, demo_id);
     let mut sources: Vec<String> = match fs::read(dir.join("sources.json")) {
@@ -227,23 +245,49 @@ pub fn delete_match(root: &Path, demo_id: &str) -> Result<()> {
         sources.extend(records.iter().map(|r| r.demo_fingerprint.clone()));
     }
     for source in sources {
-        let prefix = format!("{}-", sha1_smol::Sha1::from(source.as_str()).digest());
-        match fs::read_dir(root.join("analysis/match-state")) {
-            Ok(entries) => {
-                for entry in entries {
-                    let entry = entry?;
-                    if entry.file_name().to_string_lossy().starts_with(&prefix) {
-                        fs::remove_file(entry.path())?;
-                    }
-                }
-            }
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-            Err(e) => return Err(e.into()),
-        }
+        clear_intermediates(root, &source)?;
     }
     match fs::remove_dir_all(dir) {
         Ok(()) => Ok(()),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
         Err(e) => Err(e.into()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn intermediate_cleanup_preserves_results_replay_assets_and_other_matches() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path();
+        let states = root.join("analysis/match-state");
+        fs::create_dir_all(&states).unwrap();
+        let prefix = sha1_smol::Sha1::from("sha1:owned").digest().to_string();
+        let old = states.join(format!("{prefix}-v7-old.gz"));
+        let current = states.join(format!("{prefix}-v7-current.gz"));
+        fs::write(&old, b"old").unwrap();
+        fs::write(&current, b"current").unwrap();
+        let retained = [
+            root.join("analysis/match-state/other-v7.gz"),
+            root.join("analysis/visibility/map.bin"),
+            root.join("analysis/animation-assets/pose.bin"),
+            root.join("behavior-analysis/matches/owned/latest.json"),
+            root.join("parsed/owned.replay.json"),
+            root.join("parsed/owned.json"),
+            root.join("owned.dem"),
+        ];
+        for path in &retained {
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(path, b"keep").unwrap();
+        }
+        for _ in 0..2 {
+            clear_intermediates(root, "sha1:owned").unwrap();
+            assert!(!old.exists() && !current.exists());
+            for path in &retained {
+                assert_eq!(fs::read(path).unwrap(), b"keep");
+            }
+        }
     }
 }
