@@ -101,6 +101,7 @@ struct Node {
 pub struct World {
     triangles: Vec<Triangle>,
     nodes: Vec<Node>,
+    neighbors: Vec<[Option<(usize, usize)>; 3]>,
 }
 fn intersection(start: Vec3, end: Vec3, t: &Triangle) -> bool {
     let [a, b, c] = t.vertices;
@@ -127,6 +128,9 @@ fn intersection(start: Vec3, end: Vec3, t: &Triangle) -> bool {
 }
 /// Whether one opaque triangle's shadow cone contains the entire capsule.
 fn covers(eye: Vec3, capsule: Capsule, t: &Triangle) -> bool {
+    covers_except_edge(eye, capsule, t, None)
+}
+fn covers_except_edge(eye: Vec3, capsule: Capsule, t: &Triangle, shared: Option<usize>) -> bool {
     if !t.opaque {
         return false;
     }
@@ -141,7 +145,11 @@ fn covers(eye: Vec3, capsule: Capsule, t: &Triangle) -> bool {
     if dot(n, sub(capsule.a, a)) + margin >= 0. || dot(n, sub(capsule.b, a)) + margin >= 0. {
         return false;
     }
-    for (first, second, inside) in [(a, b, c), (b, c, a), (c, a, b)] {
+    for (edge, (first, second, inside)) in [(a, b, c), (b, c, a), (c, a, b)].into_iter().enumerate()
+    {
+        if shared == Some(edge) {
+            continue;
+        }
         let n = cross(sub(first, eye), sub(second, eye));
         let sign = dot(n, sub(inside, eye)).signum();
         if sign == 0. {
@@ -167,9 +175,66 @@ impl World {
         let mut world = Self {
             triangles,
             nodes: vec![],
+            neighbors: vec![],
         };
         world.build(0, world.triangles.len());
+        world.join_edges();
         Ok(world)
+    }
+    fn join_edges(&mut self) {
+        let mut edges = std::collections::HashMap::new();
+        self.neighbors = vec![[None; 3]; self.triangles.len()];
+        for (index, triangle) in self.triangles.iter().enumerate().filter(|(_, t)| t.opaque) {
+            for edge in 0..3 {
+                // Exact shared vertices only: never bridge a real crack in the mesh.
+                let key = |p: Vec3| p.map(|v| if v == 0. { 0 } else { v.to_bits() });
+                let mut endpoints = [
+                    key(triangle.vertices[edge]),
+                    key(triangle.vertices[(edge + 1) % 3]),
+                ];
+                endpoints.sort_unstable();
+                if let Some((other, other_edge)) = edges.remove(&endpoints) {
+                    self.neighbors[index][edge] = Some((other, other_edge));
+                    self.neighbors[other][other_edge] = Some((index, edge));
+                } else {
+                    edges.insert(endpoints, (index, edge));
+                }
+            }
+        }
+    }
+
+    fn covers_joined(&self, index: usize, eye: Vec3, capsule: Capsule) -> bool {
+        let triangle = &self.triangles[index];
+        if covers(eye, capsule, triangle) {
+            return true;
+        }
+        // Full coverage must also block the center ray through one of the pair.
+        // The BVH will visit that face even if the cached face no longer does.
+        if !triangle.opaque || !intersection(eye, mul(add(capsule.a, capsule.b), 0.5), triangle) {
+            return false;
+        }
+        // ponytail: join one neighboring face at a time; larger mesh unions can
+        // remain unknown until measured coverage justifies a general union solver.
+        self.neighbors[index]
+            .iter()
+            .enumerate()
+            .any(|(edge, neighbor)| {
+                let Some((other, other_edge)) = *neighbor else {
+                    return false;
+                };
+                let other = &self.triangles[other];
+                let plane = cross(
+                    sub(triangle.vertices[edge], eye),
+                    sub(triangle.vertices[(edge + 1) % 3], eye),
+                );
+                let side = dot(plane, sub(triangle.vertices[(edge + 2) % 3], eye));
+                let other_side = dot(plane, sub(other.vertices[(other_edge + 2) % 3], eye));
+                // Opposing half-spaces cover the internal seam. Keep all four outer
+                // shadow planes and both depth planes, so holes/folds are not filled.
+                side * other_side < 0.
+                    && covers_except_edge(eye, capsule, triangle, Some(edge))
+                    && covers_except_edge(eye, capsule, other, Some(other_edge))
+            })
     }
     fn build(&mut self, start: usize, end: usize) -> usize {
         let bounds = Bounds::triangles(&self.triangles[start..end]);
@@ -254,13 +319,10 @@ impl World {
                 .covered(left, eye, c)
                 .or_else(|| self.covered(right, eye, c));
         }
-        (node.start..node.end).find(|&i| covers(eye, c, &self.triangles[i]))
+        (node.start..node.end).find(|&i| self.covers_joined(i, eye, c))
     }
     fn covered_cached(&self, eye: Vec3, c: Capsule, cached: &mut Option<usize>) -> bool {
-        if cached
-            .and_then(|i| self.triangles.get(i))
-            .is_some_and(|t| covers(eye, c, t))
-        {
+        if cached.is_some_and(|i| i < self.triangles.len() && self.covers_joined(i, eye, c)) {
             return true;
         }
         *cached = self.covered(0, eye, c);
@@ -380,6 +442,107 @@ impl World {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn joined_wall_triangles_hide_a_body_across_their_seam() {
+        let triangles = vec![
+            Triangle {
+                vertices: [[5., -10., -10.], [5., 10., -10.], [5., 10., 10.]],
+                opaque: true,
+            },
+            Triangle {
+                vertices: [[5., -10., -10.], [5., 10., 10.], [5., -10., 10.]],
+                opaque: true,
+            },
+        ];
+        let c = Capsule {
+            a: [10., 0., 0.],
+            b: [10., 0., 1.],
+            radius: 0.5,
+        };
+        assert!(triangles.iter().all(|t| !covers([0.; 3], c, t)));
+        let world = World::new(triangles.clone()).unwrap();
+        assert_eq!(world.body([0.; 3], [1., 0., 0.], &[c]), Occlusion::Blocked);
+        let mut cache = vec![];
+        for _ in 0..2 {
+            assert_eq!(
+                world.body_with_clearance([0.; 3], [1., 0., 0.], &[c], true, &mut cache, |_, _| {
+                    true
+                }),
+                Occlusion::Blocked
+            );
+        }
+        assert_eq!(
+            world.body_with_clearance(
+                [20., 0., 0.],
+                [-1., 0., 0.],
+                &[c],
+                true,
+                &mut cache,
+                |_, _| true
+            ),
+            Occlusion::Clear
+        );
+        let mut transparent = triangles;
+        transparent[1].opaque = false;
+        assert_eq!(
+            World::new(transparent)
+                .unwrap()
+                .body([0.; 3], [1., 0., 0.], &[c]),
+            Occlusion::Unknown
+        );
+    }
+
+    #[test]
+    fn joined_shadows_do_not_close_cracks_or_hide_exposed_points() {
+        let c = Capsule {
+            a: [10., 0., 0.],
+            b: [10., 0., 1.],
+            radius: 0.5,
+        };
+        for gap in [0., 0.01] {
+            for fold in [0., -2., 2.] {
+                let triangles = vec![
+                    Triangle {
+                        vertices: [[5., -10., -10.], [5., 10., -10.], [5., 10., 10.]],
+                        opaque: true,
+                    },
+                    Triangle {
+                        vertices: [
+                            [5., 10. - gap, 10. + gap],
+                            [5., -10. - gap, -10. + gap],
+                            [5. + fold, -10., 10.],
+                        ],
+                        opaque: true,
+                    },
+                ];
+                let world = World::new(triangles).unwrap();
+                if gap > 0. {
+                    assert!(world.neighbors.iter().flatten().all(Option::is_none));
+                } else {
+                    assert_eq!(world.body([0.; 3], [1., 0., 0.], &[c]), Occlusion::Blocked);
+                }
+                for y in -12..=12 {
+                    let eye = [0., f64::from(y), 0.];
+                    if world.body(eye, [1., 0., 0.], &[c]) != Occlusion::Blocked {
+                        continue;
+                    }
+                    // Independently check surface rays against the original triangles.
+                    for z in [0., 0.5, 1.] {
+                        for i in 0..64 {
+                            let angle = f64::from(i) * std::f64::consts::TAU / 64.;
+                            let point = [10., c.radius * angle.cos(), z + c.radius * angle.sin()];
+                            assert_eq!(
+                                world.ray(eye, point),
+                                Occlusion::Blocked,
+                                "gap={gap}, fold={fold}, eye={eye:?}, point={point:?}"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     #[test]
     fn body_edges_unknown_material_and_whole_body_occlusion() {
         let triangle = Triangle {

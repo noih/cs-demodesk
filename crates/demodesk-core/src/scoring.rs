@@ -17,7 +17,7 @@ pub use rules::evaluate_match;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
-pub const RULESET_VERSION: &str = "16-estimated-smoke-rate";
+pub const RULESET_VERSION: &str = "17-bounded-ttd-onset";
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub enum State {

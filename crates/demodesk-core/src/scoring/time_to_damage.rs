@@ -33,6 +33,7 @@ pub struct Sample {
 #[derive(Default)]
 struct Clock {
     last: Option<(i32, Visibility)>,
+    last_hidden: Option<i32>,
     onset: Option<(i32, i32)>,
     damaged: bool,
 }
@@ -69,15 +70,23 @@ impl Match {
         let contiguous = clock.last.is_some_and(|(previous, _)| {
             i64::from(tick) - i64::from(previous) == i64::from(self.step)
         });
-        if !contiguous || visible != Visibility::Visible {
-            clock.onset = None;
-            clock.damaged = false;
+        if !contiguous {
+            *clock = Clock::default();
         }
-        if contiguous && visible == Visibility::Visible {
-            if let Some((previous, Visibility::Hidden)) = clock.last {
-                clock.onset = Some((previous, tick));
+        match visible {
+            Visibility::Hidden => {
+                clock.last_hidden = Some(tick);
+                clock.onset = None;
                 clock.damaged = false;
             }
+            Visibility::Visible => {
+                if let Some(hidden) = clock.last_hidden.take() {
+                    clock.onset = Some((hidden, tick));
+                }
+            }
+            // Before first visibility, retain the lower bound on onset. After it,
+            // unknown visibility could be a new occlusion, so retire that onset.
+            Visibility::Unknown => clock.onset = None,
         }
         clock.last = Some((tick, visible));
         Ok(())
@@ -89,11 +98,16 @@ impl Match {
     }
     fn record_damage(&mut self, pair: &Pair, tick: i32) -> Option<&Sample> {
         let clock = self.clocks.get_mut(pair)?;
-        if clock.damaged || clock.last != Some((tick, Visibility::Visible)) {
+        if clock.damaged {
+            return None;
+        }
+        clock.damaged = true;
+        clock.last_hidden = None;
+        if clock.last != Some((tick, Visibility::Visible)) {
+            clock.onset = None;
             return None;
         }
         let (hidden, visible) = clock.onset?;
-        clock.damaged = true;
         self.samples.push(Sample {
             pair: pair.clone(),
             last_hidden_tick: hidden,
@@ -161,12 +175,13 @@ fn metric(name: &str, value: f64, unit: &str) -> Measurement {
 pub fn unavailable(reason: &str) -> Check {
     Check {
         definition: Definition {
-            id: "time-to-damage".into(), version: "3-bounded-smoke".into(), name: "TTD".into(),
+            id: "time-to-damage".into(), version: "4-bounded-onset".into(), name: "TTD".into(),
             description: "Estimated time from first unobstructed enemy hitbox in front of the eyes to first firearm damage, using demo poses and installed map physics.".into(),
             category: "reaction".into(),
             parameters: serde_json::json!({
                 "frontHalfSpace": true, "shortUpperBoundMsInclusive": 150,
                 "requiresContiguousVisibility": true, "firearmDamageOnly": true,
+                "unknownBeforeOnset": "widenBounds", "unknownAfterOnset": "discard",
                 "bodySource": "reconstructedHitboxCapsules", "geometrySource": "installedMapPhysics",
                 "smokeVisibility": "conservativeRecordedGridBounds", "experimental": true
             }),
@@ -284,6 +299,109 @@ mod tests {
             3.
         );
     }
+    #[test]
+    fn unknown_before_visibility_widens_bounds_without_losing_the_encounter() {
+        let mut m = Match::new(64., 1).unwrap();
+        let p = pair();
+        for (tick, visibility) in [
+            Visibility::Hidden,
+            Visibility::Unknown,
+            Visibility::Unknown,
+            Visibility::Visible,
+            Visibility::Visible,
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            m.visibility(p.clone(), tick as i32, visibility).unwrap();
+        }
+        let sample = m
+            .damage(&p, 4)
+            .expect("bounded onset survives unknown ticks");
+        assert_eq!((sample.lower_ms, sample.upper_ms), (15.625, 62.5));
+        assert!(m.damage(&p, 4).is_none());
+
+        m.visibility(p.clone(), 5, Visibility::Unknown).unwrap();
+        m.visibility(p.clone(), 6, Visibility::Visible).unwrap();
+        assert!(
+            m.damage(&p, 6).is_none(),
+            "unknown after visibility cannot restart the encounter"
+        );
+    }
+
+    #[test]
+    fn unknown_after_visibility_invalidates_even_an_undamaged_onset() {
+        let mut m = Match::new(64., 1).unwrap();
+        let p = pair();
+        for (tick, visibility) in [
+            Visibility::Hidden,
+            Visibility::Visible,
+            Visibility::Unknown,
+            Visibility::Visible,
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            m.visibility(p.clone(), tick as i32, visibility).unwrap();
+        }
+        assert!(m.damage(&p, 3).is_none());
+    }
+
+    #[test]
+    fn wide_onset_bounds_are_valid_samples_without_becoming_short_findings() {
+        let mut m = Match::new(64., 1).unwrap();
+        let p = pair();
+        m.visibility(p.clone(), 0, Visibility::Hidden).unwrap();
+        for tick in 1..20 {
+            m.visibility(p.clone(), tick, Visibility::Unknown).unwrap();
+        }
+        m.visibility(p.clone(), 20, Visibility::Visible).unwrap();
+        let sample = m.damage(&p, 20).unwrap();
+        assert_eq!((sample.lower_ms, sample.upper_ms), (0., 312.5));
+        let check = m.check("one");
+        assert_eq!(check.evaluated_samples, 1);
+        assert_eq!(check.observations.len(), 1);
+        assert!(check.findings.is_empty());
+    }
+
+    #[test]
+    fn unmeasurable_first_damage_cannot_be_replaced_by_a_later_hit() {
+        let mut m = Match::new(64., 1).unwrap();
+        let p = pair();
+        m.visibility(p.clone(), 0, Visibility::Hidden).unwrap();
+        m.visibility(p.clone(), 1, Visibility::Unknown).unwrap();
+        assert!(m.damage(&p, 1).is_none());
+        m.visibility(p.clone(), 2, Visibility::Visible).unwrap();
+        assert!(m.damage(&p, 2).is_none());
+        m.visibility(p.clone(), 3, Visibility::Hidden).unwrap();
+        m.visibility(p.clone(), 4, Visibility::Unknown).unwrap();
+        m.visibility(p.clone(), 5, Visibility::Visible).unwrap();
+        let sample = m.damage(&p, 5).unwrap();
+        assert_eq!((sample.lower_ms, sample.upper_ms), (0., 31.25));
+    }
+
+    #[test]
+    fn bounded_onsets_still_require_an_unbroken_same_life_history() {
+        let p = pair();
+        for gap in [false, true] {
+            let mut m = Match::new(64., 1).unwrap();
+            m.visibility(p.clone(), 0, Visibility::Hidden).unwrap();
+            m.visibility(p.clone(), 1, Visibility::Unknown).unwrap();
+            let mut current = p.clone();
+            if !gap {
+                current.target_life.1 += 1;
+            }
+            let tick = if gap { 3 } else { 2 };
+            m.visibility(current.clone(), tick, Visibility::Visible)
+                .unwrap();
+            assert!(m.damage(&current, tick).is_none());
+        }
+        let mut m = Match::new(64., 1).unwrap();
+        m.visibility(p.clone(), 0, Visibility::Unknown).unwrap();
+        m.visibility(p.clone(), 1, Visibility::Visible).unwrap();
+        assert!(m.damage(&p, 1).is_none());
+    }
+
     #[test]
     fn clock_preserves_tick_bounds_and_requires_a_contiguous_visible_onset() {
         let mut m = Match::new(64., 1).unwrap();
@@ -697,6 +815,51 @@ mod stream_tests {
             })
             .collect()
     }
+    #[test]
+    fn wall_seam_and_unknown_transition_produce_one_bounded_first_damage() {
+        let world = World::new(vec![
+            Triangle {
+                vertices: [[5., -10., -10.], [5., 10., -10.], [5., 10., 10.]],
+                opaque: true,
+            },
+            Triangle {
+                vertices: [[5., -10., -10.], [5., 10., 10.], [5., -10., 10.]],
+                opaque: true,
+            },
+        ])
+        .unwrap();
+        for fatal in [false, true] {
+            let mut events = vec![
+                serde_json::json!({"event_name":"player_hurt","tick":4,"attacker_steamid":"one","user_steamid":"two","dmg_health":20,"weapon":"ak47"}),
+            ];
+            if fatal {
+                events.push(
+                    serde_json::json!({"event_name":"player_death","tick":4,"user_steamid":"two"}),
+                );
+            }
+            let mut stream = Stream::new(64., Some(&world), &events, &[round(1, 0, 100)]).unwrap();
+            for tick in 0..=4 {
+                let mut players = frame(if tick == 0 { 10. } else { 4. });
+                let mut scene = SceneOcclusion::default();
+                if tick == 1 || tick == 2 {
+                    scene
+                        .uncertain
+                        .push(crate::analysis::line_of_sight::Bounds {
+                            min: [1., -10., -10.],
+                            max: [2., 10., 10.],
+                        });
+                }
+                if fatal && tick == 4 {
+                    players.pop();
+                }
+                stream.push(tick, &players, Some(1), &scene).unwrap();
+            }
+            assert_eq!(stream.clocks.samples.len(), 1);
+            let sample = &stream.clocks.samples[0];
+            assert_eq!((sample.lower_ms, sample.upper_ms), (15.625, 62.5));
+        }
+    }
+
     #[test]
     fn shared_frames_join_first_damage_and_ignore_repeated_hurt_events() {
         let world = World::new(vec![Triangle {
