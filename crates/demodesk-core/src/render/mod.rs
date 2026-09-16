@@ -5,11 +5,39 @@
 pub mod actions;
 #[cfg(windows)]
 mod audio;
-pub mod encode;
 pub mod diagnostics;
+pub mod encode;
 mod leftovers;
 pub mod paths;
 pub(crate) mod process;
+
+/// Check a data root through the same process launcher used by rendering tools.
+pub fn verify_data_directory(
+    executable: &std::path::Path,
+    root: &std::path::Path,
+) -> anyhow::Result<()> {
+    let tree = process::ProcessTree::new()?;
+    let mut command = std::process::Command::new(executable);
+    command.arg("--demodesk-verify-data-directory").arg(root);
+    let mut child = tree.spawn(&mut command)?;
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    loop {
+        if let Some(status) = child.try_wait()? {
+            tree.finish()?;
+            anyhow::ensure!(
+                status.success(),
+                "External process cannot use data directory {} ({status})",
+                root.display()
+            );
+            return Ok(());
+        }
+        if std::time::Instant::now() >= deadline {
+            tree.finish()?;
+            anyhow::bail!("Data directory verification timed out: {}", root.display());
+        }
+        std::thread::sleep(std::time::Duration::from_millis(25));
+    }
+}
 mod record;
 pub mod setup;
 mod startup;
@@ -103,13 +131,37 @@ pub fn run_setup(
     std::fs::create_dir_all(tools_dir)?;
     match tool {
         SetupTool::Hlae => {
-            setup::install_hlae(tools_dir, force, log)?;
+            setup::install_hlae(
+                &o.hlae_exe
+                    .as_deref()
+                    .map(paths::installation_directory)
+                    .unwrap_or_else(|| tools_dir.to_path_buf())
+                    .join("hlae"),
+                force,
+                log,
+            )?;
         }
         SetupTool::Ffmpeg => {
-            setup::install_ffmpeg(tools_dir, force, log)?;
+            setup::install_ffmpeg(
+                &o.ffmpeg_exe
+                    .as_deref()
+                    .map(paths::installation_directory)
+                    .unwrap_or_else(|| tools_dir.to_path_buf())
+                    .join("ffmpeg"),
+                force,
+                log,
+            )?;
         }
         SetupTool::Vrf => {
-            setup::install_vrf(tools_dir, force, log)?;
+            setup::install_vrf(
+                &o.vrf_exe
+                    .as_deref()
+                    .map(paths::installation_directory)
+                    .unwrap_or_else(|| tools_dir.to_path_buf())
+                    .join("vrf"),
+                force,
+                log,
+            )?;
         }
     }
     Ok(doctor(tools_dir, o))
@@ -533,12 +585,47 @@ mod tests {
             (super::SetupTool::Vrf, "Source 2 Viewer CLI"),
         ] {
             let mut log = Vec::new();
-            super::run_setup(dir.path(), &Default::default(), tool, false, &mut super::setup::Progress { cancel: &std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)), report: &mut |line| {
-                log.push(line)
-            } })
+            super::run_setup(
+                dir.path(),
+                &Default::default(),
+                tool,
+                false,
+                &mut super::setup::Progress {
+                    cancel: &std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+                    report: &mut |line| log.push(line),
+                },
+            )
             .unwrap();
-            assert!(log.is_empty(), "{name} must not report progress when already installed");
+            assert!(
+                log.is_empty(),
+                "{name} must not report progress when already installed"
+            );
         }
+        let overrides = super::paths::PathOverrides {
+            hlae_exe: Some(dir.path().to_path_buf()),
+            ffmpeg_exe: Some(dir.path().to_path_buf()),
+            vrf_exe: Some(dir.path().to_path_buf()),
+            ..Default::default()
+        };
+        let unused = dir.path().join("unused-default");
+        for tool in [
+            super::SetupTool::Hlae,
+            super::SetupTool::Ffmpeg,
+            super::SetupTool::Vrf,
+        ] {
+            super::run_setup(
+                &unused,
+                &overrides,
+                tool,
+                false,
+                &mut super::setup::Progress {
+                    cancel: &std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+                    report: &mut |_| panic!("custom installed tool must not download"),
+                },
+            )
+            .unwrap();
+        }
+        assert_eq!(std::fs::read_dir(unused).unwrap().count(), 0);
         assert!(serde_json::from_str::<super::SetupTool>("\"unknown\"").is_err());
     }
 

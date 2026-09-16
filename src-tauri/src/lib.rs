@@ -215,27 +215,97 @@ async fn get_settings(
     blocking(&engine, move |e| Ok(settings_response(e, &directory))).await
 }
 
+fn validate_settings(engine: &Engine, settings: &Settings) -> Vec<String> {
+    let mut problems = engine.validate_settings(settings);
+    match DataDirectory::settings_use_app_data(settings) {
+        Ok(true) => problems.push("Choose settings directories outside AppData.".into()),
+        Err(error) => problems.push(error),
+        Ok(false) => {}
+    }
+    for path in [&settings.hlae_exe, &settings.ffmpeg_exe, &settings.vrf_exe]
+        .into_iter()
+        .flatten()
+    {
+        let directory = demodesk_core::render::paths::installation_directory(Path::new(path));
+        if let Err(error) = DataDirectory::validate_tool_directory(&directory) {
+            problems.push(error);
+        }
+    }
+    problems
+}
+
+#[tauri::command]
+async fn preview_settings(
+    engine: State<'_, Eng>,
+    directory: State<'_, Directory>,
+    settings: Settings,
+    original_settings: Settings,
+    data_dir_override: Option<String>,
+) -> CmdResult<serde_json::Value> {
+    let directory = directory.inner().clone();
+    blocking(&engine, move |e| {
+        let target = directory
+            .validate(data_dir_override)?
+            .ok_or("Missing data directory")?;
+        let merged = directory.target_settings(&target, &original_settings, &settings)?;
+        let problems = validate_settings(e, &merged);
+        if !problems.is_empty() {
+            return Err(problems.join("\n"));
+        }
+        Ok(serde_json::json!({ "target": target, "restartRequired": directory.changes(&target) }))
+    })
+    .await
+}
+
 #[tauri::command]
 async fn save_settings(
     engine: State<'_, Eng>,
     directory: State<'_, Directory>,
     settings: Settings,
+    original_settings: Settings,
     data_dir_override: Option<String>,
+    change_confirmed: bool,
 ) -> CmdResult<SettingsResponse> {
     let directory = directory.inner().clone();
     blocking(&engine, move |e| {
-        let selected = directory.validate(data_dir_override)?;
-        e.save_settings(settings)
-            .map_err(|problems| problems.join("\n"))?;
-        directory.save(selected)?;
+        let target = directory
+            .validate(data_dir_override)?
+            .ok_or("Missing data directory")?;
+        let merged = directory.target_settings(&target, &original_settings, &settings)?;
+        let problems = validate_settings(e, &merged);
+        if !problems.is_empty() {
+            return Err(problems.join("\n"));
+        }
+        if directory.changes(&target) {
+            if !change_confirmed {
+                return Err("Confirm the data directory change before saving.".into());
+            }
+            directory.commit_switch(target, &merged)?;
+        } else {
+            e.save_settings(merged)
+                .map_err(|problems| problems.join("\n"))?;
+            directory.save(Some(target))?;
+        }
         Ok(settings_response(e, &directory))
     })
     .await
 }
 
 #[tauri::command]
-async fn run_setup(engine: State<'_, Eng>, tool: SetupTool, force: bool) -> CmdResult<bool> {
-    blocking(&engine, move |e| Ok(e.start_setup(tool, force))).await
+async fn run_setup(
+    engine: State<'_, Eng>,
+    tool: SetupTool,
+    force: bool,
+    directory: Option<String>,
+) -> CmdResult<bool> {
+    blocking(&engine, move |e| {
+        let directory = directory
+            .filter(|value| !value.trim().is_empty())
+            .map(|value| DataDirectory::validate_tool_directory(Path::new(value.trim())))
+            .transpose()?;
+        Ok(e.start_setup(tool, force, directory))
+    })
+    .await
 }
 
 #[tauri::command]
@@ -468,6 +538,25 @@ fn get_startup_error(state: State<'_, StartupError>) -> Option<String> {
 }
 
 #[tauri::command]
+fn preferences_need_reset(directory: State<'_, Directory>) -> bool {
+    directory.reset_preferences()
+}
+
+#[tauri::command]
+fn acknowledge_preferences_reset(directory: State<'_, Directory>) -> CmdResult<()> {
+    directory.acknowledge_preferences()
+}
+
+#[tauri::command]
+fn retry_startup(app: AppHandle, state: State<'_, StartupError>) -> CmdResult<()> {
+    if state.0.is_none() {
+        return Err("The app is already running.".into());
+    }
+    app.request_restart();
+    Ok(())
+}
+
+#[tauri::command]
 fn recover_data_directory(
     app: AppHandle,
     directory: State<'_, Directory>,
@@ -485,6 +574,9 @@ fn recover_data_directory(
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    if let Some(ok) = data_directory::probe_command() {
+        std::process::exit(if ok { 0 } else { 2 });
+    }
     #[cfg(windows)]
     if !webview_runtime::ready() {
         return;
@@ -504,18 +596,33 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
             let handle = app.handle().clone();
-            let config = app.path().app_config_dir()?.join("data-directory.json");
-            let default = app.path().app_local_data_dir()?.join("demodesk-data");
-            let directory =
-                Arc::new(DataDirectory::load(config, &default).map_err(std::io::Error::other)?);
+            let base = app.path().home_dir()?.join(".noih");
+            let config = base.join("data-directory.json");
+            let default = base.join("demodesk-data");
+            let legacy_config = app.path().app_config_dir()?.join("data-directory.json");
+            let legacy_default = app.path().app_local_data_dir()?.join("demodesk-data");
+            let (directory, initialized) = match DataDirectory::load_outside(
+                config.clone(),
+                &default,
+                legacy_config,
+                legacy_default,
+            ) {
+                Ok(mut directory) => {
+                    let result = directory.initialize();
+                    (directory, result)
+                }
+                Err(error) => (DataDirectory::recovery(config, default), Err(error)),
+            };
+            let directory = Arc::new(directory);
             let data_dir = directory.active.clone();
-            let startup = directory.prepare().and_then(|_| {
+            let startup = initialized.and_then(|_| {
+                app.asset_protocol_scope()
+                    .allow_directory(&data_dir, true)
+                    .map_err(err)?;
                 Engine::new(data_dir.clone(), Arc::new(TauriNotify(handle.clone()))).map_err(err)
             });
             let error = match startup {
                 Ok(engine) => {
-                    // Let the webview play videos from the data folder.
-                    let _ = app.asset_protocol_scope().allow_directory(&data_dir, true);
                     app.manage(engine);
                     None
                 }
@@ -529,11 +636,15 @@ pub fn run() {
             browse_directory,
             check_for_updates,
             get_startup_error,
+            preferences_need_reset,
+            acknowledge_preferences_reset,
+            retry_startup,
             recover_data_directory,
             get_status,
             get_settings,
             get_storage_bytes,
             save_settings,
+            preview_settings,
             run_setup,
             cancel_setup,
             check_tools,
@@ -565,6 +676,13 @@ pub fn run() {
             open_path,
             open_url
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app, event| {
+            if matches!(event, tauri::RunEvent::Exit) {
+                if let Some(directory) = app.try_state::<Directory>() {
+                    directory.release_locks();
+                }
+            }
+        });
 }

@@ -33,6 +33,7 @@ export function StartupGate({ children }: { children: ReactNode }) {
         <Text align="center">{t('startup.hint')}</Text>
         <Callout.Root color="red" style={{ maxWidth: 720, overflowWrap: 'anywhere' }}><Callout.Text>{error}</Callout.Text></Callout.Root>
         <Flex gap="3" wrap="wrap" justify="center">
+          <Button disabled={busy} onClick={() => { setBusy(true); void api.retryStartup().catch(e => { setError(errorText(e)); setBusy(false); }); }}>{t('common.retry')}</Button>
           <Button disabled={busy} onClick={() => void recover(true)}>{t('startup.choose')}</Button>
           <Button variant="soft" disabled={busy} onClick={() => void recover(false)}>{t('startup.default')}</Button>
         </Flex>

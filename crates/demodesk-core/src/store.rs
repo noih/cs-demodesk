@@ -31,6 +31,7 @@ pub struct Settings {
     pub replay_folders: Vec<String>,
     /// Scan <cs2Dir>/game/csgo/replays automatically
     pub scan_game_replays: bool,
+    /// Tool parent folders; legacy executable paths remain readable. JSON keys stay compatible.
     pub hlae_exe: Option<String>,
     pub ffmpeg_exe: Option<String>,
     pub vrf_exe: Option<String>,
@@ -295,10 +296,16 @@ impl Store {
 
     // ---- settings ----
     pub fn settings(&self) -> Settings {
-        let mut settings: Settings = fs::read_to_string(self.root.join("settings.json"))
-            .ok()
-            .and_then(|t| serde_json::from_str(&t).ok())
-            .unwrap_or_default();
+        Self::settings_at(&self.root).unwrap_or_default()
+    }
+
+    /// Read another data folder without opening it or migrating render records.
+    pub fn settings_at(root: &Path) -> Result<Settings> {
+        let mut settings: Settings = match fs::read(root.join("settings.json")) {
+            Ok(bytes) => serde_json::from_slice(&bytes)?,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Settings::default(),
+            Err(error) => return Err(error.into()),
+        };
         settings.map_paths(|value| {
             let path = PathBuf::from(value.replace('\\', "/"));
             let relative = if safe_relative(&path) {
@@ -314,14 +321,21 @@ impl Store {
                         p.starts_with("tools")
                             && safe_relative(p)
                             && !path.exists()
-                            && self.root.join(p).exists()
+                            && root.join(p).exists()
                     })
             };
             relative
-                .map(|p| self.root.join(p).to_string_lossy().into_owned())
+                .map(|p| root.join(p).to_string_lossy().into_owned())
                 .unwrap_or(value)
         });
-        settings
+        Ok(settings)
+    }
+
+    pub fn save_settings_at(root: &Path, settings: &Settings) -> Result<()> {
+        Self {
+            root: root.to_path_buf(),
+        }
+        .save_settings(settings)
     }
     pub fn save_settings(&self, s: &Settings) -> Result<()> {
         let mut saved = s.clone();

@@ -664,6 +664,8 @@ video {
 .tool-field:last-child { padding-bottom: 0; border-bottom: 0; }
 
 .path-input .rt-TextFieldInput { color: var(--app-text); }
+.settings-page .path-input .path-clear { width:24px; min-width:24px; height:24px; min-height:24px; margin:0; padding:0; }
+.path-clear .app-icon { font-size:12px; }
 .path-input .rt-TextFieldInput::placeholder { color: var(--app-muted); opacity: 1; }
 
 .tools-highlight { background:var(--app-accentSoft); animation:tools-highlight-pulse .5s ease-in-out infinite; scroll-margin:24px; }

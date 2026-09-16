@@ -629,19 +629,20 @@ impl Engine {
                 ));
             }
         }
-        if let Some(p) = &o.hlae_exe {
-            if !p.is_file() {
-                problems.push(format!("HLAE not found: {}", p.display()));
-            }
-        }
-        if let Some(p) = &o.ffmpeg_exe {
-            if !p.is_file() {
-                problems.push(format!("FFmpeg not found: {}", p.display()));
-            }
-        }
-        if let Some(p) = &o.vrf_exe {
-            if !p.is_file() {
-                problems.push(format!("Source 2 Viewer CLI not found: {}", p.display()));
+        for path in [&o.hlae_exe, &o.ffmpeg_exe, &o.vrf_exe]
+            .into_iter()
+            .flatten()
+        {
+            let directory = crate::render::paths::installation_directory(path);
+            if !directory.is_absolute()
+                || directory
+                    .components()
+                    .any(|c| matches!(c, std::path::Component::ParentDir))
+            {
+                problems.push(format!(
+                    "Choose an absolute tool directory: {}",
+                    directory.display()
+                ));
             }
         }
         for f in &s.replay_folders {
@@ -1286,7 +1287,12 @@ impl Engine {
             "configuredPaths": self.overrides(&self.settings()),
             "checks": self.tool_checks(), "downloads": self.setup_state() })
     }
-    pub fn start_setup(self: &Arc<Self>, tool: SetupTool, force: bool) -> bool {
+    pub fn start_setup(
+        self: &Arc<Self>,
+        tool: SetupTool,
+        force: bool,
+        directory: Option<PathBuf>,
+    ) -> bool {
         let cancel = Arc::new(AtomicBool::new(false));
         {
             let mut downloads = self.setup.lock().unwrap();
@@ -1305,7 +1311,17 @@ impl Engine {
         let engine = self.clone();
         std::thread::spawn(move || {
             let settings = engine.store.settings();
-            let overrides = engine.overrides(&settings);
+            let previous_selection = match tool {
+                SetupTool::Hlae => settings.hlae_exe.clone(),
+                SetupTool::Ffmpeg => settings.ffmpeg_exe.clone(),
+                SetupTool::Vrf => settings.vrf_exe.clone(),
+            };
+            let mut overrides = engine.overrides(&settings);
+            match tool {
+                SetupTool::Hlae => overrides.hlae_exe = directory.clone(),
+                SetupTool::Ffmpeg => overrides.ffmpeg_exe = directory.clone(),
+                SetupTool::Vrf => overrides.vrf_exe = directory.clone(),
+            }
             let mut log = |line: String| {
                 engine
                     .setup
@@ -1333,12 +1349,18 @@ impl Engine {
             .and_then(|_| {
                 let _guard = engine.settings_lock.lock().unwrap();
                 let mut settings = engine.store.settings();
-                match tool {
-                    SetupTool::Hlae => settings.hlae_exe = None,
-                    SetupTool::Ffmpeg => settings.ffmpeg_exe = None,
-                    SetupTool::Vrf => settings.vrf_exe = None,
+                let selected = directory
+                    .as_ref()
+                    .map(|path| path.to_string_lossy().into_owned());
+                let current = match tool {
+                    SetupTool::Hlae => &mut settings.hlae_exe,
+                    SetupTool::Ffmpeg => &mut settings.ffmpeg_exe,
+                    SetupTool::Vrf => &mut settings.vrf_exe,
+                };
+                if *current == previous_selection {
+                    *current = selected;
+                    engine.store.save_settings(&settings)?;
                 }
-                engine.store.save_settings(&settings)?;
                 installed = true;
                 drop(_guard);
                 let check = crate::render::diagnostics::check(&engine.tool_paths(), tool);
@@ -1564,6 +1586,15 @@ impl Engine {
             });
         if let Err(e) = spawned {
             eprintln!("could not start the render worker: {e}");
+            let ids: Vec<_> = self.render_queue.lock().unwrap().drain(..).collect();
+            for id in ids {
+                if let Some(mut job) = self.store.get_job(&id) {
+                    job.status = JobStatus::Error;
+                    job.error = Some(format!("Cannot start render worker: {e}"));
+                    job.finished_at = Some(now());
+                    self.persist(&job);
+                }
+            }
             self.render_worker_running.store(false, Ordering::SeqCst);
         }
     }
@@ -1764,6 +1795,21 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let (send, receive) = mpsc::channel();
         let engine = Engine::new(temp.path().join("data"), Arc::new(Events(send))).unwrap();
+        let empty = temp.path().join("empty-tool-parent");
+        std::fs::create_dir(&empty).unwrap();
+        let selection = Some(empty.to_string_lossy().into_owned());
+        engine
+            .save_settings(Settings {
+                hlae_exe: selection.clone(),
+                ffmpeg_exe: selection.clone(),
+                vrf_exe: selection.clone(),
+                ..Default::default()
+            })
+            .unwrap();
+        assert_eq!(engine.settings().hlae_exe, selection);
+        let paths = engine.tool_paths();
+        assert!(paths.hlae_exe.is_none() && paths.ffmpeg_exe.is_none() && paths.vrf_exe.is_none());
+        engine.save_settings(Settings::default()).unwrap();
         for file in [
             "hlae/HLAE.exe",
             "hlae/x64/AfxHookSource2.dll",
@@ -1782,9 +1828,9 @@ mod tests {
         std::fs::write(&vrf, []).unwrap();
         // Keep both workers active at the settings write boundary without network access.
         let settings_guard = engine.settings_lock.lock().unwrap();
-        assert!(engine.start_setup(SetupTool::Hlae, false));
-        assert!(engine.start_setup(SetupTool::Ffmpeg, false));
-        assert!(!engine.start_setup(SetupTool::Hlae, false));
+        assert!(engine.start_setup(SetupTool::Hlae, false, None));
+        assert!(engine.start_setup(SetupTool::Ffmpeg, false, None));
+        assert!(!engine.start_setup(SetupTool::Hlae, false, None));
         let active = engine.setup_state();
         assert!(active[&SetupTool::Hlae].running && active[&SetupTool::Ffmpeg].running);
         drop(settings_guard);
@@ -1804,7 +1850,7 @@ mod tests {
             };
             engine.store.save_settings(&expected).unwrap();
             expected = engine.settings();
-            assert!(engine.start_setup(tool, false));
+            assert!(engine.start_setup(tool, false, None));
             loop {
                 if let Event::SetupFinished { ok, error, .. } =
                     receive.recv_timeout(Duration::from_secs(5)).unwrap()

@@ -44,6 +44,9 @@ try {
     window.__TAURI_INTERNALS__ = { transformCallback: fn => { callbacks.set(++callbackId, fn); return callbackId; }, unregisterCallback: id => callbacks.delete(id), convertFileSrc: () => 'data:video/mp4;base64,', invoke: async (cmd, args) => {
       window.testCalls.push({cmd,args});
       if(cmd==='get_startup_error')return null;
+      if(cmd==='preferences_need_reset')return false;
+      if(cmd==='preview_settings')return {target:args.dataDirOverride || 'E:/data',restartRequired:Boolean(args.dataDirOverride && args.dataDirOverride!=='E:/data')};
+      if(cmd==='save_settings'){window.selectedDataDirectory=args.dataDirOverride;return window.__TAURI_INTERNALS__.invoke('get_settings',{});}
       if(cmd==='get_map_assets' && window.missingTools)throw new Error('Source 2 Viewer CLI not installed');
       if(cmd==='get_replay' || cmd==='get_map_assets')return new Promise(()=>{});
       if(cmd==='get_kills')return [];
@@ -59,7 +62,7 @@ try {
       if(cmd==='get_storage_bytes'){if(window.holdStorage)await new Promise(resolve=>window.releaseStorage=resolve);return {parsedBytes:1048576,anomalyBytes:0,clipsBytes:0,radarBytes:0};}
       if(cmd==='tool_diagnostics')return JSON.stringify({environment:{appVersion:'test'},checks:window.toolChecks ?? {}});
       if(cmd==='check_tools' && window.holdToolCheck)await new Promise(resolve=>window.releaseToolCheck=resolve);
-      if(cmd==='get_settings' || cmd==='check_tools')return { toolChecks:window.toolChecks ?? Object.fromEntries(['hlae','ffmpeg','vrf'].map(tool=>[tool,{ok:Boolean(window.toolPaths?.[tool+'Exe']),path:window.toolPaths?.[tool+'Exe']??null}])),settings:{language:'en',replayFolders:[],scanGameReplays:true},doctor:{ok:true,problems:[],paths:window.toolPaths || {}},detected:{},setup:window.setupState ?? {},dataDir:'E:/data',defaultDataDir:'E:/data',parsedBytes:0,anomalyBytes:0,clipsBytes:0,radarBytes:0 };
+      if(cmd==='get_settings' || cmd==='check_tools')return { toolChecks:window.toolChecks ?? Object.fromEntries(['hlae','ffmpeg','vrf'].map(tool=>[tool,{ok:Boolean(window.toolPaths?.[tool+'Exe']),path:window.toolPaths?.[tool+'Exe']??null}])),settings:{language:'en',replayFolders:[],scanGameReplays:true},doctor:{ok:true,problems:[],paths:window.toolPaths || {}},detected:{},setup:window.setupState ?? {},dataDir:'E:/data',dataDirOverride:window.selectedDataDirectory ?? null,restartRequired:Boolean(window.selectedDataDirectory && window.selectedDataDirectory!=='E:/data'),defaultDataDir:'E:/data',parsedBytes:0,anomalyBytes:0,clipsBytes:0,radarBytes:0 };
       if(cmd==='list_demos'){if(window.holdRefresh)await new Promise(resolve=>window.releaseRefresh=resolve);return demos;}
       if(cmd==='delete_job') { window.queueJobs=(window.queueJobs ?? jobs).filter(job=>job.id!==args.id); return; }
       if(cmd==='list_jobs')return window.queueJobs ?? (window.showQueuedOnCurrentDemo ? jobs.map(j=>j.status==='queued'?{...j,demoId:'demo-0'}:j) : jobs);
@@ -698,16 +701,16 @@ try {
   });
   assert.ok(toolPositions.every(x => x === toolPositions[0]), 'Download buttons align across tools');
 
-  for (const label of ['HLAE.exe', 'ffmpeg.exe', 'Source 2 Viewer CLI']) {
+  for (const label of ['HLAE', 'FFmpeg', 'Source 2 Viewer CLI']) {
     assert.equal(await settingsPage.getByRole('button', {name:'Download source: ' + label,exact:true}).count(), 1);
   }
 
-  assert.equal(await page.getByLabel('HLAE.exe', {exact:true}).getAttribute('placeholder'), 'Not detected');
-  assert.equal(await page.getByLabel('ffmpeg.exe', {exact:true}).getAttribute('placeholder'), 'Not detected');
+  assert.equal(await page.getByLabel('HLAE', {exact:true}).getAttribute('placeholder'), 'E:/data/tools');
+  assert.equal(await page.getByLabel('FFmpeg', {exact:true}).getAttribute('placeholder'), 'E:/data/tools');
   assert.equal(await page.getByLabel('Source 2 Viewer CLI', {exact:true}).count(), 1);
-  for (const label of ['Steam install folder', 'CS2 install folder', 'HLAE.exe', 'ffmpeg.exe', 'Source 2 Viewer CLI']) {
+  for (const label of ['Steam install folder', 'CS2 install folder', 'HLAE', 'FFmpeg', 'Source 2 Viewer CLI']) {
     const field = settingsPage.locator('.tool-field').filter({has: page.getByLabel(label, {exact:true})});
-    if (['HLAE.exe', 'ffmpeg.exe', 'Source 2 Viewer CLI'].includes(label)) assert.equal(await field.getByRole('button', {name:'Show in Explorer',exact:true}).isDisabled(), true);
+    if (['HLAE', 'FFmpeg', 'Source 2 Viewer CLI'].includes(label)) assert.equal(await field.getByRole('button', {name:'Show in Explorer',exact:true}).isDisabled(), true);
     const icons = await field.locator('button i').evaluateAll(items => items.map(i => i.className).filter(name => /bi-three-dots|bi-folder2-open|bi-box-arrow-up-right/.test(name)));
     assert.ok(icons[0].includes('bi-three-dots') && icons[1].includes('bi-folder2-open') && icons[2].includes('bi-box-arrow-up-right'), 'Path actions are browse, folder, link');
   }
@@ -743,7 +746,7 @@ try {
     await page.locator('.notification-viewport .app-toast').getByRole('button', {name:'Close',exact:true}).click();
   }
   {
-  const hlaeField = settingsPage.locator('.tool-field').filter({has:page.getByLabel('HLAE.exe',{exact:true})});
+  const hlaeField = settingsPage.locator('.tool-field').filter({has:page.getByLabel('HLAE',{exact:true})});
   await page.evaluate(() => { window.holdToolCheck=true; window.toolChecks={hlae:{ok:false,path:'E:/tools/HLAE.exe',exitCode:7,timedOut:false,stderr:'fixture startup failure'}}; });
   await settingsPage.getByRole('button',{name:'Check again',exact:true}).click();
   await hlaeField.getByText('Verifying…',{exact:true}).waitFor();
@@ -1033,7 +1036,7 @@ try {
   await page.getByRole('button',{name:'Download: HLAE',exact:true}).waitFor();
   await page.evaluate(() => { window.toolPaths = {steamDir:'E:/Steam',cs2Exe:'E:/CS2/game/bin/win64/cs2.exe',hlaeExe:'E:/tools/HLAE.exe',hlaeDll:'E:/tools/AfxHookSource2.dll'}; });
   await page.getByRole('button', {name:'Check again',exact:true}).click();
-  await page.locator('.tool-field').filter({has:page.getByLabel('HLAE.exe', {exact:true})}).getByText('Ready', {exact:true}).waitFor();
+  await page.locator('.tool-field').filter({has:page.getByLabel('HLAE', {exact:true})}).getByText('Ready', {exact:true}).waitFor();
   assert.equal(await page.locator('.driver-popover').count(), 0, 'Tool updates do not restart guidance');
 
 
@@ -1097,19 +1100,47 @@ try {
     const dialog = page.getByRole('dialog');
     await dialog.waitFor();
     await dialog.getByText(tool==='vrf'?'error: Download failed':'Download completed',{exact:false}).waitFor();
-    assert.deepEqual(await page.evaluate(() => window.testCalls.filter(c => c.cmd === 'run_setup').at(-1).args), {tool,force:true});
+    assert.deepEqual(await page.evaluate(() => window.testCalls.filter(c => c.cmd === 'run_setup').at(-1).args), {tool,force:true,directory:null});
     await dialog.getByRole('button', {name:'Close',exact:true}).click();
   }
-  const hlaeField = page.locator('.tool-field').filter({has:page.getByLabel('HLAE.exe',{exact:true})});
+  const hlaeField = page.locator('.tool-field').filter({has:page.getByLabel('HLAE',{exact:true})});
   await hlaeField.getByRole('button',{name:'Show in Explorer',exact:true}).click();
-  assert.equal(await page.evaluate(() => window.openedPath), 'E:/tools/');
+  assert.equal(await page.evaluate(() => window.openedPath), 'E:/tools');
   await hlaeField.getByRole('button',{name:'Browse...',exact:true}).click();
-  assert.equal(await page.evaluate(() => window.testCalls.filter(c=>c.cmd==='browse_directory').at(-1).args.path), 'E:/tools/HLAE.exe');
+  assert.equal(await page.evaluate(() => window.testCalls.filter(c=>c.cmd==='browse_directory').at(-1).args.path), 'E:/data/tools');
   assert.equal(await page.evaluate(() => window.testCalls.filter(c=>c.cmd==='plugin:dialog|open').at(-1).args.options.defaultPath), 'E:/tools');
-  await page.getByLabel('HLAE.exe',{exact:true}).fill('E:/custom/HLAE.exe');
+  await page.getByLabel('HLAE',{exact:true}).fill('E:/custom/hlae');
   assert.equal(await hlaeField.getByRole('button',{name:'Show in Explorer',exact:true}).isDisabled(), true);
   await hlaeField.getByRole('button',{name:'Browse...',exact:true}).click();
-  assert.equal(await page.evaluate(() => window.testCalls.filter(c=>c.cmd==='browse_directory').at(-1).args.path), 'E:/custom/HLAE.exe');
+  assert.equal(await page.evaluate(() => window.testCalls.filter(c=>c.cmd==='browse_directory').at(-1).args.path), 'E:/custom/hlae');
+  assert.equal(await page.evaluate(() => window.testCalls.filter(c=>c.cmd==='plugin:dialog|open').at(-1).args.options.directory), true, 'Tool browser selects folders');
+  await hlaeField.getByRole('button',{name:'Download: HLAE',exact:true}).click();
+  assert.equal(await page.evaluate(() => window.testCalls.filter(c=>c.cmd==='run_setup').at(-1).args.directory), 'E:/custom/hlae', 'Download uses the selected folder before Save');
+  await page.evaluate(() => window.emitTestEvent({type:'setup-finished',tool:'hlae',ok:false,error:'fixture cancelled'}));
+  const saveCalls = () => page.evaluate(() => window.testCalls.filter(c=>c.cmd==='save_settings').length);
+  const beforeSave = await saveCalls();
+  await page.getByLabel('Data directory',{exact:true}).fill('E:/new-data');
+  assert.equal(await page.getByRole('alertdialog').count(),0,'Editing multiple paths does not ask for confirmation');
+  await page.getByRole('button',{name:'Save',exact:true}).click();
+  const changeDialog=page.getByRole('alertdialog');
+  await changeDialog.getByText(/Old files will be kept/).waitFor();
+  await changeDialog.getByRole('button',{name:'Cancel',exact:true}).click();
+  assert.equal(await saveCalls(),beforeSave,'Cancelling confirmation does not submit settings');
+  await page.getByRole('button',{name:'Save',exact:true}).click();
+  await changeDialog.getByRole('button',{name:'Save',exact:true}).click();
+  await changeDialog.waitFor({state:'hidden'});
+  await page.getByText('Restart the app to use the selected data directory. Storage actions below still use the current directory.',{exact:true}).first().waitFor();
+  const submitted=await page.evaluate(()=>window.testCalls.filter(c=>c.cmd==='save_settings').at(-1).args);
+  assert.equal(submitted.dataDirOverride,'E:/new-data');
+  assert.equal(submitted.settings.hlaeExe,'E:/custom/hlae','The same save includes the edited tool path');
+  assert.equal(submitted.changeConfirmed,true);
+  assert.equal(await page.getByLabel('Data directory',{exact:true}).inputValue(),'E:/new-data');
+  assert.equal(await page.getByRole('dialog').count(),0,'Saving does not open a waiting or restart dialog');
+  await page.evaluate(()=>window.emitTestEvent({type:'setup-progress',tool:'hlae',progress:'still running'}));
+  await page.evaluate(()=>window.emitTestEvent({type:'setup-finished',tool:'hlae',ok:true}));
+  await hlaeField.getByRole('button',{name:'Download: HLAE',exact:true}).waitFor();
+  assert.equal(await page.evaluate(()=>window.testCalls.some(c=>['restart_status','cancel_settings_restart','retry_startup'].includes(c.cmd))),false,'Saving leaves restarting to the user');
+  await page.reload();
   await checkReplayDrawing(page);
   await page.evaluate(() => localStorage.setItem('test.playerNames', JSON.stringify(['P', "Synthetic player with an intentionally very long display name"])));
   await page.reload();

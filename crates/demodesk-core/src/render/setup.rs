@@ -147,9 +147,66 @@ struct GithubAsset {
     browser_download_url: String,
 }
 
+// ponytail: serialize only replacement/recovery; use per-directory locks if publishing becomes contended.
+static INSTALL_COMMIT: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+fn previous_directory(dir: &Path) -> PathBuf {
+    let mut name = dir.file_name().unwrap_or_default().to_os_string();
+    name.push(".demodesk-previous");
+    dir.with_file_name(name)
+}
+
+/// Replacement owns the whole directory, so arbitrary user folders must never be replaced.
+fn validate_install_directory(dir: &Path, repo: &str, replacing: bool) -> Result<()> {
+    anyhow::ensure!(
+        dir.is_absolute()
+            && dir.components().count() >= 3
+            && !dir
+                .components()
+                .any(|c| matches!(c, std::path::Component::ParentDir)),
+        "Choose an absolute tool directory"
+    );
+    for path in [dir.to_path_buf(), previous_directory(dir)] {
+        let metadata = match fs::symlink_metadata(&path) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => return Err(error.into()),
+        };
+        #[cfg(windows)]
+        let link = {
+            use std::os::windows::fs::MetadataExt;
+            metadata.file_attributes() & 0x400 != 0
+        };
+        #[cfg(not(windows))]
+        let link = metadata.is_symlink();
+        anyhow::ensure!(
+            metadata.is_dir() && !link,
+            "Choose a regular tool directory: {}",
+            path.display()
+        );
+        if (!replacing && path == dir) || fs::read_dir(&path)?.next().is_none() {
+            continue;
+        }
+        let info = fs::read(path.join("install-info.json"))
+            .ok()
+            .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok());
+        let prefix = format!("https://github.com/{repo}/releases/download/");
+        anyhow::ensure!(
+            info.as_ref()
+                .and_then(|v| v.get("url"))
+                .and_then(|v| v.as_str())
+                .is_some_and(|url| url.starts_with(&prefix)),
+            "Choose an empty folder or this tool's DemoDesk installation folder: {}",
+            path.display()
+        );
+    }
+    Ok(())
+}
+
 /// Recover a replacement interrupted after the old installation was moved aside.
 fn recover_install(dir: &Path) -> Result<()> {
-    let backup = dir.with_extension("previous");
+    let _commit = INSTALL_COMMIT.lock().unwrap();
+    let backup = previous_directory(dir);
     if backup.exists() && !dir.exists() {
         fs::rename(&backup, dir).context("restore previous installation")?;
     }
@@ -160,7 +217,7 @@ fn recover_install(dir: &Path) -> Result<()> {
 }
 
 fn publish_install(dir: &Path, staged: &Path) -> Result<()> {
-    let backup = dir.with_extension("previous");
+    let backup = previous_directory(dir);
     let existed = dir.exists();
     if existed {
         fs::rename(dir, &backup).context("tool may be in use; close it before updating")?;
@@ -183,16 +240,16 @@ fn publish_install(dir: &Path, staged: &Path) -> Result<()> {
 /// Fully extract and validate before replacing a working installation.
 fn install_zip(dir: &Path, url: &str, tag: &str, valid: fn(&Path) -> bool, log: Log) -> Result<()> {
     recover_install(dir)?;
-    let work = dir.with_extension("installing");
-    if work.exists() {
-        fs::remove_dir_all(&work)?;
-    }
-    let zip = work.join("download.zip");
+    let parent = dir
+        .parent()
+        .ok_or_else(|| anyhow!("Invalid tool directory"))?;
+    fs::create_dir_all(parent)?;
+    let work = tempfile::Builder::new()
+        .prefix(".demodesk-install-")
+        .tempdir_in(parent)?;
+    let zip = work.path().join("download.zip");
     let result = download(url, &zip, log)
-        .and_then(|_| install_archive(dir, &work, tag, url, valid, log.cancel));
-    if result.is_err() && log.cancel.load(Ordering::Relaxed) {
-        let _ = fs::remove_dir_all(&work);
-    }
+        .and_then(|_| install_archive(dir, work.path(), tag, url, valid, log.cancel));
     result
 }
 
@@ -215,6 +272,13 @@ fn install_archive(
     }
     fs::write(staged.join("install-info.json"), serde_json::json!({ "tag": tag, "url": url, "installedAt": chrono::Utc::now().to_rfc3339() }).to_string())?;
     anyhow::ensure!(!cancel.load(Ordering::Relaxed), "Download cancelled");
+    let _commit = INSTALL_COMMIT.lock().unwrap();
+    let repo = url
+        .strip_prefix("https://github.com/")
+        .and_then(|url| url.split_once("/releases/download/"))
+        .map(|(repo, _)| repo)
+        .ok_or_else(|| anyhow!("Unrecognized tool download source"))?;
+    validate_install_directory(dir, repo, true)?;
     publish_install(dir, &staged)?;
     let _ = fs::remove_dir_all(work);
     Ok(())
@@ -288,12 +352,14 @@ fn unique_asset<'a>(
     Ok(asset)
 }
 
-pub fn install_hlae(tools_dir: &Path, force: bool, log: Log) -> Result<PathBuf> {
-    let dir = tools_dir.join("hlae");
+pub fn install_hlae(directory: &Path, force: bool, log: Log) -> Result<PathBuf> {
+    let dir = directory.to_path_buf();
+    validate_install_directory(&dir, "advancedfx/advancedfx", force)?;
     recover_install(&dir)?;
     if !force && hlae_installed(&dir) {
         return Ok(dir);
     }
+    validate_install_directory(&dir, "advancedfx/advancedfx", true)?;
     install_release(
         "advancedfx/advancedfx",
         &dir,
@@ -319,12 +385,14 @@ fn ffmpeg_asset(release: &GithubRelease) -> Result<&GithubAsset> {
     )
 }
 
-pub fn install_ffmpeg(tools_dir: &Path, force: bool, log: Log) -> Result<PathBuf> {
-    let dir = tools_dir.join("ffmpeg");
+pub fn install_ffmpeg(directory: &Path, force: bool, log: Log) -> Result<PathBuf> {
+    let dir = directory.to_path_buf();
+    validate_install_directory(&dir, "BtbN/FFmpeg-Builds", force)?;
     recover_install(&dir)?;
     if !force && ffmpeg_installed(&dir) {
         return Ok(dir);
     }
+    validate_install_directory(&dir, "BtbN/FFmpeg-Builds", true)?;
     install_release(
         "BtbN/FFmpeg-Builds",
         &dir,
@@ -392,13 +460,15 @@ fn vrf_asset(release: &GithubRelease) -> Result<&GithubAsset> {
     unique_asset(release, |name| name == wanted, wanted)
 }
 
-pub fn install_vrf(tools_dir: &Path, force: bool, log: Log) -> Result<PathBuf> {
-    let dir = tools_dir.join("vrf");
+pub fn install_vrf(directory: &Path, force: bool, log: Log) -> Result<PathBuf> {
+    let dir = directory.to_path_buf();
     let exe = dir.join(vrf_exe_name());
+    validate_install_directory(&dir, "ValveResourceFormat/ValveResourceFormat", force)?;
     recover_install(&dir)?;
     if !force && vrf_installed(&dir) {
         return Ok(exe);
     }
+    validate_install_directory(&dir, "ValveResourceFormat/ValveResourceFormat", true)?;
     install_release(
         "ValveResourceFormat/ValveResourceFormat",
         &dir,
@@ -552,7 +622,7 @@ mod tests {
         fs::write(dir.join("old"), b"working").unwrap();
         assert!(publish_install(&dir, &root.path().join("missing-stage")).is_err());
         assert_eq!(fs::read(dir.join("old")).unwrap(), b"working");
-        fs::rename(&dir, dir.with_extension("previous")).unwrap();
+        fs::rename(&dir, previous_directory(&dir)).unwrap();
         recover_install(&dir).unwrap();
         assert_eq!(fs::read(dir.join("old")).unwrap(), b"working");
         let staged = root.path().join("new");
@@ -561,7 +631,50 @@ mod tests {
         publish_install(&dir, &staged).unwrap();
         assert!(dir.join("new").is_file());
         assert!(!dir.join("old").exists());
-        assert!(!dir.with_extension("previous").exists());
+        assert!(!previous_directory(&dir).exists());
+    }
+
+    #[test]
+    fn custom_directory_install_preserves_unrelated_folders_and_replaces_owned_tools() {
+        use std::io::Write;
+        let root = tempfile::tempdir().unwrap();
+        let dir = root.path().join("chosen.previous");
+        fs::create_dir(&dir).unwrap();
+        let work = root.path().join("stage");
+        fs::create_dir(&work).unwrap();
+        let mut zip = zip::ZipWriter::new(fs::File::create(work.join("download.zip")).unwrap());
+        for file in ["HLAE.exe", "x64/AfxHookSource2.dll"] {
+            zip.start_file(file, zip::write::SimpleFileOptions::default())
+                .unwrap();
+            zip.write_all(b"synthetic binary").unwrap();
+        }
+        zip.finish().unwrap();
+        let url = "https://github.com/advancedfx/advancedfx/releases/download/test/hlae.zip";
+        fs::write(dir.join("keep.txt"), b"unrelated").unwrap();
+        assert!(install_archive(
+            &dir,
+            &work,
+            "test",
+            url,
+            hlae_installed,
+            &AtomicBool::new(false)
+        )
+        .is_err());
+        assert_eq!(fs::read(dir.join("keep.txt")).unwrap(), b"unrelated");
+        fs::remove_file(dir.join("keep.txt")).unwrap();
+        install_archive(
+            &dir,
+            &work,
+            "test",
+            url,
+            hlae_installed,
+            &AtomicBool::new(false),
+        )
+        .unwrap();
+        assert!(hlae_installed(&dir));
+        validate_install_directory(&dir, "advancedfx/advancedfx", true).unwrap();
+        assert!(validate_install_directory(&dir, "BtbN/FFmpeg-Builds", true).is_err());
+        assert_ne!(previous_directory(&dir), dir);
     }
 
     #[test]

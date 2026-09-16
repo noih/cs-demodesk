@@ -9,6 +9,26 @@ import { api, errorText, mb, type Settings, type ToolPaths, type SettingsRespons
 import { LogView } from './LogView.tsx';
 import i18n, { applyLanguage, translateProblem, detectLanguage, LANGUAGE_NAMES, LANGUAGES } from '../i18n/index.ts';
 
+// Preserve legacy executable settings while presenting folder selection in the UI.
+const toolDirectory = (value?: string | null) => {
+  if (!value || !/[/\\][^/\\]+\.exe$/i.test(value)) return value ?? '';
+  const parent = value.replace(/[/\\][^/\\]+$/, '');
+  const executable = value.split(/[/\\]/).pop()?.toLowerCase();
+  const tool = ({ 'hlae.exe': 'hlae', 'ffmpeg.exe': 'ffmpeg', 'source2viewer-cli.exe': 'vrf' } as Record<string, string>)[executable ?? ''];
+  if (tool) {
+    let ancestor = parent;
+    while (ancestor) {
+      const separator = Math.max(ancestor.lastIndexOf('/'), ancestor.lastIndexOf('\\'));
+      if (separator < 0) break;
+      if (ancestor.slice(separator + 1).toLowerCase() === tool) {
+        return ancestor.slice(0, separator === 2 && ancestor[1] === ':' ? 3 : separator);
+      }
+      ancestor = ancestor.slice(0, separator);
+    }
+  }
+  return parent;
+};
+
 function toolsInstalled(paths: ToolPaths): boolean {
   return Boolean(paths.hlaeExe && paths.hlaeDll && paths.ffmpegExe && paths.vrfExe);
 }
@@ -50,8 +70,8 @@ function PathField({ label, value, placeholder, hint, description, action, sourc
         <TextField.Root size="2" aria-label={label} value={value} placeholder={placeholder ?? t('settings.notDetected')} onChange={(e) => onChange(e.target.value)} className="mono path-input" style={{ flex: 1, minWidth: 0 }}>
         {value && (
           <TextField.Slot side="right">
-          <Tooltip disableHoverableContent delayDuration={400} style={{ pointerEvents: 'none' }} content={t('settings.clearToAuto')}>
-            <IconButton size="2" variant="outline" color="gray" onClick={() => onChange('')} aria-label={t('settings.clear')}>
+          <Tooltip disableHoverableContent delayDuration={400} style={{ pointerEvents: 'none' }} content={t('settings.clear')}>
+            <IconButton size="1" variant="ghost" color="gray" className="path-clear" onClick={() => onChange('')} aria-label={t('settings.clear')}>
               <i aria-hidden="true" className="bi bi-x-lg app-icon" />
             </IconButton>
           </Tooltip>
@@ -166,6 +186,8 @@ export function SettingsView({ onChanged, toolsRequest = 0, toolsTarget = 'rende
   const [form, setForm] = useState<Settings>({ language: null, cs2Dir: null, steamDir: null, replayFolders: [], scanGameReplays: true, hlaeExe: null, ffmpegExe: null, vrfExe: null });
   const [dataDirOverride, setDataDirOverride] = useState('');
   const [saving, setSaving] = useState(false);
+  const [pendingSave, setPendingSave] = useState<{ settings: Settings; original: Settings; target: string }>();
+  const downloadSelections = useRef<Partial<Record<'hlae' | 'ffmpeg' | 'vrf', string | null>>>({});
   const [message, setMessage] = useState<{ ok: boolean; text: string }>();
   const [logTool, setLogTool] = useState<'hlae' | 'ffmpeg' | 'vrf'>();
 
@@ -196,7 +218,7 @@ export function SettingsView({ onChanged, toolsRequest = 0, toolsTarget = 'rende
           void load().then(r => {
             if (!ev.ok && !ev.installed) return;
             const field = ({ hlae: 'hlaeExe', ffmpeg: 'ffmpegExe', vrf: 'vrfExe' } as const)[ev.tool];
-            setForm(current => ({ ...current, [field]: r.settings[field] }));
+            setForm(current => current[field] === downloadSelections.current[ev.tool] ? ({ ...current, [field]: r.settings[field] }) : current);
           }).catch(e => setMessage({ ok: false, text: errorText(e) }));
           setMessage(ev.cancelled ? { ok: true, text: i18n.t('renders.status.cancelled') } : ev.ok ? { ok: true, text: i18n.t('settings.downloadDone') } : { ok: false, text: i18n.t('settings.downloadFailed', { error: ev.error ?? i18n.t('settings.unknownError') }) });
         }
@@ -207,10 +229,17 @@ export function SettingsView({ onChanged, toolsRequest = 0, toolsTarget = 'rende
   }, [load]);
 
   const save = async () => {
+    if (!data || saving || pendingSave) return;
     setSaving(true);
     setMessage(undefined);
     try {
-      const r = await api.saveSettings(form, dataDirOverride || null);
+      const preview = await api.previewSettings(form, data.settings, dataDirOverride || null);
+      if (preview.restartRequired) {
+        setPendingSave({ settings: structuredClone(form), original: structuredClone(data.settings), target: preview.target });
+        return;
+      }
+      const r = await api.saveSettings(form, preview.target, data.settings);
+      if (!r) return;
       setData(r);
       setForm(r.settings);
       setDataDirOverride(r.dataDirOverride ?? '');
@@ -245,6 +274,21 @@ export function SettingsView({ onChanged, toolsRequest = 0, toolsTarget = 'rende
       setChecking(false);
     }
   };
+  const confirmDirectoryChange = async () => {
+    if (!pendingSave || saving) return;
+    const submission = pendingSave;
+    setPendingSave(undefined);
+    setSaving(true);
+    try {
+      const r = await api.saveSettings(submission.settings, submission.target, submission.original, true);
+      setData(r);
+      setForm(r.settings);
+      setDataDirOverride(r.dataDirOverride ?? '');
+      setMessage({ ok: true, text: t('settings.restartRequired') });
+    } catch (error) {
+      setMessage({ ok: false, text: errorText(error) });
+    } finally { setSaving(false); }
+  };
   const clear = (what: string, fn: () => Promise<number>) => async () => {
     try {
       const freed = await fn();
@@ -261,7 +305,9 @@ export function SettingsView({ onChanged, toolsRequest = 0, toolsTarget = 'rende
     setMessage(undefined);
     setData(current => current && ({ ...current, setup: { ...current.setup, [tool]: { running: true, progress: null, log: [] } } }));
     try {
-      await api.runSetup(tool, true);
+      const field = ({ hlae: 'hlaeExe', ffmpeg: 'ffmpegExe', vrf: 'vrfExe' } as const)[tool];
+      downloadSelections.current[tool] = form[field];
+      await api.runSetup(tool, true, toolDirectory(form[field]) || null);
       await load();
     } catch (e) {
       setData(current => current && ({ ...current, setup: { ...current.setup, [tool]: { running: false, progress: null, log: [errorText(e)] } } }));
@@ -331,6 +377,9 @@ export function SettingsView({ onChanged, toolsRequest = 0, toolsTarget = 'rende
 
   return (
     <Flex direction="column" gap="4" className="settings-page">
+      <ConfirmDialog open={Boolean(pendingSave)} onOpenChange={open => { if (!open) setPendingSave(undefined); }}
+        title={t('settings.changeDataTitle')} description={t('settings.changeDataConfirm')}
+        confirmLabel={t('common.save')} onConfirm={() => void confirmDirectoryChange()} />
       <Flex justify="between" align="center" gap="3" wrap="wrap">
         <Box>
           <Heading data-text-role="title" size="6">{t('settings.title')}</Heading>
@@ -477,10 +526,10 @@ export function SettingsView({ onChanged, toolsRequest = 0, toolsTarget = 'rende
             )}
             <Flex direction="column" gap="3">
               <Flex direction="column" gap="3">
-                <PathField description={t('settings.hlaePurpose')} action={toolButton('hlae', 'HLAE')} source={SOURCES.hlae} {...toolReadiness('hlae')} label="HLAE.exe" value={form.hlaeExe ?? ''} detectedPath={(form.hlaeExe ?? '') === (data.settings.hlaeExe ?? '') ? d.paths.hlaeExe : null} placeholder={d.paths.hlaeExe} onChange={(v) => set({ hlaeExe: v || null })} pick={{ filters: [{ name: 'HLAE', extensions: ['exe'] }] }} />
-                <PathField description={t('settings.ffmpegPurpose')} action={toolButton('ffmpeg', 'FFmpeg')} source={SOURCES.ffmpeg} {...toolReadiness('ffmpeg')} label="ffmpeg.exe" value={form.ffmpegExe ?? ''} detectedPath={(form.ffmpegExe ?? '') === (data.settings.ffmpegExe ?? '') ? d.paths.ffmpegExe : null} placeholder={d.paths.ffmpegExe} onChange={(v) => set({ ffmpegExe: v || null })} pick={{ filters: [{ name: 'ffmpeg', extensions: ['exe'] }] }} />
+                <PathField description={t('settings.hlaePurpose')} hint={t('settings.toolDirectoryHint')} action={toolButton('hlae', 'HLAE')} source={SOURCES.hlae} {...toolReadiness('hlae')} label="HLAE" value={toolDirectory(form.hlaeExe)} detectedPath={(form.hlaeExe ?? '') === (data.settings.hlaeExe ?? '') ? toolDirectory(d.paths.hlaeExe) : null} placeholder={`${data.dataDir}/tools`} onChange={(v) => set({ hlaeExe: v || null })} pick={{ directory: true }} />
+                <PathField description={t('settings.ffmpegPurpose')} hint={t('settings.toolDirectoryHint')} action={toolButton('ffmpeg', 'FFmpeg')} source={SOURCES.ffmpeg} {...toolReadiness('ffmpeg')} label="FFmpeg" value={toolDirectory(form.ffmpegExe)} detectedPath={(form.ffmpegExe ?? '') === (data.settings.ffmpegExe ?? '') ? toolDirectory(d.paths.ffmpegExe) : null} placeholder={`${data.dataDir}/tools`} onChange={(v) => set({ ffmpegExe: v || null })} pick={{ directory: true }} />
               </Flex>
-              <PathField description={t('settings.vrfPurpose')} action={toolButton('vrf', 'Source 2 Viewer CLI')} source={SOURCES.vrf} {...toolReadiness('vrf')} label="Source 2 Viewer CLI" value={form.vrfExe ?? ''} detectedPath={(form.vrfExe ?? '') === (data.settings.vrfExe ?? '') ? d.paths.vrfExe : null} placeholder={d.paths.vrfExe} onChange={(v) => set({ vrfExe: v || null })} pick={{ filters: [{ name: 'Source 2 Viewer CLI', extensions: ['exe'] }] }} />
+              <PathField description={t('settings.vrfPurpose')} hint={t('settings.toolDirectoryHint')} action={toolButton('vrf', 'Source 2 Viewer CLI')} source={SOURCES.vrf} {...toolReadiness('vrf')} label="Source 2 Viewer CLI" value={toolDirectory(form.vrfExe)} detectedPath={(form.vrfExe ?? '') === (data.settings.vrfExe ?? '') ? toolDirectory(d.paths.vrfExe) : null} placeholder={`${data.dataDir}/tools`} onChange={(v) => set({ vrfExe: v || null })} pick={{ directory: true }} />
               <Flex gap="2" wrap="wrap" align="center" justify="center">
                 <Button size="2" variant="outline" color="gray" disabled={checking} onClick={() => void check()}>{checking ? t('settings.verifying') : t('settings.recheck')}</Button>
                 <Button size="2" variant="outline" color="gray" onClick={() => void api.toolDiagnostics().then(setDiagnostics).catch(error => setMessage({ok: false, text: errorText(error)}))}>{t('settings.diagnostics')}</Button>

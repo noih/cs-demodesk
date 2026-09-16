@@ -1,20 +1,43 @@
 # Data storage and automatic parsing
 
-By default, the desktop app opens `demodesk-data` beside its current executable.
-The Storage setting selects the data folder itself; no extra directory name is
-appended. Clearing the field restores the portable default. Selection changes
-apply on the next application start, so active workers keep using their original
-store. Selecting a directory does not copy or move existing data.
+By default, both Store and portable builds use
+`%USERPROFILE%\.noih\demodesk-data`, with downloaded tools under `tools/`.
+The bootstrap preference lives at `%USERPROFILE%\.noih\data-directory.json`.
+Clearing the Storage field restores this default. Custom folders outside AppData
+are supported; aliases that resolve into AppData are rejected.
 
-The bootstrap preference is `data-directory.json` under Tauri's
-`app.path().app_config_dir()`, outside the selected data folder. This allows the
-app to discover a custom folder before opening its `settings.json`, and allows
-clearing the selection while using that folder. Unwritable or relative paths are
-rejected; the app does not silently switch to a different data directory. If the
-selected store cannot be opened at startup, a recovery screen appears before
-normal app commands or workers start. Users can choose another directory or
-explicitly restore the portable default. A validated selection is saved before
-restarting the app; a failed selection leaves recovery available.
+Startup checks the active data root and every directory setting (Steam, CS2,
+replay folders and all tool locations). Any AppData path triggers a reset,
+including aliases whose existing ancestor resolves into AppData. No app-version
+marker is used. Saving settings rejects these paths to prevent repeated resets.
+
+The trigger is separate from deletion authority: cleanup can remove only the
+fixed legacy app workspace and its Windows-reported package-private counterpart.
+Configured paths never extend that scope. The entire authorized workspace,
+including settings.json, tools, clips and unknown obsolete files, is removed.
+External custom folders are left untouched and their old settings are discarded.
+The new default receives fresh settings; tools must be downloaded again.
+Demo files inside the authorized workspace are also removed. External demo files
+remain untouched; reparse points inside cleanup roots block deletion.
+
+Cross-process locks and cleanup boundaries are checked before deletion. A pending
+reset record permits interrupted cleanup to resume before workers start, with
+its roots revalidated on each startup. A nonempty new default blocks automatic
+reset rather than overwriting existing data. Appearance preferences are reset.
+
+Manual data-root changes prompt once on Save. Confirmation saves the next-start
+selection and displays a manual-restart reminder. Existing work continues using
+the current Engine and store; there is no automatic restart or waiting phase.
+Old data is retained. Only fields edited in the same Save are applied over the
+target folder's own settings. Invalid selections leave the current store unchanged,
+and startup failures offer recovery before starting workers.
+
+Each tool field selects a parent folder, which may be empty. Download installs
+into its own `hlae/`, `ffmpeg/` or `vrf/` child, using the current field even before
+Save. Only that tool selection is saved after installation. Existing executable
+settings remain readable; new selections are folders. Replacement refuses
+nonempty child folders that are not that tool's DemoDesk installation. Staging
+uses a unique temporary sibling and failed installs keep the previous tool.
 
 The existing periodic demo scan starts automatic parsing for entries without
 analysis or a recorded error. Readiness uses Source 2 frame boundaries and a
@@ -81,7 +104,7 @@ The old 2D view is unmounted while reparsing.
 General statistics are rebuilt by the parse. The detailed 2D stream is generated
 on demand when 2D is opened again. Shared radar assets, source demos and exported
 videos are retained. Paths are relative to the selected data folder, which is
-`demodesk-data` beside the executable unless changed in Settings.
+`%USERPROFILE%\.noih\demodesk-data` unless changed in Settings.
 
 ## Privacy when developing and publishing
 

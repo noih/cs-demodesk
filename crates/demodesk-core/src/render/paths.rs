@@ -145,6 +145,51 @@ fn find_on_path(exe: &str) -> Option<PathBuf> {
         .find(|p| p.is_file())
 }
 
+/// Legacy executables inside a managed tool folder map to its parent selection.
+pub fn installation_directory(path: &Path) -> PathBuf {
+    if path.is_file()
+        || path.extension().is_some_and(|ext| {
+            ext.to_str()
+                .is_some_and(|ext| ext.eq_ignore_ascii_case("exe"))
+        })
+    {
+        let parent = path.parent().unwrap_or(path);
+        let tool = match path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .map(str::to_ascii_lowercase)
+            .as_deref()
+        {
+            Some("hlae.exe") => Some("hlae"),
+            Some("ffmpeg.exe" | "ffmpeg") => Some("ffmpeg"),
+            Some("source2viewer-cli.exe" | "source2viewer-cli") => Some("vrf"),
+            _ => None,
+        };
+        if let Some(tool) = tool {
+            for ancestor in parent.ancestors() {
+                if ancestor
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .is_some_and(|name| name.eq_ignore_ascii_case(tool))
+                {
+                    return ancestor.parent().unwrap_or(ancestor).to_path_buf();
+                }
+            }
+        }
+        parent.to_path_buf()
+    } else {
+        path.to_path_buf()
+    }
+}
+
+fn selected_executable(path: &Path, name: &str) -> Option<PathBuf> {
+    if path.is_file() {
+        Some(path.to_path_buf())
+    } else {
+        find_file(path, name, 4)
+    }
+}
+
 pub fn resolve_tool_paths(tools_dir: &Path, o: &PathOverrides) -> ToolPaths {
     let tools_dir = tools_dir.to_path_buf();
     let steam_dir = o
@@ -160,28 +205,45 @@ pub fn resolve_tool_paths(tools_dir: &Path, o: &PathOverrides) -> ToolPaths {
         .as_ref()
         .map(|d| cs2_exe_in(d))
         .filter(|p| p.is_file());
-    let hlae_exe = o
-        .hlae_exe
-        .clone()
-        .or_else(|| find_file(&tools_dir.join("hlae"), "HLAE.exe", 2))
-        .filter(|p| p.is_file());
+    let hlae_exe = match &o.hlae_exe {
+        Some(path) => selected_executable(
+            &if path.is_file() {
+                path.clone()
+            } else {
+                path.join("hlae")
+            },
+            "HLAE.exe",
+        ),
+        None => find_file(&tools_dir.join("hlae"), "HLAE.exe", 2),
+    };
     let hlae_dll = hlae_exe
         .as_ref()
         .map(|e| e.parent().unwrap().join("x64").join("AfxHookSource2.dll"))
         .filter(|p| p.is_file());
     let ffmpeg_name = if IS_WINDOWS { "ffmpeg.exe" } else { "ffmpeg" };
-    let ffmpeg_exe = o
-        .ffmpeg_exe
-        .clone()
-        .or_else(|| find_file(&tools_dir.join("ffmpeg"), ffmpeg_name, 4))
-        .or_else(|| find_on_path(ffmpeg_name))
-        .filter(|p| p.is_file());
-    let vrf_exe = Some(
-        o.vrf_exe
-            .clone()
-            .unwrap_or_else(|| tools_dir.join("vrf").join(super::setup::vrf_exe_name())),
-    )
-    .filter(|p| p.is_file());
+    let ffmpeg_exe = match &o.ffmpeg_exe {
+        Some(path) => selected_executable(
+            &if path.is_file() {
+                path.clone()
+            } else {
+                path.join("ffmpeg")
+            },
+            ffmpeg_name,
+        ),
+        None => find_file(&tools_dir.join("ffmpeg"), ffmpeg_name, 4)
+            .or_else(|| find_on_path(ffmpeg_name)),
+    };
+    let vrf_exe = match &o.vrf_exe {
+        Some(path) => selected_executable(
+            &if path.is_file() {
+                path.clone()
+            } else {
+                path.join("vrf")
+            },
+            super::setup::vrf_exe_name(),
+        ),
+        None => selected_executable(&tools_dir.join("vrf"), super::setup::vrf_exe_name()),
+    };
     ToolPaths {
         tools_dir,
         steam_dir,
@@ -201,6 +263,67 @@ pub fn to_forward_slashes(p: &Path) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn legacy_executables_select_the_tool_parent_without_nesting() {
+        let root = tempfile::tempdir().unwrap();
+        for relative in [
+            "hlae/HLAE.exe",
+            "ffmpeg/release/bin/ffmpeg.exe",
+            "vrf/Source2Viewer-CLI.exe",
+        ] {
+            assert_eq!(
+                super::installation_directory(&root.path().join(relative)),
+                root.path()
+            );
+        }
+        let folder = root.path().join("hlae");
+        assert_eq!(super::installation_directory(&folder), folder);
+        assert_eq!(
+            super::installation_directory(&root.path().join("custom/HLAE.exe")),
+            root.path().join("custom")
+        );
+    }
+
+    #[test]
+    fn empty_selected_folder_does_not_fall_back_and_nested_tools_are_detected() {
+        let root = tempfile::tempdir().unwrap();
+        let custom = root.path().join("selected");
+        std::fs::create_dir(&custom).unwrap();
+        let overrides = super::PathOverrides {
+            hlae_exe: Some(custom.clone()),
+            ffmpeg_exe: Some(custom.clone()),
+            vrf_exe: Some(custom.clone()),
+            ..Default::default()
+        };
+        let missing = super::resolve_tool_paths(root.path(), &overrides);
+        assert!(
+            missing.hlae_exe.is_none() && missing.ffmpeg_exe.is_none() && missing.vrf_exe.is_none()
+        );
+        for name in [
+            "hlae/HLAE.exe",
+            "hlae/x64/AfxHookSource2.dll",
+            "ffmpeg/build/bin/ffmpeg.exe",
+            &format!("vrf/{}", super::super::setup::vrf_exe_name()),
+        ] {
+            let path = custom.join(name);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, b"test").unwrap();
+        }
+        let paths = super::resolve_tool_paths(root.path(), &overrides);
+        assert_eq!(paths.hlae_exe, Some(custom.join("hlae/HLAE.exe")));
+        assert!(paths.hlae_dll.is_some());
+        if cfg!(windows) {
+            assert_eq!(
+                paths.ffmpeg_exe,
+                Some(custom.join("ffmpeg/build/bin/ffmpeg.exe"))
+            );
+        }
+        assert_eq!(
+            paths.vrf_exe,
+            Some(custom.join("vrf").join(super::super::setup::vrf_exe_name()))
+        );
+    }
+
     #[test]
     fn custom_steam_detects_cs2_and_rejects_missing_executables() {
         let dir = tempfile::tempdir().unwrap();
