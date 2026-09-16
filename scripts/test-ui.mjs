@@ -40,7 +40,7 @@ try {
     const listeners = new Map();
     let callbackId = 0;
     window.testListenerCount = () => listeners.size;
-    window.emitTestEvent = payload => { for (const [id, handler] of listeners) callbacks.get(handler)?.({event:'demodesk://event',id,payload}); };
+    window.emitTestEvent = payload => { if(payload.type==='setup-progress')window.setupState={...window.setupState,[payload.tool]:{...window.setupState[payload.tool],progress:payload.progress}};if(payload.type==='setup-finished')window.setupState={...window.setupState,[payload.tool]:{running:false,progress:null,log:['Download started',payload.cancelled?'Download cancelled':payload.ok?'Download completed':'error: '+payload.error]}}; for (const [id, handler] of listeners) callbacks.get(handler)?.({event:'demodesk://event',id,payload}); };
     window.__TAURI_INTERNALS__ = { transformCallback: fn => { callbacks.set(++callbackId, fn); return callbackId; }, unregisterCallback: id => callbacks.delete(id), convertFileSrc: () => 'data:video/mp4;base64,', invoke: async (cmd, args) => {
       window.testCalls.push({cmd,args});
       if(cmd==='get_startup_error')return null;
@@ -50,13 +50,14 @@ try {
       if(cmd==='parse_demo')return new Promise(resolve=>window.releaseParse=resolve);
       if(cmd==='browse_directory')return args.path ? 'E:/tools' : 'E:/Desktop';
       if(cmd==='plugin:dialog|open')return null;
-      if(cmd==='run_setup')return true;
+      if(cmd==='cancel_setup'){window.emitTestEvent({type:'setup-finished',tool:args.tool,ok:false,cancelled:true,error:null});return;}
+      if(cmd==='run_setup'){window.setupState={...window.setupState,[args.tool]:{running:true,progress:null,log:['Download started']}};return true;}
       if(cmd==='check_for_updates'){if(window.holdUpdate)await new Promise(resolve=>window.releaseUpdate=resolve);if(window.failUpdate)throw new Error('offline');return window.updateStatus ?? {status:'available',version:'1.0.10'};}
       if(cmd==='open_url'){window.openedUrl=args.url;return;}
       if(cmd==='open_path'){window.openedPath=args.path;return;}
       if(cmd==='get_status')return window.missingTools ? {...status,ok:false,missingRenderTools:window.missingRenderTools ?? ['HLAE','ffmpeg']} : status;
       if(cmd==='get_storage_bytes'){if(window.holdStorage)await new Promise(resolve=>window.releaseStorage=resolve);return {parsedBytes:1048576,anomalyBytes:0,clipsBytes:0,radarBytes:0};}
-      if(cmd==='get_settings')return { settings:{language:'en',replayFolders:[],scanGameReplays:true},doctor:{ok:true,problems:[],paths:window.toolPaths || {}},detected:{},setup:{running:false,log:[]},dataDir:'E:/data',defaultDataDir:'E:/data',parsedBytes:0,anomalyBytes:0,clipsBytes:0,radarBytes:0 };
+      if(cmd==='get_settings')return { settings:{language:'en',replayFolders:[],scanGameReplays:true},doctor:{ok:true,problems:[],paths:window.toolPaths || {}},detected:{},setup:window.setupState ?? {},dataDir:'E:/data',defaultDataDir:'E:/data',parsedBytes:0,anomalyBytes:0,clipsBytes:0,radarBytes:0 };
       if(cmd==='list_demos'){if(window.holdRefresh)await new Promise(resolve=>window.releaseRefresh=resolve);return demos;}
       if(cmd==='delete_job') { window.queueJobs=(window.queueJobs ?? jobs).filter(job=>job.id!==args.id); return; }
       if(cmd==='list_jobs')return window.queueJobs ?? (window.showQueuedOnCurrentDemo ? jobs.map(j=>j.status==='queued'?{...j,demoId:'demo-0'}:j) : jobs);
@@ -702,6 +703,12 @@ try {
   assert.equal(await page.getByLabel('HLAE.exe', {exact:true}).getAttribute('placeholder'), 'Not detected');
   assert.equal(await page.getByLabel('ffmpeg.exe', {exact:true}).getAttribute('placeholder'), 'Not detected');
   assert.equal(await page.getByLabel('Source 2 Viewer CLI', {exact:true}).count(), 1);
+  for (const label of ['Steam install folder', 'CS2 install folder', 'HLAE.exe', 'ffmpeg.exe', 'Source 2 Viewer CLI']) {
+    const field = settingsPage.locator('.tool-field').filter({has: page.getByLabel(label, {exact:true})});
+    if (['HLAE.exe', 'ffmpeg.exe', 'Source 2 Viewer CLI'].includes(label)) assert.equal(await field.getByRole('button', {name:'Show in Explorer',exact:true}).isDisabled(), true);
+    const icons = await field.locator('button i').evaluateAll(items => items.map(i => i.className).filter(name => /bi-three-dots|bi-folder2-open|bi-box-arrow-up-right/.test(name)));
+    assert.ok(icons[0].includes('bi-three-dots') && icons[1].includes('bi-folder2-open') && icons[2].includes('bi-box-arrow-up-right'), 'Path actions are browse, folder, link');
+  }
   await page.getByText('Tools are not fully installed. Some features will be limited.', {exact:true}).waitFor();
   const warningAlignment = await page.getByText('Tools are not fully installed. Some features will be limited.', {exact:true}).locator('..').evaluate(el => {
     const icon = el.querySelector('.rt-CalloutIcon').getBoundingClientRect();
@@ -735,6 +742,9 @@ try {
   }
   const actionHeights = await settingsPage.locator('.rt-Button, .rt-IconButton').evaluateAll(buttons => buttons.map(b => b.getBoundingClientRect().height));
   assert.ok(actionHeights.every(height => height >= 32), 'Settings action controls accommodate the selected text size');
+  assert.ok(actionHeights.every(height => height === actionHeights[0]), 'All settings buttons have the same height');
+  const iconSizes = await settingsPage.locator('.rt-IconButton').evaluateAll(buttons => buttons.map(button => { const rect = button.getBoundingClientRect(); return [rect.width, rect.height]; }));
+  assert.ok(iconSizes.every(([width, height]) => width === actionHeights[0] && height === actionHeights[0]), 'Browse, storage folder and tool icons share one square size');
   if (process.env.UI_SCREENSHOT_DIR) await page.screenshot({path:process.env.UI_SCREENSHOT_DIR+'/settings-redesign.png'});
   assert.deepEqual(await headerButtonBounds(), detailHeaderBounds, 'Header button positions and sizes remain stable on Settings');
   await page.setViewportSize({width:960,height:720});
@@ -883,6 +893,28 @@ try {
   assert.equal(await page.evaluate(()=>window.testCalls.filter(c=>c.cmd==='run_setup').length), 0, 'Guidance does not start downloads');
   await page.getByRole('button',{name:'Settings',exact:true}).click();
   await page.waitForFunction(() => window.testListenerCount() === 1);
+  await page.evaluate(() => { (window.setupState ??= {}).vrf = { running: true, log: ['Download started'], progress: null }; });
+  await page.getByRole('tab').filter({hasText:'Players'}).click();
+  await page.getByRole('tab').filter({hasText:'2D'}).click();
+  await page.getByRole('button',{name:'Missing Source 2 Viewer. Go to Settings to download.'}).click();
+  await page.locator('.driver-popover').waitFor();
+  assert.equal(await page.locator('.tools-highlight').getAttribute('aria-label'), 'Log: Source 2 Viewer CLI', 'Running downloads guide users to progress instead of cancel');
+  assert.equal(await page.locator('.driver-popover-description').innerText(), 'Downloading. Please wait for completion.');
+  assert.equal(await page.getByRole('button',{name:'Cancel: Source 2 Viewer CLI',exact:true}).evaluate(el => el.classList.contains('tools-highlight')), false);
+  await page.evaluate(() => window.emitTestEvent({type:'setup-progress',tool:'vrf',progress:'1 / 50 MB (2%)'}));
+  await page.locator('.tools-highlight').getByText('1 / 50 MB (2%)',{exact:true}).waitFor();
+  await page.locator('.driver-popover').evaluate(el => { el.dataset.sameGuide = 'true'; });
+  await page.evaluate(() => window.emitTestEvent({type:'setup-progress',tool:'vrf',progress:'2 / 50 MB (4%)'}));
+  await page.locator('.tools-highlight').getByText('2 / 50 MB (4%)',{exact:true}).waitFor();
+  assert.equal(await page.locator('.driver-popover').getAttribute('data-same-guide'), 'true', 'Progress updates do not rebuild the guide');
+  await page.evaluate(() => { window.toolPaths.vrfExe='E:/tools/Source2Viewer-CLI.exe'; window.emitTestEvent({type:'setup-finished',tool:'vrf',ok:true,error:null}); });
+  await page.locator('.driver-popover').waitFor({state:'detached'});
+  assert.equal(await page.locator('.tools-highlight').count(), 0, 'Finishing download removes waiting guidance');
+  await page.setViewportSize({width:1000,height:940});
+  assert.equal(await page.locator('.settings-panels').evaluate(el => getComputedStyle(el).gridTemplateColumns.split(' ').length), 1, 'Narrow settings use one column before panels become cramped');
+  await page.setViewportSize({width:1360,height:940});
+  await page.getByRole('button',{name:'Settings',exact:true}).click();
+  await page.evaluate(() => { delete window.setupState.vrf; delete window.toolPaths.vrfExe; });
   await page.evaluate(() => { window.holdListener = true; });
   await page.getByRole('button',{name:'Settings',exact:true}).click();
   await page.getByRole('button', {name:'Download: Source 2 Viewer CLI',exact:true}).waitFor();
@@ -940,11 +972,42 @@ try {
   await page.locator('.driver-popover').waitFor({state:'detached'});
   await page.setViewportSize({width:1360,height:940});
   assert.equal(await page.evaluate(()=>window.testCalls.filter(c=>c.cmd==='run_setup').length),1,'Highlighted download remains clickable');
-  await page.evaluate(() => window.emitTestEvent({type:'setup-log',line:'10% of 185.4 MB'}));
-  await page.getByRole('dialog').getByText('10% of 185.4 MB',{exact:true}).waitFor();
-  assert.equal(await page.getByRole('dialog').getByText('10% of 185.4 MB',{exact:true}).count(), 1, 'One backend progress event produces one log line');
-  assert.equal(await page.getByRole('button', {name:'Download: HLAE',exact:true,includeHidden:true}).evaluate(el => getComputedStyle(el).animationName), 'none', 'Downloading closes guidance and stops pulsing');
+  assert.equal(await page.getByRole('dialog').count(), 0, 'Downloading does not open the log automatically');
+  const downloadLog = page.getByRole('button',{name:'Log: HLAE',exact:true});
+  await downloadLog.waitFor();
+  assert.equal(await downloadLog.innerText(), '', 'Before progress arrives only the log icon is shown');
+  const logSize = await downloadLog.boundingBox();
+  const cancelHlae = page.getByRole('button',{name:'Cancel: HLAE',exact:true});
+  const downloadSize = await cancelHlae.boundingBox();
+  assert.equal(logSize.width, downloadSize.width);
+  assert.equal(logSize.height, downloadSize.height);
+  const storageCallsBeforeProgress = await page.evaluate(() => window.testCalls.filter(c => c.cmd === 'get_storage_bytes').length);
+  await page.evaluate(() => window.emitTestEvent({type:'setup-progress',tool:'hlae',progress:'9.2 / 185.4 MB (5%)'}));
+  await downloadLog.getByText('9.2 / 185.4 MB (5%)',{exact:true}).waitFor();
+  await page.evaluate(() => window.emitTestEvent({type:'setup-progress',tool:'hlae',progress:'18.5 / 185.4 MB (10%)'}));
+  await downloadLog.getByText('18.5 / 185.4 MB (10%)',{exact:true}).waitFor();
+  assert.equal((await downloadLog.boundingBox()).height, (await cancelHlae.boundingBox()).height, 'Progress and download buttons have the same height');
+  assert.equal(await page.evaluate(() => window.testCalls.filter(c => c.cmd === 'get_storage_bytes').length), storageCallsBeforeProgress, 'Progress updates must not rescan storage');
+  const ffmpegDownload = page.getByRole('button',{name:'Download: FFmpeg',exact:true});
+  assert.equal(await ffmpegDownload.isDisabled(), false, 'Other tools remain downloadable');
+  await ffmpegDownload.click();
+  await page.evaluate(() => window.emitTestEvent({type:'setup-progress',tool:'ffmpeg',progress:'30 / 100 MB (30%)'}));
+  await page.getByRole('button',{name:'Log: FFmpeg',exact:true}).getByText('30 / 100 MB (30%)',{exact:true}).waitFor();
+  assert.equal(await cancelHlae.isDisabled(), false);
+  assert.equal(await page.getByRole('button',{name:'Cancel: FFmpeg',exact:true}).isDisabled(), false);
+  assert.equal(await downloadLog.innerText(), '18.5 / 185.4 MB (10%)', 'Concurrent tools retain separate progress');
+  await page.getByRole('button',{name:'Cancel: FFmpeg',exact:true}).click();
+  assert.deepEqual(await page.evaluate(() => window.testCalls.filter(c => c.cmd === 'cancel_setup').at(-1).args), {tool:'ffmpeg'});
+  await page.getByRole('button',{name:'Log: FFmpeg',exact:true}).click();
+  await page.getByRole('dialog').getByText('Download cancelled').waitFor();
   await page.keyboard.press('Escape');
+  await downloadLog.click();
+  await page.getByRole('dialog').getByText('Download started',{exact:true}).waitFor();
+  assert.equal(await page.getByRole('dialog').getByText('18.5 / 185.4 MB (10%)',{exact:true}).count(), 0, 'Progress is separate from log');
+  assert.equal(await page.getByRole('button', {name:'Cancel: HLAE',exact:true,includeHidden:true}).evaluate(el => getComputedStyle(el).animationName), 'none', 'Downloading closes guidance and stops pulsing');
+  await page.keyboard.press('Escape');
+  await page.evaluate(() => window.emitTestEvent({type:'setup-finished',tool:'hlae',ok:true,error:null}));
+  await page.getByRole('button',{name:'Download: HLAE',exact:true}).waitFor();
   await page.evaluate(() => { window.toolPaths = {steamDir:'E:/Steam',cs2Exe:'E:/CS2/game/bin/win64/cs2.exe',hlaeExe:'E:/tools/HLAE.exe',hlaeDll:'E:/tools/AfxHookSource2.dll'}; });
   await page.getByRole('button', {name:'Check again',exact:true}).click();
   await page.locator('.tool-field').filter({has:page.getByLabel('HLAE.exe', {exact:true})}).getByText('Ready', {exact:true}).waitFor();
@@ -1006,16 +1069,22 @@ try {
   if (!await page.locator('.settings-page').count()) await page.getByRole('button', {name:'Settings',exact:true}).click();
   for (const [tool, label] of [['hlae','HLAE'],['ffmpeg','FFmpeg'],['vrf','Source 2 Viewer CLI']]) {
     await page.getByRole('button', {name:'Download: ' + label,exact:true}).click();
+    await page.evaluate(tool => window.emitTestEvent({type:'setup-finished',tool,ok:tool!=='vrf',error:tool==='vrf'?'Download failed':null}), tool);
+    await page.getByRole('button',{name:'Log: '+label,exact:true}).click();
     const dialog = page.getByRole('dialog');
     await dialog.waitFor();
+    await dialog.getByText(tool==='vrf'?'error: Download failed':'Download completed',{exact:false}).waitFor();
     assert.deepEqual(await page.evaluate(() => window.testCalls.filter(c => c.cmd === 'run_setup').at(-1).args), {tool,force:true});
     await dialog.getByRole('button', {name:'Close',exact:true}).click();
   }
   const hlaeField = page.locator('.tool-field').filter({has:page.getByLabel('HLAE.exe',{exact:true})});
+  await hlaeField.getByRole('button',{name:'Show in Explorer',exact:true}).click();
+  assert.equal(await page.evaluate(() => window.openedPath), 'E:/tools/');
   await hlaeField.getByRole('button',{name:'Browse...',exact:true}).click();
   assert.equal(await page.evaluate(() => window.testCalls.filter(c=>c.cmd==='browse_directory').at(-1).args.path), 'E:/tools/HLAE.exe');
   assert.equal(await page.evaluate(() => window.testCalls.filter(c=>c.cmd==='plugin:dialog|open').at(-1).args.options.defaultPath), 'E:/tools');
   await page.getByLabel('HLAE.exe',{exact:true}).fill('E:/custom/HLAE.exe');
+  assert.equal(await hlaeField.getByRole('button',{name:'Show in Explorer',exact:true}).isDisabled(), true);
   await hlaeField.getByRole('button',{name:'Browse...',exact:true}).click();
   assert.equal(await page.evaluate(() => window.testCalls.filter(c=>c.cmd==='browse_directory').at(-1).args.path), 'E:/custom/HLAE.exe');
   await checkReplayDrawing(page);

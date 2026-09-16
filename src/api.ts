@@ -329,7 +329,7 @@ export interface SettingsResponse {
   settings: Settings;
   detected: { steamDir?: string; cs2Dir?: string; replaysDir?: string };
   doctor: DoctorReport;
-  setup: { running: boolean; log: string[] };
+  setup: Partial<Record<'hlae' | 'ffmpeg' | 'vrf', { running: boolean; stopping?: boolean; log: string[]; progress: string | null }>>;
   dataDir: string;
 }
 export interface StorageBytes {
@@ -359,8 +359,8 @@ export type AppEvent =
   | { type: 'scoring-progress'; id: string; step: ScoringStep }
   | { type: 'demo-changed'; demo: DemoMeta }
   | { type: 'job-changed'; job: RenderJob }
-  | { type: 'setup-log'; line: string }
-  | { type: 'setup-finished'; tool: 'hlae' | 'ffmpeg' | 'vrf'; ok: boolean; error: string | null };
+  | { type: 'setup-progress'; tool: 'hlae' | 'ffmpeg' | 'vrf'; progress: string }
+  | { type: 'setup-finished'; tool: 'hlae' | 'ffmpeg' | 'vrf'; ok: boolean; cancelled: boolean; error: string | null };
 
 export type AssessmentState = 'passed' | 'findings' | 'unavailable' | 'failed';
 export interface MatchAssessment {
@@ -410,6 +410,7 @@ export const api = {
   settings: () => invoke<SettingsResponse>('get_settings'),
   saveSettings: (settings: Settings, dataDirOverride: string | null) => invoke<SettingsResponse>('save_settings', { settings, dataDirOverride }),
   runSetup: (tool: 'hlae' | 'ffmpeg' | 'vrf', force = false) => invoke<boolean>('run_setup', { tool, force }),
+  cancelSetup: (tool: 'hlae' | 'ffmpeg' | 'vrf') => invoke<void>('cancel_setup', { tool }),
   demos: () => invoke<DemoMeta[]>('list_demos'),
   registerDemo: (path: string) => invoke<DemoMeta>('register_demo', { path }),
   parse: (id: string) => invoke<void>('parse_demo', { id }),

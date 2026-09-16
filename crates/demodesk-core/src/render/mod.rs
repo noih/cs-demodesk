@@ -84,7 +84,7 @@ pub fn clean_leftovers(tools_dir: &Path, o: &PathOverrides) -> bool {
     }
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum SetupTool {
     Hlae,
@@ -97,7 +97,7 @@ pub fn run_setup(
     o: &PathOverrides,
     tool: SetupTool,
     force: bool,
-    log: &mut dyn FnMut(String),
+    log: setup::Log,
 ) -> Result<DoctorReport> {
     std::fs::create_dir_all(tools_dir)?;
     match tool {
@@ -532,11 +532,11 @@ mod tests {
             (super::SetupTool::Vrf, "Source 2 Viewer CLI"),
         ] {
             let mut log = Vec::new();
-            super::run_setup(dir.path(), &Default::default(), tool, false, &mut |line| {
+            super::run_setup(dir.path(), &Default::default(), tool, false, &mut super::setup::Progress { cancel: &std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)), report: &mut |line| {
                 log.push(line)
-            })
+            } })
             .unwrap();
-            assert_eq!(log, vec![format!("{name} already installed")]);
+            assert!(log.is_empty(), "{name} must not report progress when already installed");
         }
         assert!(serde_json::from_str::<super::SetupTool>("\"unknown\"").is_err());
     }

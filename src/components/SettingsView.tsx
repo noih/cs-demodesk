@@ -16,12 +16,13 @@ function toolsInstalled(paths: ToolPaths): boolean {
 type PickOptions = { directory?: boolean; filters?: Array<{ name: string; extensions: string[] }> };
 
 /** Text field + browse button; empty means "use the auto-detected value" (shown as placeholder). */
-function PathField({ label, value, placeholder, hint, description, action, sourceAction, checked, source, onChange, pick }: {
-  label: string; value: string; placeholder?: string; hint?: string; checked?: boolean;
+function PathField({ label, value, placeholder, hint, description, action, sourceAction, checked, source, detectedPath, onChange, pick }: {
+  label: string; value: string; placeholder?: string; hint?: string; checked?: boolean; detectedPath?: string | null;
   description?: string; action?: ReactNode; sourceAction?: ReactNode; source?: { repo: string; url: string; site?: 'official' | 'steam' }; onChange: (v: string) => void; pick: PickOptions;
 }) {
   const { t } = useTranslation();
   const notify = useNotify();
+
   const browse = async () => {
     try {
       const defaultPath = await api.browseDirectory(value.trim() || placeholder || null);
@@ -32,29 +33,40 @@ function PathField({ label, value, placeholder, hint, description, action, sourc
     }
   };
   return (
-    <Box className={source ? 'tool-field' : undefined}>
-      <Flex justify="between" align="center" mb="1" gap="2" wrap="wrap">
+
+    <Box className={source ? 'path-field tool-field' : 'path-field'}>
+      <Flex justify="between" align="center" mb="1" gap="2">
         <Text size="2" weight="medium">{label}</Text>
         {checked !== undefined && <Text size="1" color={checked ? 'green' : 'red'}>
           <i aria-hidden="true" className={'bi app-icon ' + (checked ? 'bi-check-circle' : 'bi-x-circle')} />
           {' '}{t(checked ? 'settings.ready' : 'settings.notReady')}
         </Text>}
       </Flex>
-      {description && <Text as="div" size="1" color="gray" mb="2">{description}</Text>}
+      {(description || action) && <Flex justify="between" align="center" mb="2" gap="2">
+        {description && <Text size="1" color="gray" style={{ flex: 1, minWidth: 0 }}>{description}</Text>}
+        {action && <Flex align="center" gap="2" style={{ flexShrink: 0, marginLeft: 'auto' }}>{action}</Flex>}
+      </Flex>}
       <Flex align="center" gap="2">
-        <TextField.Root size="2" aria-label={label} value={value} placeholder={placeholder ?? t('settings.notDetected')} onChange={(e) => onChange(e.target.value)} className="mono path-input" style={{ flex: 1, minWidth: 0 }} />
+        <TextField.Root size="2" aria-label={label} value={value} placeholder={placeholder ?? t('settings.notDetected')} onChange={(e) => onChange(e.target.value)} className="mono path-input" style={{ flex: 1, minWidth: 0 }}>
         {value && (
-          <Tooltip delayDuration={150} content={t('settings.clearToAuto')}>
+          <TextField.Slot side="right">
+          <Tooltip disableHoverableContent delayDuration={400} style={{ pointerEvents: 'none' }} content={t('settings.clearToAuto')}>
             <IconButton size="2" variant="outline" color="gray" onClick={() => onChange('')} aria-label={t('settings.clear')}>
               <i aria-hidden="true" className="bi bi-x-lg app-icon" />
             </IconButton>
           </Tooltip>
+          </TextField.Slot>
         )}
-        <Button size="2" variant="outline" color="gray" onClick={() => void browse()}>
-          <i aria-hidden="true" className="bi bi-folder2-open app-icon" />{t('settings.browse')}
-        </Button>
-        {action}
-        {sourceAction ?? (source && <Tooltip delayDuration={150} content={source.site === 'steam' ? t('settings.steamStoreSource', { name: source.repo }) : source.site === 'official' ? t('settings.officialSource', { name: source.repo }) : t('settings.source', { repo: source.repo })}>
+        </TextField.Root>
+        <Tooltip disableHoverableContent delayDuration={400} style={{ pointerEvents: 'none' }} content={t('settings.browse')}><IconButton size="2" variant="outline" color="gray" aria-label={t('settings.browse')} onClick={() => void browse()}>
+          <i aria-hidden="true" className="bi bi-three-dots app-icon" />
+        </IconButton></Tooltip>
+        <Tooltip disableHoverableContent delayDuration={400} style={{ pointerEvents: 'none' }} content={t('common.openInExplorer')}>
+          <IconButton size="2" variant="outline" color="gray" aria-label={t('common.openInExplorer')} disabled={!detectedPath} onClick={() => { if (detectedPath) void api.open(pick.directory ? detectedPath : detectedPath.replace(/[^\\/]+$/, '')).catch(error => notify(errorText(error))); }}>
+            <i aria-hidden="true" className="bi bi-folder2-open app-icon" />
+          </IconButton>
+        </Tooltip>
+        {sourceAction ?? (source && <Tooltip disableHoverableContent delayDuration={400} style={{ pointerEvents: 'none' }} content={source.site === 'steam' ? t('settings.steamStoreSource', { name: source.repo }) : source.site === 'official' ? t('settings.officialSource', { name: source.repo }) : t('settings.source', { repo: source.repo })}>
           <IconButton size="2" variant="outline" color="gray" aria-label={t('settings.sourceLabel') + ': ' + label} onClick={() => void api.openUrl(source.url)}>
             <i aria-hidden="true" className="bi bi-box-arrow-up-right app-icon" />
           </IconButton>
@@ -66,6 +78,7 @@ function PathField({ label, value, placeholder, hint, description, action, sourc
         </Text>
       )}
     </Box>
+
   );
 }
 
@@ -99,8 +112,10 @@ export function SettingsView({ onChanged, toolsRequest = 0, toolsTarget = 'rende
   const [data, setData] = useState<SettingsResponse>();
   const [storage, setStorage] = useState<StorageBytes>();
   const [storageError, setStorageError] = useState<string>();
+  const [storageRevision, setStorageRevision] = useState(0);
+  const activeDataDir = data?.dataDir;
   useEffect(() => {
-    if (!data) return;
+    if (!activeDataDir) return;
     let disposed = false;
     setStorage(undefined);
     setStorageError(undefined);
@@ -110,47 +125,51 @@ export function SettingsView({ onChanged, toolsRequest = 0, toolsTarget = 'rende
       if (!disposed) setStorageError(errorText(error));
     });
     return () => { disposed = true; };
-  }, [data]);
+  }, [activeDataDir, storageRevision]);
   const toolsRef = useRef<HTMLDivElement>(null);
   const toolGuide = useRef<ReturnType<typeof driver> | null>(null);
   const dismissedRequest = useRef(0);
   const loaded = data !== undefined;
+  const guidePhase = data && JSON.stringify([
+    data.doctor.paths.steamDir, data.doctor.paths.cs2Exe, data.doctor.paths.hlaeExe,
+    data.doctor.paths.hlaeDll, data.doctor.paths.ffmpegExe, data.doctor.paths.vrfExe,
+    ...(['hlae', 'ffmpeg', 'vrf'] as const).map(tool => [Boolean(data.setup[tool]?.running), Boolean(data.setup[tool]?.progress)]),
+  ]);
   useEffect(() => {
     if (!toolsRequest || toolsRequest === dismissedRequest.current || !loaded || !toolsRef.current) return;
     const buttons = [...toolsRef.current.querySelectorAll<HTMLButtonElement>('[data-guide-missing="true"]')];
     const first = buttons[0];
     if (!first || buttons.some(button => button.disabled)) return;
+    const downloading = buttons.every(button => button.dataset.guideDownloading === 'true');
     let target: HTMLElement = first.closest<HTMLElement>('.tool-field') ?? first;
     while (target.parentElement && !buttons.every(button => target.contains(button))) target = target.parentElement;
     target.scrollIntoView({ block: 'center', behavior: 'instant' });
+    let refreshing = false;
     const guide = driver({
       animate: false,
       overlayOpacity: 0.65,
       popoverClass: 'tools-guide',
-      onDestroyed: () => { dismissedRequest.current = toolsRequest; buttons.forEach(button => button.classList.remove('tools-highlight')); },
+      onDestroyed: () => { if (!refreshing) dismissedRequest.current = toolsRequest; buttons.forEach(button => button.classList.remove('tools-highlight')); },
       onPopoverRender: popover => popover.closeButton.setAttribute('aria-label', t('common.close')),
     });
     toolGuide.current = guide;
     guide.highlight({
       element: target,
-      popover: { showButtons: ['close'], title: buttons.length === 1 ? first.getAttribute('aria-label') ?? '' : t('settings.downloadTool') + ': ' + buttons.map(button => button.dataset.toolLabel).join(', '), description: t(toolsTarget === 'render' ? 'settings.renderToolsReason' : 'settings.replayToolReason'), side: 'left', align: 'center' },
+      popover: { showButtons: ['close'], title: buttons.length === 1 ? first.getAttribute('aria-label') ?? '' : (downloading ? 'Log' : t('settings.downloadTool')) + ': ' + buttons.map(button => button.dataset.toolLabel).join(', '), description: t(downloading ? 'settings.waitForDownload' : toolsTarget === 'render' ? 'settings.renderToolsReason' : 'settings.replayToolReason'), side: 'left', align: 'center' },
     });
     buttons.forEach(button => button.classList.add('tools-highlight'));
     const frame = requestAnimationFrame(() => guide.refresh());
-    return () => { cancelAnimationFrame(frame); guide.destroy(); toolGuide.current = null; };
-  }, [toolsRequest, toolsTarget, loaded, t]);
+    return () => { refreshing = true; cancelAnimationFrame(frame); guide.destroy(); toolGuide.current = null; };
+  }, [toolsRequest, toolsTarget, loaded, guidePhase, t]);
   const [form, setForm] = useState<Settings>({ language: null, cs2Dir: null, steamDir: null, replayFolders: [], scanGameReplays: true, hlaeExe: null, ffmpegExe: null, vrfExe: null });
   const [dataDirOverride, setDataDirOverride] = useState('');
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ ok: boolean; text: string }>();
-  const [setupLog, setSetupLog] = useState<string[]>([]);
-  const [logOpen, setLogOpen] = useState(false);
-  const [startingSetup, setStartingSetup] = useState(false);
+  const [logTool, setLogTool] = useState<'hlae' | 'ffmpeg' | 'vrf'>();
 
   const load = useCallback(async () => {
     const r = await api.settings();
     setData(r);
-    setSetupLog(r.setup.log);
     return r;
   }, []);
   useEffect(() => {
@@ -162,7 +181,7 @@ export function SettingsView({ onChanged, toolsRequest = 0, toolsTarget = 'rende
     void api
       .onEvent((ev) => {
         if (disposed) return;
-        if (ev.type === 'setup-log') setSetupLog((l) => [...l, ev.line].slice(-300));
+        if (ev.type === 'setup-progress') setData(current => current && ({ ...current, setup: { ...current.setup, [ev.tool]: { log: [], ...current.setup[ev.tool], running: true, progress: ev.progress } } }));
         if (ev.type === 'setup-finished') {
           void load().then(r => {
             if (ev.ok) {
@@ -170,7 +189,7 @@ export function SettingsView({ onChanged, toolsRequest = 0, toolsTarget = 'rende
               setForm(current => ({ ...current, [field]: r.settings[field] }));
             }
           }).catch(e => setMessage({ ok: false, text: errorText(e) }));
-          setMessage(ev.ok ? { ok: true, text: i18n.t('settings.downloadDone') } : { ok: false, text: i18n.t('settings.downloadFailed', { error: ev.error ?? i18n.t('settings.unknownError') }) });
+          setMessage(ev.cancelled ? { ok: true, text: i18n.t('renders.status.cancelled') } : ev.ok ? { ok: true, text: i18n.t('settings.downloadDone') } : { ok: false, text: i18n.t('settings.downloadFailed', { error: ev.error ?? i18n.t('settings.unknownError') }) });
         }
       })
       .then((stop) => { if (disposed) stop(); else unlisten = stop; })
@@ -212,6 +231,7 @@ export function SettingsView({ onChanged, toolsRequest = 0, toolsTarget = 'rende
   const clear = (what: string, fn: () => Promise<number>) => async () => {
     try {
       const freed = await fn();
+      setStorageRevision(current => current + 1);
       setMessage({ ok: true, text: t('settings.cleared', { what, size: mb(freed) }) });
       await load();
       await onChanged();
@@ -221,17 +241,14 @@ export function SettingsView({ onChanged, toolsRequest = 0, toolsTarget = 'rende
   };
   // Always a fresh download: the same button re-installs after a CS2 update breaks HLAE.
   const runSetup = async (tool: 'hlae' | 'ffmpeg' | 'vrf') => {
-    setStartingSetup(true);
-    setSetupLog([]);
     setMessage(undefined);
-    setLogOpen(true);
+    setData(current => current && ({ ...current, setup: { ...current.setup, [tool]: { running: true, progress: null, log: [] } } }));
     try {
       await api.runSetup(tool, true);
       await load();
     } catch (e) {
+      setData(current => current && ({ ...current, setup: { ...current.setup, [tool]: { running: false, progress: null, log: [errorText(e)] } } }));
       setMessage({ ok: false, text: errorText(e) });
-    } finally {
-      setStartingSetup(false);
     }
   };
 
@@ -240,15 +257,43 @@ export function SettingsView({ onChanged, toolsRequest = 0, toolsTarget = 'rende
   const toolsReady = toolsInstalled(d.paths);
   const ready = { steam: Boolean(d.paths.steamDir), cs2: Boolean(d.paths.cs2Exe), hlae: Boolean(d.paths.hlaeExe && d.paths.hlaeDll), ffmpeg: Boolean(d.paths.ffmpegExe), vrf: Boolean(d.paths.vrfExe) };
   const guidedTools = (toolsTarget === 'render' ? ['steam', 'cs2', 'hlae', 'ffmpeg'] as const : ['vrf'] as const).filter(tool => !ready[tool]);
-  const toolButton = (tool: 'steam' | 'cs2' | 'hlae' | 'ffmpeg' | 'vrf', label: string) => (
-    <Tooltip delayDuration={150} content={tool === 'steam' ? t('settings.officialSource', { name: label }) : tool === 'cs2' ? t('settings.steamStoreSource', { name: label }) : t('settings.downloadTool') + ': ' + label}>
-      <IconButton data-guide-missing={guidedTools.includes(tool)} data-tool-label={label}
-        size="2" variant="outline" color="gray" aria-label={t(tool === 'steam' || tool === 'cs2' ? 'settings.sourceLabel' : 'settings.downloadTool') + ': ' + label}
-        disabled={startingSetup || data.setup.running} onClick={() => { toolGuide.current?.destroy(); void (tool === 'steam' || tool === 'cs2' ? api.openUrl(SOURCES[tool].url).catch(error => setMessage({ ok: false, text: errorText(error) })) : runSetup(tool)); }}>
-        <i aria-hidden="true" className={tool === 'steam' || tool === 'cs2' ? 'bi bi-box-arrow-up-right app-icon' : 'bi bi-download app-icon'} />
+  const toolButton = (tool: 'steam' | 'cs2' | 'hlae' | 'ffmpeg' | 'vrf', label: string) => {
+    const setup = tool === 'steam' || tool === 'cs2' ? undefined : data.setup[tool];
+    const openLog = () => { toolGuide.current?.destroy(); if (tool !== 'steam' && tool !== 'cs2') setLogTool(tool); };
+    const logGuide = { 'data-guide-missing': guidedTools.includes(tool) && Boolean(setup?.running), 'data-guide-downloading': true, 'data-tool-label': label };
+    return (<>
+    {setup && (setup.running || setup.log.length > 0) && (
+      <Tooltip disableHoverableContent delayDuration={400} style={{ pointerEvents: 'none' }} content="Log">
+        {setup.running && setup.progress ? (
+          <Button {...logGuide} size="2" variant="outline" color="gray" aria-label={t('settings.setupLogTitle') + ': ' + label} onClick={openLog}>
+            {setup.progress.trim()}
+          </Button>
+        ) : (
+          <IconButton {...logGuide} size="2" variant="outline" color="gray" aria-label={t('settings.setupLogTitle') + ': ' + label} onClick={openLog}>
+            <i aria-hidden="true" className="bi bi-file-text app-icon" />
+          </IconButton>
+        )}
+      </Tooltip>
+    )}
+    <Tooltip disableHoverableContent delayDuration={400} style={{ pointerEvents: 'none' }} content={setup?.running ? t('common.cancel') : tool === 'steam' ? t('settings.officialSource', { name: label }) : tool === 'cs2' ? t('settings.steamStoreSource', { name: label }) : t('settings.downloadTool') + ': ' + label}>
+      <IconButton data-guide-missing={guidedTools.includes(tool) && !setup?.running} data-tool-label={label}
+        size="2" variant="outline" color="gray" aria-label={t(setup?.running ? 'common.cancel' : tool === 'steam' || tool === 'cs2' ? 'settings.sourceLabel' : 'settings.downloadTool') + ': ' + label}
+        disabled={setup?.stopping} aria-busy={setup?.stopping} onClick={() => {
+          toolGuide.current?.destroy();
+          if (tool === 'steam' || tool === 'cs2') {
+            void api.openUrl(SOURCES[tool].url).catch(error => setMessage({ ok: false, text: errorText(error) }));
+          } else if (setup?.running) {
+            setData(current => current && ({ ...current, setup: { ...current.setup, [tool]: { ...setup, stopping: true } } }));
+            void api.cancelSetup(tool).catch(error => { void load(); setMessage({ ok: false, text: errorText(error) }); });
+          } else {
+            void runSetup(tool);
+          }
+        }}>
+        <i aria-hidden="true" className={setup?.running ? 'bi bi-stop-fill app-icon' : tool === 'steam' || tool === 'cs2' ? 'bi bi-box-arrow-up-right app-icon' : 'bi bi-download app-icon'} />
       </IconButton>
     </Tooltip>
-  );
+    </>);
+  };
 
   const set = (patch: Partial<Settings>) => {
     setForm({ ...form, ...patch });
@@ -283,7 +328,7 @@ export function SettingsView({ onChanged, toolsRequest = 0, toolsTarget = 'rende
 
       {message && <Toast message={message.text} color={message.ok ? 'green' : 'red'} duration={message.ok ? 3000 : 0} onDismiss={() => setMessage(undefined)} />}
 
-      <Grid columns={{ initial: '1', md: '2' }} gap="4" align="start">
+      <Grid className="settings-panels" columns="repeat(auto-fit, minmax(min(100%, 480px), 1fr))" gap="4" align="start">
         {/* ---- left column: game & demos, output ---- */}
         <Flex direction="column" gap="4">
           <Card>
@@ -364,7 +409,7 @@ export function SettingsView({ onChanged, toolsRequest = 0, toolsTarget = 'rende
               {t('settings.storageSection')}
             </Heading>
             <Flex direction="column" gap="3">
-              <PathField label={t('settings.dataDir')} value={dataDirOverride} placeholder={data.defaultDataDir} hint={t('settings.dataDirHint')} onChange={(value) => { setDataDirOverride(value); setMessage(undefined); }} pick={{ directory: true }} />
+              <PathField label={t('settings.dataDir')} detectedPath={data.dataDir} value={dataDirOverride} placeholder={data.defaultDataDir} hint={t('settings.dataDirHint')} onChange={(value) => { setDataDirOverride(value); setMessage(undefined); }} pick={{ directory: true }} />
               {data.restartRequired && (
                 <Callout.Root color="amber" size="1">
                   <Callout.Text>{t('settings.restartRequired')}</Callout.Text>
@@ -388,8 +433,8 @@ export function SettingsView({ onChanged, toolsRequest = 0, toolsTarget = 'rende
               {t('settings.gameSection')}
             </Heading>
             <Flex direction="column" gap="3">
-              <PathField label={t('settings.steamDir')} description={t('settings.steamPurpose')} source={SOURCES.steam} sourceAction={toolButton('steam', 'Steam')} checked={(form.steamDir ?? '') === (data.settings.steamDir ?? '') ? ready.steam : undefined} value={form.steamDir ?? ''} placeholder={d.paths.steamDir} onChange={value => set({ steamDir: value || null })} pick={{ directory: true }} />
-              <PathField description={t('settings.cs2Purpose')} source={SOURCES.cs2} sourceAction={toolButton('cs2', 'CS2')} checked={(form.cs2Dir ?? '') === (data.settings.cs2Dir ?? '') ? Boolean(d.paths.cs2Exe) : undefined} hint={d.paths.cs2PatchVersion ? 'CS2 v' + d.paths.cs2PatchVersion : undefined} label={t('settings.cs2Dir')} value={form.cs2Dir ?? ''} placeholder={d.paths.cs2Dir} onChange={(v) => set({ cs2Dir: v || null })} pick={{ directory: true }} />
+              <PathField label={t('settings.steamDir')} description={t('settings.steamPurpose')} source={SOURCES.steam} sourceAction={toolButton('steam', 'Steam')} checked={(form.steamDir ?? '') === (data.settings.steamDir ?? '') ? ready.steam : undefined} value={form.steamDir ?? ''} detectedPath={(form.steamDir ?? '') === (data.settings.steamDir ?? '') ? d.paths.steamDir : null} placeholder={d.paths.steamDir} onChange={value => set({ steamDir: value || null })} pick={{ directory: true }} />
+              <PathField description={t('settings.cs2Purpose')} source={SOURCES.cs2} sourceAction={toolButton('cs2', 'CS2')} checked={(form.cs2Dir ?? '') === (data.settings.cs2Dir ?? '') ? Boolean(d.paths.cs2Exe) : undefined} hint={d.paths.cs2PatchVersion ? 'CS2 v' + d.paths.cs2PatchVersion : undefined} label={t('settings.cs2Dir')} value={form.cs2Dir ?? ''} detectedPath={(form.cs2Dir ?? '') === (data.settings.cs2Dir ?? '') ? (d.paths.cs2Exe ? d.paths.cs2Dir : null) : null} placeholder={d.paths.cs2Dir} onChange={(v) => set({ cs2Dir: v || null })} pick={{ directory: true }} />
             </Flex>
           </Card>
           <Card>
@@ -406,12 +451,11 @@ export function SettingsView({ onChanged, toolsRequest = 0, toolsTarget = 'rende
             )}
             <Flex direction="column" gap="3">
               <Flex direction="column" gap="3">
-                <PathField description={t('settings.hlaePurpose')} action={toolButton('hlae', 'HLAE')} source={SOURCES.hlae} checked={(form.hlaeExe ?? '') === (data.settings.hlaeExe ?? '') ? Boolean(d.paths.hlaeExe && d.paths.hlaeDll) : undefined} label="HLAE.exe" value={form.hlaeExe ?? ''} placeholder={d.paths.hlaeExe} onChange={(v) => set({ hlaeExe: v || null })} pick={{ filters: [{ name: 'HLAE', extensions: ['exe'] }] }} />
-                <PathField description={t('settings.ffmpegPurpose')} action={toolButton('ffmpeg', 'FFmpeg')} source={SOURCES.ffmpeg} checked={(form.ffmpegExe ?? '') === (data.settings.ffmpegExe ?? '') ? Boolean(d.paths.ffmpegExe) : undefined} label="ffmpeg.exe" value={form.ffmpegExe ?? ''} placeholder={d.paths.ffmpegExe} onChange={(v) => set({ ffmpegExe: v || null })} pick={{ filters: [{ name: 'ffmpeg', extensions: ['exe'] }] }} />
+                <PathField description={t('settings.hlaePurpose')} action={toolButton('hlae', 'HLAE')} source={SOURCES.hlae} checked={(form.hlaeExe ?? '') === (data.settings.hlaeExe ?? '') ? Boolean(d.paths.hlaeExe && d.paths.hlaeDll) : undefined} label="HLAE.exe" value={form.hlaeExe ?? ''} detectedPath={(form.hlaeExe ?? '') === (data.settings.hlaeExe ?? '') ? d.paths.hlaeExe : null} placeholder={d.paths.hlaeExe} onChange={(v) => set({ hlaeExe: v || null })} pick={{ filters: [{ name: 'HLAE', extensions: ['exe'] }] }} />
+                <PathField description={t('settings.ffmpegPurpose')} action={toolButton('ffmpeg', 'FFmpeg')} source={SOURCES.ffmpeg} checked={(form.ffmpegExe ?? '') === (data.settings.ffmpegExe ?? '') ? Boolean(d.paths.ffmpegExe) : undefined} label="ffmpeg.exe" value={form.ffmpegExe ?? ''} detectedPath={(form.ffmpegExe ?? '') === (data.settings.ffmpegExe ?? '') ? d.paths.ffmpegExe : null} placeholder={d.paths.ffmpegExe} onChange={(v) => set({ ffmpegExe: v || null })} pick={{ filters: [{ name: 'ffmpeg', extensions: ['exe'] }] }} />
               </Flex>
-              <PathField description={t('settings.vrfPurpose')} action={toolButton('vrf', 'Source 2 Viewer CLI')} source={SOURCES.vrf} checked={(form.vrfExe ?? '') === (data.settings.vrfExe ?? '') ? Boolean(d.paths.vrfExe) : undefined} label="Source 2 Viewer CLI" value={form.vrfExe ?? ''} placeholder={d.paths.vrfExe} onChange={(v) => set({ vrfExe: v || null })} pick={{ filters: [{ name: 'Source 2 Viewer CLI', extensions: ['exe'] }] }} />
+              <PathField description={t('settings.vrfPurpose')} action={toolButton('vrf', 'Source 2 Viewer CLI')} source={SOURCES.vrf} checked={(form.vrfExe ?? '') === (data.settings.vrfExe ?? '') ? Boolean(d.paths.vrfExe) : undefined} label="Source 2 Viewer CLI" value={form.vrfExe ?? ''} detectedPath={(form.vrfExe ?? '') === (data.settings.vrfExe ?? '') ? d.paths.vrfExe : null} placeholder={d.paths.vrfExe} onChange={(v) => set({ vrfExe: v || null })} pick={{ filters: [{ name: 'Source 2 Viewer CLI', extensions: ['exe'] }] }} />
               <Flex gap="2" wrap="wrap" align="center" justify="center">
-                {data.setup.running && <Button size="2" variant="outline" color="gray" onClick={() => setLogOpen(true)}>{t('settings.downloading')}</Button>}
                 <Button size="2" variant="outline" color="gray" onClick={() => void check()}>{t('settings.recheck')}</Button>
               </Flex>
             </Flex>
@@ -420,13 +464,13 @@ export function SettingsView({ onChanged, toolsRequest = 0, toolsTarget = 'rende
         </Flex>
       </Grid>
 
-      <Dialog.Root open={logOpen} onOpenChange={setLogOpen}>
+      <Dialog.Root open={logTool !== undefined} onOpenChange={open => { if (!open) setLogTool(undefined); }}>
         <Dialog.Content maxWidth="900px">
           <Dialog.Title>{t('settings.setupLogTitle')}</Dialog.Title>
           <Dialog.Description size="2" color="gray">
-            {data.setup.running ? t('settings.setupRunning') : t('settings.setupFinished')}
+            {logTool && data.setup[logTool]?.running ? t('settings.setupRunning') : t('settings.setupFinished')}
           </Dialog.Description>
-          <LogView lines={setupLog} empty={t('settings.setupLogEmpty')} />
+          <LogView lines={logTool ? data.setup[logTool]?.log ?? [] : []} empty={t('settings.setupLogEmpty')} />
           <Flex justify="end" mt="3">
             <Dialog.Close>
               <Button variant="outline">{t('common.close')}</Button>

@@ -79,8 +79,32 @@ fn prepare(path: &Path) -> Result<(), String> {
     if !path.is_absolute() {
         return Err("Choose an absolute data directory path.".into());
     }
+    check_access(path)?;
+    for child in ["tools", "parsed", "clips"] {
+        check_access(&path.join(child))?;
+    }
+    for tool in ["hlae", "ffmpeg", "vrf"] {
+        let dir = path.join("tools").join(tool);
+        match fs::metadata(&dir) {
+            Ok(_) => check_access(&dir)?,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => {
+                return Err(format!(
+                    "Cannot access tool directory {}: {e}",
+                    dir.display()
+                ))
+            }
+        }
+    }
+    Ok(())
+}
+
+fn check_access(path: &Path) -> Result<(), String> {
+    use std::io::Write;
     fs::create_dir_all(path)
         .map_err(|e| format!("Cannot create data directory {}: {e}", path.display()))?;
+    fs::read_dir(path)
+        .map_err(|e| format!("Data directory is not readable ({}): {e}", path.display()))?;
     let stamp = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_err(|e| e.to_string())?
@@ -89,19 +113,47 @@ fn prepare(path: &Path) -> Result<(), String> {
         ".demodesk-write-test-{}-{stamp}",
         std::process::id()
     ));
-    let file = fs::OpenOptions::new()
+    let mut file = fs::OpenOptions::new()
         .write(true)
         .create_new(true)
         .open(&probe)
         .map_err(|e| format!("Data directory is not writable ({}): {e}", path.display()))?;
-    drop(file);
-    fs::remove_file(probe).map_err(|e| e.to_string())?;
+    let result = (|| -> std::io::Result<()> {
+        file.write_all(b"DemoDesk access check")?;
+        drop(file);
+        if fs::read(&probe)? != b"DemoDesk access check" {
+            return Err(std::io::Error::other("Data directory read-back failed"));
+        }
+        Ok(())
+    })();
+    let cleanup = fs::remove_file(&probe);
+    result.and(cleanup)
+        .map_err(|e| format!("Cannot read, write or remove files in data directory {}: {e}. Choose another data directory or check folder permissions.", path.display()))?;
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rejects_inaccessible_tool_directory_before_use() {
+        let root = std::env::temp_dir().join(format!(
+            "demodesk-access-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        prepare(&root).unwrap();
+        let blocked = root.join("tools").join("vrf");
+        fs::write(&blocked, b"not a directory").unwrap();
+        let error = prepare(&root).unwrap_err();
+        assert!(error.contains(&blocked.display().to_string()));
+        assert_eq!(fs::read(&blocked).unwrap(), b"not a directory");
+        fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn store_default_survives_selection_reset() {

@@ -656,7 +656,8 @@ video {
 .app-toast { flex-shrink: 0; pointer-events: auto; max-width: min(480px, calc(100vw - 48px)); overflow-wrap: anywhere; }
 
 .tool-field { padding-bottom: 18px; border-bottom: 1px solid var(--app-border); }
-.tool-field .rt-Button, .tool-field .rt-IconButton { flex-shrink: 0; }
+.settings-page .rt-Button, .settings-page .rt-IconButton { height:calc(var(--app-font-body) * 1.5 + 10px); min-height:calc(var(--app-font-body) * 1.5 + 10px); box-sizing:border-box; flex-shrink:0; }
+.settings-page .rt-IconButton { width:calc(var(--app-font-body) * 1.5 + 10px); min-width:calc(var(--app-font-body) * 1.5 + 10px); }
 
 .rt-CalloutRoot { align-items: center; }
 

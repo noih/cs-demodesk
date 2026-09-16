@@ -8,8 +8,24 @@ use serde::Deserialize;
 use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+use std::time::{Duration, Instant};
 
-pub type Log<'a> = &'a mut dyn FnMut(String);
+mod transport;
+
+pub struct Progress<'a> {
+    pub cancel: &'a Arc<AtomicBool>,
+    pub report: &'a mut dyn FnMut(String),
+}
+pub type Log<'a, 'b> = &'a mut Progress<'b>;
+
+impl Progress<'_> {
+    fn check(&self) -> Result<()> {
+        anyhow::ensure!(!self.cancel.load(Ordering::Relaxed), "Download cancelled");
+        Ok(())
+    }
+}
 
 /// HTTPS through the OS trust store (Windows certificate store), so a
 /// corporate / antivirus proxy that re-signs TLS still works.
@@ -18,6 +34,8 @@ fn agent() -> ureq::Agent {
     ureq::Agent::config_builder()
         .user_agent("DemoDesk")
         .timeout_global(Some(std::time::Duration::from_secs(600)))
+        .timeout_connect(Some(Duration::from_secs(30)))
+        .timeout_recv_response(Some(Duration::from_secs(60)))
         .tls_config(
             TlsConfig::builder()
                 .root_certs(RootCerts::PlatformVerifier)
@@ -28,9 +46,20 @@ fn agent() -> ureq::Agent {
 }
 
 fn download(url: &str, dest: &Path, log: Log) -> Result<()> {
-    fs::create_dir_all(dest.parent().unwrap())?;
-    let resp = agent()
+    log.check()?;
+    fs::create_dir_all(dest.parent().unwrap()).with_context(|| {
+        format!(
+            "Cannot create download directory {}",
+            dest.parent().unwrap().display()
+        )
+    })?;
+    let mut file = fs::File::create(dest)
+        .with_context(|| format!("Cannot write download file {}. Check folder permissions or choose another data directory", dest.display()))?;
+    let resp = transport::agent(log.cancel.clone())
         .get(url)
+        .config()
+        .timeout_global(Some(Duration::from_secs(2 * 60 * 60)))
+        .build()
         .call()
         .with_context(|| format!("GET {url}"))?;
     let total = resp
@@ -39,30 +68,48 @@ fn download(url: &str, dest: &Path, log: Log) -> Result<()> {
         .and_then(|v| v.to_str().ok())
         .and_then(|v| v.parse::<u64>().ok());
     let mut reader = resp.into_body().into_reader();
-    let mut file = fs::File::create(dest)?;
+    copy_download(&mut reader, &mut file, total, log)
+        .with_context(|| format!("Downloading {url} to {}", dest.display()))
+}
+
+fn copy_download(
+    reader: &mut impl Read,
+    file: &mut impl std::io::Write,
+    total: Option<u64>,
+    log: Log,
+) -> Result<()> {
     let mut buf = vec![0u8; 1 << 16];
     let mut done = 0u64;
-    let mut last_pct = 0;
+    let mut last_report = None;
+    let report = |done: u64| match total {
+        Some(t) => format!(
+            "  {:.2} / {:.2} MB ({}%)",
+            done as f64 / 1_048_576.0,
+            t as f64 / 1_048_576.0,
+            done.saturating_mul(100) / t.max(1)
+        ),
+        None => format!("  {:.2} MB downloaded", done as f64 / 1_048_576.0),
+    };
     loop {
+        log.check()?;
         let n = reader.read(&mut buf)?;
+        log.check()?;
         if n == 0 {
             break;
         }
-        std::io::Write::write_all(&mut file, &buf[..n])?;
+        file.write_all(&buf[..n])?;
         done += n as u64;
-        if let Some(t) = total {
-            let pct = (done * 100 / t.max(1)) as u32;
-            if pct >= last_pct + 10 {
-                last_pct = pct;
-                log(format!("  {}% of {:.1} MB", pct, t as f64 / 1_048_576.0));
-            }
+        if last_report.is_none_or(|at: Instant| at.elapsed() >= Duration::from_secs(1)) {
+            (log.report)(report(done));
+            last_report = Some(Instant::now());
         }
     }
     if total.is_some_and(|expected| done != expected) {
         return Err(anyhow!(
-            "incomplete download from {url}: received {done} bytes, expected {total:?}"
+            "incomplete download: received {done} bytes, expected {total:?}"
         ));
     }
+    (log.report)(report(done));
     Ok(())
 }
 
@@ -141,8 +188,12 @@ fn install_zip(dir: &Path, url: &str, tag: &str, valid: fn(&Path) -> bool, log: 
         fs::remove_dir_all(&work)?;
     }
     let zip = work.join("download.zip");
-    download(url, &zip, log)?;
-    install_archive(dir, &work, tag, url, valid)
+    let result = download(url, &zip, log)
+        .and_then(|_| install_archive(dir, &work, tag, url, valid, log.cancel));
+    if result.is_err() && log.cancel.load(Ordering::Relaxed) {
+        let _ = fs::remove_dir_all(&work);
+    }
+    result
 }
 
 fn install_archive(
@@ -151,7 +202,9 @@ fn install_archive(
     tag: &str,
     url: &str,
     valid: fn(&Path) -> bool,
+    cancel: &AtomicBool,
 ) -> Result<()> {
+    anyhow::ensure!(!cancel.load(Ordering::Relaxed), "Download cancelled");
     let staged = work.join("extracted");
     extract_zip(&work.join("download.zip"), &staged)?;
     if !valid(&staged) {
@@ -161,6 +214,7 @@ fn install_archive(
         ));
     }
     fs::write(staged.join("install-info.json"), serde_json::json!({ "tag": tag, "url": url, "installedAt": chrono::Utc::now().to_rfc3339() }).to_string())?;
+    anyhow::ensure!(!cancel.load(Ordering::Relaxed), "Download cancelled");
     publish_install(dir, &staged)?;
     let _ = fs::remove_dir_all(work);
     Ok(())
@@ -174,12 +228,8 @@ fn install_release(
     log: Log,
 ) -> Result<()> {
     for attempt in 0..2 {
-        let release = release_for_tool(repo, select)?;
+        let release = release_for_tool(repo, select, log)?;
         let asset = select(&release)?;
-        log(format!(
-            "downloading {repo} {} from {}",
-            release.tag_name, asset.browser_download_url
-        ));
         match install_zip(
             dir,
             &asset.browser_download_url,
@@ -192,10 +242,7 @@ fn install_release(
                     && matches!(
                         error.downcast_ref::<ureq::Error>(),
                         Some(ureq::Error::StatusCode(404 | 410))
-                    ) =>
-            {
-                log("release asset was replaced; refreshing release information…".into());
-            }
+                    ) => {}
             result => return result,
         }
     }
@@ -245,7 +292,6 @@ pub fn install_hlae(tools_dir: &Path, force: bool, log: Log) -> Result<PathBuf> 
     let dir = tools_dir.join("hlae");
     recover_install(&dir)?;
     if !force && hlae_installed(&dir) {
-        log("HLAE already installed".into());
         return Ok(dir);
     }
     install_release(
@@ -255,7 +301,6 @@ pub fn install_hlae(tools_dir: &Path, force: bool, log: Log) -> Result<PathBuf> 
         hlae_installed,
         log,
     )?;
-    log("HLAE installed".into());
     Ok(dir)
 }
 
@@ -278,7 +323,6 @@ pub fn install_ffmpeg(tools_dir: &Path, force: bool, log: Log) -> Result<PathBuf
     let dir = tools_dir.join("ffmpeg");
     recover_install(&dir)?;
     if !force && ffmpeg_installed(&dir) {
-        log("FFmpeg already installed".into());
         return Ok(dir);
     }
     install_release(
@@ -288,7 +332,6 @@ pub fn install_ffmpeg(tools_dir: &Path, force: bool, log: Log) -> Result<PathBuf
         ffmpeg_installed,
         log,
     )?;
-    log("FFmpeg installed".into());
     Ok(dir)
 }
 
@@ -296,6 +339,7 @@ pub fn install_ffmpeg(tools_dir: &Path, force: bool, log: Log) -> Result<PathBuf
 fn release_for_tool(
     repo: &str,
     select: fn(&GithubRelease) -> Result<&GithubAsset>,
+    log: Log,
 ) -> Result<GithubRelease> {
     let sources: &[&str] = if repo == "BtbN/FFmpeg-Builds" {
         &["tags/latest", "latest"]
@@ -304,9 +348,10 @@ fn release_for_tool(
     };
     let mut errors = Vec::new();
     for source in sources {
+        log.check()?;
         let url = format!("https://api.github.com/repos/{repo}/releases/{source}");
         let fetched: Result<GithubRelease> = (|| {
-            let release = agent()
+            let release = transport::agent(log.cancel.clone())
                 .get(&url)
                 .header("Accept", "application/vnd.github+json")
                 .call()?
@@ -352,7 +397,6 @@ pub fn install_vrf(tools_dir: &Path, force: bool, log: Log) -> Result<PathBuf> {
     let exe = dir.join(vrf_exe_name());
     recover_install(&dir)?;
     if !force && vrf_installed(&dir) {
-        log("Source 2 Viewer CLI already installed".into());
         return Ok(exe);
     }
     install_release(
@@ -367,7 +411,6 @@ pub fn install_vrf(tools_dir: &Path, force: bool, log: Log) -> Result<PathBuf> {
         use std::os::unix::fs::PermissionsExt;
         let _ = fs::set_permissions(&exe, fs::Permissions::from_mode(0o755));
     }
-    log("Source 2 Viewer CLI installed".into());
     Ok(exe)
 }
 
@@ -384,6 +427,50 @@ pub fn register_ffmpeg_with_hlae(hlae_exe: &Path, ffmpeg_exe: &Path) -> Result<(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn cancelling_download_stops_writing_before_next_chunk() {
+        let cancel = Arc::new(AtomicBool::new(false));
+        let mut output = Vec::new();
+        let result = copy_download(
+            &mut std::io::Cursor::new(vec![1; 200_000]),
+            &mut output,
+            Some(200_000),
+            &mut Progress {
+                cancel: &cancel,
+                report: &mut |_| cancel.store(true, Ordering::Relaxed),
+            },
+        );
+        assert!(result.is_err());
+        assert_eq!(output.len(), 1 << 16);
+    }
+    #[test]
+    fn download_reports_small_and_unknown_size_transfers_and_rejects_truncation() {
+        for total in [Some(10_000_000), Some(100_000), None] {
+            let mut reader = std::io::Cursor::new(vec![42; 100_000]);
+            let mut output = Vec::new();
+            let mut logs = Vec::new();
+            let result = super::copy_download(
+                &mut reader,
+                &mut output,
+                total,
+                &mut Progress {
+                    cancel: &Arc::new(AtomicBool::new(false)),
+                    report: &mut |line| logs.push(line),
+                },
+            );
+            assert_eq!(output.len(), 100_000);
+            assert!(
+                !logs.is_empty(),
+                "progress must appear below 10% and without Content-Length"
+            );
+            assert_eq!(
+                result.is_err(),
+                total == Some(10_000_000),
+                "truncated bodies must fail"
+            );
+        }
+    }
+
     use super::*;
 
     fn release(names: &[&str]) -> GithubRelease {
@@ -487,14 +574,41 @@ mod tests {
         fs::create_dir(&work).unwrap();
         fs::write(dir.join("old"), b"working").unwrap();
         fs::write(work.join("download.zip"), b"truncated download").unwrap();
-        assert!(install_archive(&dir, &work, "test", "test", hlae_installed).is_err());
+        let cancelled = install_archive(
+            &dir,
+            &work,
+            "test",
+            "test",
+            hlae_installed,
+            &AtomicBool::new(true),
+        )
+        .unwrap_err();
+        assert!(cancelled.to_string().contains("cancelled"));
+        assert_eq!(fs::read(dir.join("old")).unwrap(), b"working");
+        assert!(install_archive(
+            &dir,
+            &work,
+            "test",
+            "test",
+            hlae_installed,
+            &AtomicBool::new(false)
+        )
+        .is_err());
         assert_eq!(fs::read(dir.join("old")).unwrap(), b"working");
         let mut zip = zip::ZipWriter::new(fs::File::create(work.join("download.zip")).unwrap());
         zip.start_file("README.txt", zip::write::SimpleFileOptions::default())
             .unwrap();
         zip.write_all(b"missing binaries").unwrap();
         zip.finish().unwrap();
-        assert!(install_archive(&dir, &work, "test", "test", hlae_installed).is_err());
+        assert!(install_archive(
+            &dir,
+            &work,
+            "test",
+            "test",
+            hlae_installed,
+            &AtomicBool::new(false)
+        )
+        .is_err());
         assert_eq!(fs::read(dir.join("old")).unwrap(), b"working");
     }
 }

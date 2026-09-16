@@ -42,12 +42,14 @@ pub enum Event {
     JobChanged {
         job: RenderJob,
     },
-    SetupLog {
-        line: String,
+    SetupProgress {
+        tool: SetupTool,
+        progress: String,
     },
     SetupFinished {
         tool: SetupTool,
         ok: bool,
+        cancelled: bool,
         error: Option<String>,
     },
 }
@@ -64,11 +66,15 @@ pub struct Detected {
     pub replays_dir: Option<PathBuf>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SetupState {
     pub running: bool,
+    pub stopping: bool,
     pub log: Vec<String>,
+    pub progress: Option<String>,
+    #[serde(skip)]
+    cancel: Arc<AtomicBool>,
 }
 
 /// In-memory state of one demo: what the last scan saw plus the parse result.
@@ -109,8 +115,7 @@ pub struct Engine {
     analysis_queue: Mutex<crate::scoring::queue::Queue>,
     active_job: Mutex<Option<(String, Arc<AtomicBool>)>>,
     render_worker_running: AtomicBool,
-    setup_running: AtomicBool,
-    setup_log: Mutex<Vec<String>>,
+    setup: Mutex<HashMap<SetupTool, SetupState>>,
     settings_lock: Mutex<()>,
 }
 
@@ -150,8 +155,7 @@ impl Engine {
             analysis_queue: Mutex::new(crate::scoring::queue::Queue::default()),
             active_job: Mutex::new(None),
             render_worker_running: AtomicBool::new(false),
-            setup_running: AtomicBool::new(false),
-            setup_log: Mutex::new(vec![]),
+            setup: Mutex::new(HashMap::new()),
             settings_lock: Mutex::new(()),
         });
         // Nothing can be recording yet, so an old plugin install is a leftover.
@@ -1240,58 +1244,100 @@ impl Engine {
     }
 
     // ---- setup ----
-    pub fn setup_state(&self) -> SetupState {
-        SetupState {
-            running: self.setup_running.load(Ordering::Relaxed),
-            log: self.setup_log.lock().unwrap().clone(),
-        }
+    pub fn setup_state(&self) -> HashMap<SetupTool, SetupState> {
+        self.setup.lock().unwrap().clone()
     }
     pub fn start_setup(self: &Arc<Self>, tool: SetupTool, force: bool) -> bool {
-        if self.setup_running.swap(true, Ordering::SeqCst) {
-            return false;
+        let cancel = Arc::new(AtomicBool::new(false));
+        {
+            let mut downloads = self.setup.lock().unwrap();
+            let state = downloads.entry(tool).or_default();
+            if state.running {
+                return false;
+            }
+            *state = SetupState {
+                running: true,
+                stopping: false,
+                progress: None,
+                log: vec!["Download started".into()],
+                cancel: cancel.clone(),
+            };
         }
-        self.setup_log.lock().unwrap().clear();
         let engine = self.clone();
         std::thread::spawn(move || {
             let settings = engine.store.settings();
             let overrides = engine.overrides(&settings);
             let mut log = |line: String| {
-                engine.setup_log.lock().unwrap().push(line.clone());
-                engine.notify.notify(Event::SetupLog { line });
-            };
-            let result = run_setup(&engine.tools_dir(), &overrides, tool, force, &mut log)
-                .and_then(|_| {
-                    let _guard = engine.settings_lock.lock().unwrap();
-                    let mut settings = engine.store.settings();
-                    match tool {
-                        SetupTool::Hlae => settings.hlae_exe = None,
-                        SetupTool::Ffmpeg => settings.ffmpeg_exe = None,
-                        SetupTool::Vrf => settings.vrf_exe = None,
-                    }
-                    engine.store.save_settings(&settings)
+                engine
+                    .setup
+                    .lock()
+                    .unwrap()
+                    .get_mut(&tool)
+                    .unwrap()
+                    .progress = Some(line.clone());
+                engine.notify.notify(Event::SetupProgress {
+                    tool,
+                    progress: line,
                 });
-            engine.setup_running.store(false, Ordering::SeqCst);
+            };
+            let result = run_setup(
+                &engine.tools_dir(),
+                &overrides,
+                tool,
+                force,
+                &mut crate::render::setup::Progress {
+                    cancel: &cancel,
+                    report: &mut log,
+                },
+            )
+            .and_then(|_| {
+                let _guard = engine.settings_lock.lock().unwrap();
+                let mut settings = engine.store.settings();
+                match tool {
+                    SetupTool::Hlae => settings.hlae_exe = None,
+                    SetupTool::Ffmpeg => settings.ffmpeg_exe = None,
+                    SetupTool::Vrf => settings.vrf_exe = None,
+                }
+                engine.store.save_settings(&settings)
+            });
+            let cancelled = result.is_err() && cancel.load(Ordering::Relaxed);
+            {
+                let mut downloads = engine.setup.lock().unwrap();
+                let state = downloads.get_mut(&tool).unwrap();
+                state.running = false;
+                state.stopping = false;
+                state.progress = None;
+                state.log.push(match &result {
+                    Ok(_) => "Download completed".into(),
+                    Err(_) if cancelled => "Download cancelled".into(),
+                    Err(e) => format!("error: {e:#}"),
+                });
+            }
             match result {
                 Ok(_) => engine.notify.notify(Event::SetupFinished {
                     tool,
                     ok: true,
+                    cancelled: false,
                     error: None,
                 }),
-                Err(e) => {
-                    engine
-                        .setup_log
-                        .lock()
-                        .unwrap()
-                        .push(format!("error: {e:#}"));
-                    engine.notify.notify(Event::SetupFinished {
-                        tool,
-                        ok: false,
-                        error: Some(format!("{e:#}")),
-                    })
-                }
+                Err(e) => engine.notify.notify(Event::SetupFinished {
+                    tool,
+                    ok: false,
+                    cancelled,
+                    error: Some(format!("{e:#}")),
+                }),
             }
         });
         true
+    }
+
+    pub fn cancel_setup(&self, tool: SetupTool) {
+        if let Some(state) = self.setup.lock().unwrap().get_mut(&tool) {
+            if state.running {
+                state.stopping = true;
+                state.cancel.store(true, Ordering::Relaxed);
+            }
+        }
     }
 
     // ---- render queue ----
@@ -1683,6 +1729,20 @@ mod tests {
             .join(crate::render::setup::vrf_exe_name());
         std::fs::create_dir_all(vrf.parent().unwrap()).unwrap();
         std::fs::write(&vrf, []).unwrap();
+        // Keep both workers active at the settings write boundary without network access.
+        let settings_guard = engine.settings_lock.lock().unwrap();
+        assert!(engine.start_setup(SetupTool::Hlae, false));
+        assert!(engine.start_setup(SetupTool::Ffmpeg, false));
+        assert!(!engine.start_setup(SetupTool::Hlae, false));
+        let active = engine.setup_state();
+        assert!(active[&SetupTool::Hlae].running && active[&SetupTool::Ffmpeg].running);
+        drop(settings_guard);
+        for _ in 0..2 {
+            assert!(matches!(
+                receive.recv_timeout(Duration::from_secs(5)).unwrap(),
+                Event::SetupFinished { ok: true, .. }
+            ));
+        }
         for tool in [SetupTool::Hlae, SetupTool::Ffmpeg, SetupTool::Vrf] {
             let mut expected = Settings {
                 language: Some("ja".into()),
@@ -1703,6 +1763,10 @@ mod tests {
                 }
             }
             let paths = engine.tool_paths();
+            let setup = engine.setup_state().remove(&tool).unwrap();
+            assert!(!setup.running);
+            assert!(setup.progress.is_none());
+            assert_eq!(setup.log, ["Download started", "Download completed"]);
             match tool {
                 SetupTool::Hlae => {
                     expected.hlae_exe = None;

@@ -50,7 +50,7 @@ struct SettingsResponse {
     settings: Settings,
     detected: Detected,
     doctor: DoctorReport,
-    setup: SetupState,
+    setup: std::collections::HashMap<SetupTool, SetupState>,
     data_dir: PathBuf,
     data_dir_override: Option<PathBuf>,
     default_data_dir: PathBuf,
@@ -233,6 +233,11 @@ async fn save_settings(
 #[tauri::command]
 async fn run_setup(engine: State<'_, Eng>, tool: SetupTool, force: bool) -> CmdResult<bool> {
     blocking(&engine, move |e| Ok(e.start_setup(tool, force))).await
+}
+
+#[tauri::command]
+fn cancel_setup(engine: State<'_, Eng>, tool: SetupTool) {
+    engine.cancel_setup(tool);
 }
 
 #[tauri::command]
@@ -506,6 +511,7 @@ pub fn run() {
             get_storage_bytes,
             save_settings,
             run_setup,
+            cancel_setup,
             list_demos,
             register_demo,
             parse_demo,
