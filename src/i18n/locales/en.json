@@ -389,6 +389,14 @@
     "money": "Money"
   },
   "settings": {
+    "verifying": "Verifying…",
+    "unverified": "Not verified",
+    "startupFailed": "Startup failed",
+    "diagnostics": "Diagnostics",
+    "diagnosticsHint": "Includes local paths and system information. Review before copying; nothing is uploaded automatically.",
+    "copyDiagnostics": "Copy diagnostics",
+    "diagnosticsCopied": "Diagnostics copied",
+    "startupFailedHint": "A tool could not start. Check again or re-download using its download button. You can also browse to another tool location. Startup checks do not verify decoding or game injection.",
     "calculating": "Calculating…",
     "demoSources": "Demo sources",
     "noExtraFolders": "No additional folders added",

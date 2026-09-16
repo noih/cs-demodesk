@@ -17,7 +17,7 @@ struct Release {
 }
 
 #[cfg(windows)]
-fn is_packaged() -> Result<bool> {
+pub(crate) fn is_packaged() -> Result<bool> {
     use windows_sys::Win32::Foundation::{APPMODEL_ERROR_NO_PACKAGE, ERROR_INSUFFICIENT_BUFFER};
     use windows_sys::Win32::Storage::Packaging::Appx::GetCurrentPackageFullName;
     let mut length = 0;
@@ -31,7 +31,7 @@ fn is_packaged() -> Result<bool> {
 }
 
 #[cfg(not(windows))]
-fn is_packaged() -> Result<bool> {
+pub(crate) fn is_packaged() -> Result<bool> {
     Ok(false)
 }
 

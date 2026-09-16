@@ -57,7 +57,9 @@ try {
       if(cmd==='open_path'){window.openedPath=args.path;return;}
       if(cmd==='get_status')return window.missingTools ? {...status,ok:false,missingRenderTools:window.missingRenderTools ?? ['HLAE','ffmpeg']} : status;
       if(cmd==='get_storage_bytes'){if(window.holdStorage)await new Promise(resolve=>window.releaseStorage=resolve);return {parsedBytes:1048576,anomalyBytes:0,clipsBytes:0,radarBytes:0};}
-      if(cmd==='get_settings')return { settings:{language:'en',replayFolders:[],scanGameReplays:true},doctor:{ok:true,problems:[],paths:window.toolPaths || {}},detected:{},setup:window.setupState ?? {},dataDir:'E:/data',defaultDataDir:'E:/data',parsedBytes:0,anomalyBytes:0,clipsBytes:0,radarBytes:0 };
+      if(cmd==='tool_diagnostics')return JSON.stringify({environment:{appVersion:'test'},checks:window.toolChecks ?? {}});
+      if(cmd==='check_tools' && window.holdToolCheck)await new Promise(resolve=>window.releaseToolCheck=resolve);
+      if(cmd==='get_settings' || cmd==='check_tools')return { toolChecks:window.toolChecks ?? Object.fromEntries(['hlae','ffmpeg','vrf'].map(tool=>[tool,{ok:Boolean(window.toolPaths?.[tool+'Exe']),path:window.toolPaths?.[tool+'Exe']??null}])),settings:{language:'en',replayFolders:[],scanGameReplays:true},doctor:{ok:true,problems:[],paths:window.toolPaths || {}},detected:{},setup:window.setupState ?? {},dataDir:'E:/data',defaultDataDir:'E:/data',parsedBytes:0,anomalyBytes:0,clipsBytes:0,radarBytes:0 };
       if(cmd==='list_demos'){if(window.holdRefresh)await new Promise(resolve=>window.releaseRefresh=resolve);return demos;}
       if(cmd==='delete_job') { window.queueJobs=(window.queueJobs ?? jobs).filter(job=>job.id!==args.id); return; }
       if(cmd==='list_jobs')return window.queueJobs ?? (window.showQueuedOnCurrentDemo ? jobs.map(j=>j.status==='queued'?{...j,demoId:'demo-0'}:j) : jobs);
@@ -719,7 +721,7 @@ try {
   const toolLayout = await settingsPage.evaluate(el => {
     const recheck = [...el.querySelectorAll('button')].find(b=>b.textContent.trim()==='Check again');
     const card = recheck.closest('.rt-Card').getBoundingClientRect();
-    const button = recheck.getBoundingClientRect();
+    const button = recheck.parentElement.getBoundingClientRect();
     const warning = recheck.closest('.rt-Card').querySelector('.rt-CalloutRoot').getBoundingClientRect();
     const firstTool = recheck.closest('.rt-Card').querySelector('.tool-field').getBoundingClientRect();
     return {center:Math.abs(button.x+button.width/2-card.x-card.width/2),warningBottom:warning.bottom,toolTop:firstTool.top};
@@ -739,6 +741,27 @@ try {
     await settingsPage.getByRole('button', {name:'Check again',exact:true}).click();
     await toolWarning.waitFor({state:missing ? 'visible' : 'hidden'});
     await page.locator('.notification-viewport .app-toast').getByRole('button', {name:'Close',exact:true}).click();
+  }
+  {
+  const hlaeField = settingsPage.locator('.tool-field').filter({has:page.getByLabel('HLAE.exe',{exact:true})});
+  await page.evaluate(() => { window.holdToolCheck=true; window.toolChecks={hlae:{ok:false,path:'E:/tools/HLAE.exe',exitCode:7,timedOut:false,stderr:'fixture startup failure'}}; });
+  await settingsPage.getByRole('button',{name:'Check again',exact:true}).click();
+  await hlaeField.getByText('Verifying…',{exact:true}).waitFor();
+  assert.equal(await hlaeField.getByText('Ready',{exact:true}).count(),0,'Existing file is not ready while verification runs');
+  await page.waitForFunction(()=>typeof window.releaseToolCheck==='function');
+  await page.evaluate(()=>{window.holdToolCheck=false;window.releaseToolCheck();});
+  await hlaeField.getByText('Startup failed',{exact:true}).waitFor();
+  await settingsPage.getByRole('button',{name:'Diagnostics',exact:true}).click();
+  const diagnosticsDialog=page.getByRole('dialog');
+  await diagnosticsDialog.getByText(/fixture startup failure/).waitFor();
+  await page.evaluate(()=>Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText:async text=>{window.copiedDiagnostics=text;}}}));
+  await diagnosticsDialog.getByRole('button',{name:'Copy diagnostics',exact:true}).click();
+  assert.equal(await page.evaluate(()=>JSON.parse(window.copiedDiagnostics).checks.hlae.exitCode),7);
+  await diagnosticsDialog.getByRole('button',{name:'Close',exact:true}).click();
+  await page.evaluate(()=>{delete window.toolChecks;});
+  await settingsPage.getByRole('button',{name:'Check again',exact:true}).click();
+  await hlaeField.getByText('Ready',{exact:true}).waitFor();
+  await page.locator('.notification-viewport .app-toast').getByRole('button',{name:'Close',exact:true}).click();
   }
   const actionHeights = await settingsPage.locator('.rt-Button, .rt-IconButton').evaluateAll(buttons => buttons.map(b => b.getBoundingClientRect().height));
   assert.ok(actionHeights.every(height => height >= 32), 'Settings action controls accommodate the selected text size');

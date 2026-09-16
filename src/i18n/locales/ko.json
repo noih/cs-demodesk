@@ -385,6 +385,14 @@
     "money": "보유 금액"
   },
   "settings": {
+    "verifying": "확인 중…",
+    "unverified": "미확인",
+    "startupFailed": "시작 실패",
+    "diagnostics": "진단 정보",
+    "diagnosticsHint": "로컬 경로와 시스템 정보가 포함됩니다. 복사 전에 확인하세요. 자동으로 업로드되지 않습니다.",
+    "copyDiagnostics": "진단 정보 복사",
+    "diagnosticsCopied": "진단 정보 복사됨",
+    "startupFailedHint": "도구를 시작할 수 없습니다. 다시 확인하거나 다운로드 버튼으로 다시 받거나 다른 위치의 도구를 선택하세요. 시작 확인은 디코딩이나 게임 주입의 성공을 보장하지 않습니다.",
     "calculating": "계산 중…",
     "demoSources": "데모 소스",
     "noExtraFolders": "추가된 폴더가 없습니다",

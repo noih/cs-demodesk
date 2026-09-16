@@ -51,6 +51,8 @@ struct SettingsResponse {
     detected: Detected,
     doctor: DoctorReport,
     setup: std::collections::HashMap<SetupTool, SetupState>,
+    tool_checks:
+        std::collections::HashMap<SetupTool, demodesk_core::render::diagnostics::ToolCheck>,
     data_dir: PathBuf,
     data_dir_override: Option<PathBuf>,
     default_data_dir: PathBuf,
@@ -88,6 +90,7 @@ fn settings_response(engine: &Engine, directory: &DataDirectory) -> SettingsResp
         detected: engine.detected(),
         doctor: engine.doctor(),
         setup: engine.setup_state(),
+        tool_checks: engine.tool_checks(),
         data_dir: engine.data_dir().to_path_buf(),
     }
 }
@@ -238,6 +241,27 @@ async fn run_setup(engine: State<'_, Eng>, tool: SetupTool, force: bool) -> CmdR
 #[tauri::command]
 fn cancel_setup(engine: State<'_, Eng>, tool: SetupTool) {
     engine.cancel_setup(tool);
+}
+
+#[tauri::command]
+async fn check_tools(
+    engine: State<'_, Eng>,
+    directory: State<'_, Directory>,
+) -> CmdResult<SettingsResponse> {
+    let directory = directory.inner().clone();
+    blocking(&engine, move |e| {
+        e.check_tools();
+        Ok(settings_response(e, &directory))
+    })
+    .await
+}
+
+#[tauri::command]
+async fn tool_diagnostics(engine: State<'_, Eng>) -> CmdResult<String> {
+    blocking(&engine, |e| {
+        serde_json::to_string_pretty(&e.tool_diagnostics()).map_err(err)
+    })
+    .await
 }
 
 #[tauri::command]
@@ -512,6 +536,8 @@ pub fn run() {
             save_settings,
             run_setup,
             cancel_setup,
+            check_tools,
+            tool_diagnostics,
             list_demos,
             register_demo,
             parse_demo,

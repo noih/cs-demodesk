@@ -385,6 +385,14 @@
     "money": "所持金"
   },
   "settings": {
+    "verifying": "検証中…",
+    "unverified": "未検証",
+    "startupFailed": "起動失敗",
+    "diagnostics": "診断情報",
+    "diagnosticsHint": "ローカルパスとシステム情報が含まれます。コピー前に確認してください。自動送信は行いません。",
+    "copyDiagnostics": "診断情報をコピー",
+    "diagnosticsCopied": "診断情報をコピーしました",
+    "startupFailedHint": "ツールを起動できません。再確認、ダウンロードボタンからの再ダウンロード、または別の場所にあるツールの選択を試してください。起動確認はデコードやゲームへの注入の成功を保証しません。",
     "calculating": "計算中…",
     "demoSources": "デモの読み込み元",
     "noExtraFolders": "追加のフォルダーはありません",

@@ -305,7 +305,11 @@ mod platform {
                 stderr: errors,
             })
         }
-        fn start(&self, command: &Command, capture: Option<(&File, &File)>) -> io::Result<Child> {
+        pub(super) fn start(
+            &self,
+            command: &Command,
+            capture: Option<(&File, &File)>,
+        ) -> io::Result<Child> {
             let program = wide(command.get_program())?;
             let mut line = vec![];
             argument(command.get_program(), &mut line)?;
@@ -418,6 +422,50 @@ pub(crate) use platform::ProcessTree;
 
 #[cfg(not(windows))]
 pub(crate) struct ProcessTree;
+
+/// Bounded startup probe using the same process ownership as real tool launches.
+pub(crate) fn probe_output(
+    command: &mut std::process::Command,
+    timeout: std::time::Duration,
+) -> std::io::Result<(Option<std::process::ExitStatus>, String, String)> {
+    use std::io::{Read, Seek, SeekFrom};
+    let tree = ProcessTree::new()?;
+    let mut stdout = tempfile::tempfile()?;
+    let mut stderr = tempfile::tempfile()?;
+    #[cfg(windows)]
+    let mut child = tree.start(command, Some((&stdout, &stderr)))?;
+    #[cfg(not(windows))]
+    let mut child = super::hide(command)
+        .stdin(std::process::Stdio::null())
+        .stdout(stdout.try_clone()?)
+        .stderr(stderr.try_clone()?)
+        .spawn()?;
+    let start = std::time::Instant::now();
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break Some(status),
+            Ok(None) if start.elapsed() < timeout => {
+                std::thread::sleep(std::time::Duration::from_millis(50))
+            }
+            result => {
+                child.kill()?;
+                child.wait()?;
+                if let Err(error) = result {
+                    return Err(error);
+                }
+                break None;
+            }
+        }
+    };
+    drop(tree);
+    let read = |file: &mut std::fs::File| -> std::io::Result<String> {
+        file.seek(SeekFrom::Start(0))?;
+        let mut bytes = Vec::new();
+        file.take(16 * 1024).read_to_end(&mut bytes)?;
+        Ok(String::from_utf8_lossy(&bytes).into_owned())
+    };
+    Ok((status, read(&mut stdout)?, read(&mut stderr)?))
+}
 #[cfg(not(windows))]
 impl ProcessTree {
     pub fn new() -> std::io::Result<Self> {

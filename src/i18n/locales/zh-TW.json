@@ -385,6 +385,14 @@
     "money": "金錢"
   },
   "settings": {
+    "verifying": "驗證中…",
+    "unverified": "尚未驗證",
+    "startupFailed": "啟動失敗",
+    "diagnostics": "診斷資訊",
+    "diagnosticsHint": "包含本機路徑與系統資訊，請確認內容再複製；不會自動上傳。",
+    "copyDiagnostics": "複製診斷",
+    "diagnosticsCopied": "已複製診斷資訊",
+    "startupFailedHint": "工具無法啟動。可重新檢查、按該工具的下載按鈕重新下載，或瀏覽選擇其他工具位置。啟動驗證不代表解碼或遊戲注入一定成功。",
     "calculating": "計算中…",
     "demoSources": "Demo 來源",
     "noExtraFolders": "尚未加入其他目錄",

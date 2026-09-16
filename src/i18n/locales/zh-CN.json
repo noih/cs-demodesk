@@ -385,6 +385,14 @@
     "money": "金钱"
   },
   "settings": {
+    "verifying": "验证中…",
+    "unverified": "尚未验证",
+    "startupFailed": "启动失败",
+    "diagnostics": "诊断信息",
+    "diagnosticsHint": "包含本机路径与系统信息，请确认内容再复制；不会自动上传。",
+    "copyDiagnostics": "复制诊断",
+    "diagnosticsCopied": "已复制诊断信息",
+    "startupFailedHint": "工具无法启动。可重新检查、按该工具的下载按钮重新下载，或浏览选择其他工具位置。启动验证不代表解码或游戏注入一定成功。",
     "calculating": "计算中…",
     "demoSources": "Demo 来源",
     "noExtraFolders": "尚未添加其他目录",

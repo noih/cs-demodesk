@@ -38,6 +38,29 @@ clips, and existing tool directories. Failures identify the path through the
 existing startup recovery screen or settings error. This checks app access, not
 whether Windows allows a downloaded executable to initialize.
 
+Settings separately verifies executable startup on entry, after saving paths,
+and after each tool installation. HLAE uses `-customLoader -noGui -noConfig`,
+Source 2 Viewer uses `--version`, and FFmpeg uses `-version`. Checks have a
+10-second deadline and capture up to 16 KiB per output stream. Windows uses the
+same owned process tree as rendering, so timed-out probes and their children are
+terminated. A successful launch is not a decoding or game-injection guarantee.
+Unverified and failed tools do not show the ready status in Settings. Cached
+results are invalidated when the executable or required companion file changes
+or disappears; Check again reruns the probes without downloading anything.
+
+Diagnostics shows a reviewable report with app/package identity, Windows build,
+.NET Framework release, configured/resolved paths, check times, exit codes,
+captured output and download errors. Copying is explicit; reports are neither
+uploaded nor persisted. Paths can contain usernames. Re-download uses the existing
+tool download button; alternate tool locations use Browse and Save.
+
+`cargo test -p demodesk-core --lib diagnostics` exercises failed executables,
+missing companion files, deleted files, output limits and hung processes.
+For actual installed tools, set `DEMODESK_TEST_TOOLS_DIR` and run
+`cargo test -p demodesk-core installed_tools_startup -- --ignored --nocapture`.
+The test host is not MSIX-packaged: compare reports from installed and portable
+apps on the affected machine to determine whether package context matters.
+
 Each tool downloads into one fixed `.installing` sibling directory. The ZIP must
 extract successfully and contain the required binaries before installation is
 replaced. HLAE needs HLAE.exe and x64/AfxHookSource2.dll; FFmpeg needs ffmpeg.exe

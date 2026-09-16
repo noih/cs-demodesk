@@ -6,6 +6,7 @@ pub mod actions;
 #[cfg(windows)]
 mod audio;
 pub mod encode;
+pub mod diagnostics;
 mod leftovers;
 pub mod paths;
 pub(crate) mod process;

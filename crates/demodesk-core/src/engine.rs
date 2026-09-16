@@ -49,6 +49,7 @@ pub enum Event {
     SetupFinished {
         tool: SetupTool,
         ok: bool,
+        installed: bool,
         cancelled: bool,
         error: Option<String>,
     },
@@ -116,6 +117,8 @@ pub struct Engine {
     active_job: Mutex<Option<(String, Arc<AtomicBool>)>>,
     render_worker_running: AtomicBool,
     setup: Mutex<HashMap<SetupTool, SetupState>>,
+    tool_checks: Mutex<HashMap<SetupTool, crate::render::diagnostics::ToolCheck>>,
+    tool_check_lock: Mutex<()>,
     settings_lock: Mutex<()>,
 }
 
@@ -156,6 +159,8 @@ impl Engine {
             active_job: Mutex::new(None),
             render_worker_running: AtomicBool::new(false),
             setup: Mutex::new(HashMap::new()),
+            tool_checks: Mutex::new(HashMap::new()),
+            tool_check_lock: Mutex::new(()),
             settings_lock: Mutex::new(()),
         });
         // Nothing can be recording yet, so an old plugin install is a leftover.
@@ -1247,6 +1252,40 @@ impl Engine {
     pub fn setup_state(&self) -> HashMap<SetupTool, SetupState> {
         self.setup.lock().unwrap().clone()
     }
+    pub fn tool_checks(&self) -> HashMap<SetupTool, crate::render::diagnostics::ToolCheck> {
+        let paths = self.tool_paths();
+        self.tool_checks
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(tool, check)| {
+                check.fingerprint == crate::render::diagnostics::fingerprint(&paths, **tool)
+            })
+            .map(|(tool, check)| (*tool, check.clone()))
+            .collect()
+    }
+    pub fn check_tools(&self) {
+        let _guard = self.tool_check_lock.lock().unwrap();
+        for tool in [SetupTool::Hlae, SetupTool::Ffmpeg, SetupTool::Vrf] {
+            if self
+                .setup
+                .lock()
+                .unwrap()
+                .get(&tool)
+                .is_some_and(|s| s.running)
+            {
+                continue;
+            }
+            let check = crate::render::diagnostics::check(&self.tool_paths(), tool);
+            self.tool_checks.lock().unwrap().insert(tool, check);
+        }
+    }
+    pub fn tool_diagnostics(&self) -> serde_json::Value {
+        serde_json::json!({ "environment": crate::render::diagnostics::environment(),
+            "dataDirectory": self.data_dir(), "paths": self.tool_paths(),
+            "configuredPaths": self.overrides(&self.settings()),
+            "checks": self.tool_checks(), "downloads": self.setup_state() })
+    }
     pub fn start_setup(self: &Arc<Self>, tool: SetupTool, force: bool) -> bool {
         let cancel = Arc::new(AtomicBool::new(false));
         {
@@ -1280,6 +1319,7 @@ impl Engine {
                     progress: line,
                 });
             };
+            let mut installed = false;
             let result = run_setup(
                 &engine.tools_dir(),
                 &overrides,
@@ -1298,7 +1338,16 @@ impl Engine {
                     SetupTool::Ffmpeg => settings.ffmpeg_exe = None,
                     SetupTool::Vrf => settings.vrf_exe = None,
                 }
-                engine.store.save_settings(&settings)
+                engine.store.save_settings(&settings)?;
+                installed = true;
+                drop(_guard);
+                let check = crate::render::diagnostics::check(&engine.tool_paths(), tool);
+                let error = check.error.clone();
+                engine.tool_checks.lock().unwrap().insert(tool, check);
+                if let Some(error) = error {
+                    anyhow::bail!("Tool installed but startup verification failed: {error}");
+                }
+                Ok(())
             });
             let cancelled = result.is_err() && cancel.load(Ordering::Relaxed);
             {
@@ -1317,12 +1366,14 @@ impl Engine {
                 Ok(_) => engine.notify.notify(Event::SetupFinished {
                     tool,
                     ok: true,
+                    installed,
                     cancelled: false,
                     error: None,
                 }),
                 Err(e) => engine.notify.notify(Event::SetupFinished {
                     tool,
                     ok: false,
+                    installed,
                     cancelled,
                     error: Some(format!("{e:#}")),
                 }),
@@ -1740,7 +1791,7 @@ mod tests {
         for _ in 0..2 {
             assert!(matches!(
                 receive.recv_timeout(Duration::from_secs(5)).unwrap(),
-                Event::SetupFinished { ok: true, .. }
+                Event::SetupFinished { ok: false, .. }
             ));
         }
         for tool in [SetupTool::Hlae, SetupTool::Ffmpeg, SetupTool::Vrf] {
@@ -1758,7 +1809,7 @@ mod tests {
                 if let Event::SetupFinished { ok, error, .. } =
                     receive.recv_timeout(Duration::from_secs(5)).unwrap()
                 {
-                    assert!(ok, "{error:?}");
+                    assert!(!ok && error.unwrap().contains("startup verification failed"));
                     break;
                 }
             }
@@ -1766,7 +1817,9 @@ mod tests {
             let setup = engine.setup_state().remove(&tool).unwrap();
             assert!(!setup.running);
             assert!(setup.progress.is_none());
-            assert_eq!(setup.log, ["Download started", "Download completed"]);
+            assert_eq!(setup.log[0], "Download started");
+            assert!(setup.log[1].contains("startup verification failed"));
+            assert!(!engine.tool_checks()[&tool].ok);
             match tool {
                 SetupTool::Hlae => {
                     expected.hlae_exe = None;
