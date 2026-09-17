@@ -60,6 +60,44 @@ pub fn fingerprint(paths: &ToolPaths, tool: SetupTool) -> Fingerprint {
     )
 }
 
+pub fn tool_report(
+    paths: &ToolPaths,
+    tool: SetupTool,
+    cached: Option<&ToolCheck>,
+) -> serde_json::Value {
+    let path = executable(paths, tool);
+    let mut report = serde_json::json!({ "path": path, "cache": "missing", "lastCheck": null });
+    let Some(check) = cached else {
+        return report;
+    };
+    report["lastCheck"] = serde_json::json!({
+        "ok": check.ok, "path": check.path, "installedRelease": check.installed_release,
+        "checkedAt": check.checked_at, "exitCode": check.exit_code,
+        "timedOut": check.timed_out, "error": check.error,
+    });
+    if !check.ok {
+        for (name, output) in [("stdout", &check.stdout), ("stderr", &check.stderr)] {
+            if !output.is_empty() {
+                report["lastCheck"][name] = output.as_str().into();
+            }
+        }
+    }
+    if check.fingerprint == fingerprint(paths, tool) {
+        report["cache"] = "valid".into();
+    } else {
+        report["cache"] = "stale".into();
+        report["cacheReason"] = if path.is_none() {
+            "Executable is missing or no longer resolves"
+        } else if check.path.as_ref() != path {
+            "Executable path changed"
+        } else {
+            "Required files changed or are missing"
+        }
+        .into();
+    }
+    report
+}
+
 pub fn check(paths: &ToolPaths, tool: SetupTool) -> ToolCheck {
     let mut result = ToolCheck {
         ok: false,
@@ -130,7 +168,6 @@ pub fn environment() -> serde_json::Value {
     let mut result = serde_json::json!({
         "appVersion": env!("CARGO_PKG_VERSION"), "os": std::env::consts::OS, "architecture": std::env::consts::ARCH,
         "packaged": crate::updates::is_packaged().ok(),
-        "appExecutable": std::env::current_exe().ok(), "workingDirectory": std::env::current_dir().ok(),
     });
     #[cfg(windows)]
     {
@@ -161,6 +198,82 @@ pub fn environment() -> serde_json::Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn report_explains_cache_state_and_only_includes_useful_check_output() {
+        let temp = tempfile::tempdir().unwrap();
+        let exe = temp.path().join("HLAE.exe");
+        let companion = temp.path().join("x64/AfxHookSource2.dll");
+        std::fs::create_dir(companion.parent().unwrap()).unwrap();
+        std::fs::write(&exe, b"report must not execute this").unwrap();
+        std::fs::write(&companion, []).unwrap();
+        let mut paths = ToolPaths {
+            hlae_exe: Some(exe.clone()),
+            ..Default::default()
+        };
+        assert_eq!(
+            tool_report(&paths, SetupTool::Hlae, None),
+            serde_json::json!({ "path": exe, "cache": "missing", "lastCheck": null })
+        );
+        let mut cached = ToolCheck {
+            ok: true,
+            path: Some(exe.clone()),
+            installed_release: Some("v1".into()),
+            checked_at: "2026-09-17T00:00:00Z".into(),
+            exit_code: Some(0),
+            timed_out: false,
+            stdout: "version banner".into(),
+            stderr: "diagnostic output".into(),
+            error: None,
+            fingerprint: fingerprint(&paths, SetupTool::Hlae),
+        };
+        let valid = tool_report(&paths, SetupTool::Hlae, Some(&cached));
+        assert_eq!(valid["cache"], "valid");
+        assert!(valid.get("cacheReason").is_none());
+        assert!(valid["lastCheck"].get("stdout").is_none());
+        assert!(valid["lastCheck"].get("stderr").is_none());
+        assert!(valid["lastCheck"].get("fingerprint").is_none());
+
+        cached.ok = false;
+        cached.exit_code = Some(7);
+        cached.error = Some("Tool exited with code 7".into());
+        let failed = tool_report(&paths, SetupTool::Hlae, Some(&cached));
+        assert_eq!(failed["cache"], "valid");
+        assert_eq!(failed["lastCheck"], serde_json::to_value(&cached).unwrap());
+        cached.stdout.clear();
+        cached.stderr.clear();
+        let empty_output = tool_report(&paths, SetupTool::Hlae, Some(&cached));
+        assert!(empty_output["lastCheck"].get("stdout").is_none());
+        assert!(empty_output["lastCheck"].get("stderr").is_none());
+
+        std::fs::write(&companion, b"changed").unwrap();
+        let stale = tool_report(&paths, SetupTool::Hlae, Some(&cached));
+        assert_eq!(stale["cache"], "stale");
+        assert_eq!(
+            stale["cacheReason"],
+            "Required files changed or are missing"
+        );
+        assert_eq!(stale["lastCheck"], empty_output["lastCheck"]);
+        std::fs::remove_file(companion).unwrap();
+        assert_eq!(
+            tool_report(&paths, SetupTool::Hlae, Some(&cached))["cache"],
+            "stale"
+        );
+        paths.hlae_exe = Some(temp.path().join("new/HLAE.exe"));
+        let moved = tool_report(&paths, SetupTool::Hlae, Some(&cached));
+        assert_eq!(moved["path"], serde_json::json!(paths.hlae_exe));
+        assert_eq!(moved["cache"], "stale");
+        assert_eq!(moved["cacheReason"], "Executable path changed");
+        assert_eq!(moved["lastCheck"]["path"], serde_json::json!(exe));
+        paths.hlae_exe = None;
+        let missing = tool_report(&paths, SetupTool::Hlae, Some(&cached));
+        assert_eq!(missing["cache"], "stale");
+        assert_eq!(
+            missing["cacheReason"],
+            "Executable is missing or no longer resolves"
+        );
+        assert_eq!(missing["lastCheck"], empty_output["lastCheck"]);
+    }
 
     #[test]
     #[ignore = "requires DEMODESK_TEST_TOOLS_DIR pointing to installed tools"]

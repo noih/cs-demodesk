@@ -13,13 +13,14 @@ export function ScoringTab({players,parsed,busy,step,error,job,queuePosition,sta
   const playerNames = Object.fromEntries(parsed.info.players.map(player => [player.steamid, displayPlayerName(player.name)]));
   const hasRecords = Object.values(players ?? {}).some(records => records.length > 0);
   return <Flex direction="column" gap="3">
-    <Flex align="center" justify={hasRecords ? "end" : "start"} gap="3" wrap="wrap">
+    <Text as="p" size="2" color="gray">{t('scoring.explanation')}</Text>
+    {(!hasRecords || busy || error || job?.status==='error') && <Flex align="center" justify={hasRecords ? "end" : "start"} gap="3" wrap="wrap">
       {((players !== undefined && !hasRecords) || busy) && <Button size="1" onClick={onAnalyze} disabled={busy} aria-busy={busy}>
         {busy ? <span role="status">{job?.status==='queued' ? t('scoring.queue.waiting',{position:queuePosition}) : job?.status==='running' ? `${t('scoring.progress',{step,total:3})} · ${t(`scoring.steps.${step}`)}` : t('scoring.queue.submitting')}</span> : t('scoring.start')}
       </Button>}
     {!busy && job?.status==='error' && <Text role="alert" color="red">{t('scoring.failed')}{job.step && ` · ${t(`scoring.steps.${job.step}`)}`}: {job.error}</Text>}
     {error && <Text color="red" role="alert">{t('scoring.failed')}: {error}</Text>}
-    </Flex>
+    </Flex>}
     {hasRecords && <div style={{overflowX: 'auto', maxWidth: '100%'}}><Table.Root variant="surface" layout="auto" aria-label={t('scoring.title')}>
       <Table.Header><Table.Row>
         <Table.ColumnHeaderCell width="22%">{t('common.player')}</Table.ColumnHeaderCell>

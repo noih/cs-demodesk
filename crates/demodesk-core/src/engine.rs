@@ -1282,10 +1282,83 @@ impl Engine {
         }
     }
     pub fn tool_diagnostics(&self) -> serde_json::Value {
-        serde_json::json!({ "environment": crate::render::diagnostics::environment(),
-            "dataDirectory": self.data_dir(), "paths": self.tool_paths(),
-            "configuredPaths": self.overrides(&self.settings()),
-            "checks": self.tool_checks(), "downloads": self.setup_state() })
+        use crate::scoring::queue::Status;
+        use serde_json::json;
+
+        let settings = self.settings();
+        let doctor = doctor(&self.tools_dir(), &self.overrides(&settings));
+        let checks = self.tool_checks.lock().unwrap().clone();
+        let downloads = self.setup_state();
+        let tools: serde_json::Map<String, serde_json::Value> = [
+            ("hlae", SetupTool::Hlae),
+            ("ffmpeg", SetupTool::Ffmpeg),
+            ("vrf", SetupTool::Vrf),
+        ]
+        .into_iter()
+        .map(|(name, tool)| {
+            let mut report =
+                crate::render::diagnostics::tool_report(&doctor.paths, tool, checks.get(&tool));
+            if let Some(download) = downloads.get(&tool) {
+                report["download"] = json!({ "running": download.running,
+                    "stopping": download.stopping, "progress": download.progress,
+                    "lastMessage": download.log.last() });
+            }
+            (name.into(), report)
+        })
+        .collect();
+        let parsing = {
+            let demos = self.demos.lock().unwrap();
+            json!({
+                "known": demos.len(),
+                "new": demos.values().filter(|d| d.meta.status == DemoStatus::New).count(),
+                "parsing": demos.values().filter(|d| d.meta.status == DemoStatus::Parsing).count(),
+                "parsed": demos.values().filter(|d| d.meta.status == DemoStatus::Parsed).count(),
+                "failed": demos.values().filter(|d| d.meta.status == DemoStatus::Error).count(),
+                "errorSamples": demos.values().filter(|d| d.meta.status == DemoStatus::Error)
+                    .take(3).map(|d| json!({ "demoId": d.meta.id, "path": d.meta.path, "error": d.meta.error }))
+                    .collect::<Vec<_>>()
+            })
+        };
+        let analysis = self.analysis_jobs();
+        let analysis_detail = |j: &crate::scoring::queue::Job| {
+            json!({
+                "jobId": j.id, "demoId": j.demo_id, "step": j.step,
+                "startedAt": j.started_at, "finishedAt": j.finished_at, "error": j.error
+            })
+        };
+        let render = self.store.list_jobs();
+        let render_detail = |j: &RenderJob| {
+            json!({
+                "jobId": j.id, "demoId": j.demo_id, "stage": j.stage, "progress": j.progress,
+                "startedAt": j.started_at, "finishedAt": j.finished_at,
+                "errorCode": j.error_code, "error": j.error,
+                "logTail": &j.log[j.log.len().saturating_sub(5)..]
+            })
+        };
+        json!({
+            "generatedAt": now(), "environment": crate::render::diagnostics::environment(),
+            "dataDirectory": self.data_dir(), "paths": doctor.paths,
+            "configuredPaths": self.overrides(&settings), "problems": doctor.problems,
+            "toolCacheScope": "session", "tools": tools,
+            "activity": {
+                "parsing": parsing,
+                "analysis": {
+                    "scope": "session",
+                    "queued": analysis.iter().filter(|j| j.status == Status::Queued).count(),
+                    "failed": analysis.iter().filter(|j| j.status == Status::Error).count(),
+                    "active": analysis.iter().find(|j| j.status == Status::Running).map(analysis_detail),
+                    "latestFailure": analysis.iter().filter(|j| j.status == Status::Error)
+                        .max_by_key(|j| j.finished_at.as_ref().unwrap_or(&j.created_at)).map(analysis_detail)
+                },
+                "render": {
+                    "queued": self.render_queue.lock().unwrap().len(),
+                    "failed": render.iter().filter(|j| j.status == JobStatus::Error).count(),
+                    "active": render.iter().find(|j| j.status == JobStatus::Running).map(render_detail),
+                    "latestFailure": render.iter().filter(|j| j.status == JobStatus::Error)
+                        .max_by_key(|j| j.finished_at.as_ref().unwrap_or(&j.created_at)).map(render_detail)
+                }
+            }
+        })
     }
     pub fn start_setup(
         self: &Arc<Self>,
@@ -1442,6 +1515,7 @@ impl Engine {
         &self,
         demo_id: &str,
         selection: &crate::scoring::clips::Selection,
+        merge: bool,
     ) -> Result<Vec<crate::scoring::clips::RuleClips>> {
         let (_, parsed) = self
             .get_demo(demo_id)
@@ -1458,7 +1532,12 @@ impl Engine {
             .map(|r| r.end_tick.max(r.officially_ended_tick))
             .max()
             .ok_or_else(|| anyhow!("demo timeline unavailable"))?;
-        crate::scoring::clips::build(&record, &parsed.info, end, &selection.rule_ids)
+        let groups = crate::scoring::clips::build(&record, &parsed.info, end, &selection.rule_ids)?;
+        Ok(if merge {
+            crate::scoring::clips::merge(groups)
+        } else {
+            groups
+        })
     }
 
     pub fn enqueue_analysis_render(
@@ -1468,18 +1547,7 @@ impl Engine {
         mut options: RenderOptions,
     ) -> Result<Vec<RenderJob>> {
         let _guard = self.replay_lock.lock().unwrap();
-        let mut groups = self.analysis_clips(demo_id, &selection)?;
-        if options.merge && groups.len() > 1 {
-            let mut combined = groups.remove(0);
-            for group in groups.drain(..) {
-                combined.rule_id.push('+');
-                combined.rule_id.push_str(&group.rule_id);
-                combined.title.push_str(" / ");
-                combined.title.push_str(&group.title);
-                combined.highlights.extend(group.highlights);
-            }
-            groups.push(combined);
-        }
+        let groups = self.analysis_clips(demo_id, &selection, options.merge)?;
         let (meta, _) = self
             .get_demo(demo_id)
             .ok_or_else(|| anyhow!("demo not found"))?;
@@ -1788,6 +1856,99 @@ mod tests {
         fn notify(&self, event: Event) {
             let _ = self.0.send(event);
         }
+    }
+
+    #[test]
+    fn diagnostics_summarizes_failures_without_starting_work() {
+        use crate::scoring::queue::Status;
+        use serde_json::json;
+
+        let temp = tempfile::tempdir().unwrap();
+        let (send, receive) = mpsc::channel();
+        let engine = Engine::new(temp.path().join("data"), Arc::new(Events(send))).unwrap();
+        for index in 0..5 {
+            let id = format!("demo-{index}");
+            let meta = serde_json::from_value(json!({
+                "id": id, "name": "fixture.dem", "path": "fixture.dem",
+                "bytes": 0, "mtimeMs": 0, "createdMs": 0,
+                "status": if index == 0 { "new" } else { "error" },
+                "error": if index == 0 { None } else { Some("fixture parse failure") }
+            }))
+            .unwrap();
+            engine.demos.lock().unwrap().insert(
+                id,
+                DemoEntry {
+                    meta,
+                    parsed: None,
+                    auto_complete: None,
+                },
+            );
+        }
+        {
+            let mut queue = engine.analysis_queue.lock().unwrap();
+            queue.enqueue("demo-1", false);
+            queue.jobs[0].status = Status::Error;
+            queue.jobs[0].error = Some("fixture analysis failure".into());
+            queue.enqueue("demo-2", false);
+            queue.claim().unwrap();
+            queue.enqueue("demo-3", false);
+        }
+        let mut job = engine
+            .store
+            .new_job("demo-1", vec![], RenderOptions::default())
+            .unwrap();
+        job.status = JobStatus::Error;
+        job.error = Some("fixture encoding failure".into());
+        job.created_at = "2026-09-17T00:00:00Z".into();
+        job.finished_at = Some("2026-09-17T00:03:00Z".into());
+        job.log = (0..10).map(|n| format!("stage {n}")).collect();
+        engine.store.save_job(&job).unwrap();
+        let mut earlier_failure = engine
+            .store
+            .new_job("demo-2", vec![], RenderOptions::default())
+            .unwrap();
+        earlier_failure.status = JobStatus::Error;
+        earlier_failure.error = Some("earlier failure from newer job".into());
+        earlier_failure.created_at = "2026-09-17T00:01:00Z".into();
+        earlier_failure.finished_at = Some("2026-09-17T00:02:00Z".into());
+        engine.store.save_job(&earlier_failure).unwrap();
+        let record = engine.store.job_dir(&job.id).join("job.json");
+        let before = std::fs::read(&record).unwrap();
+
+        let report = engine.tool_diagnostics();
+        let activity = &report["activity"];
+        assert_eq!(activity["parsing"]["known"], 5);
+        assert_eq!(activity["parsing"]["new"], 1);
+        assert_eq!(activity["parsing"]["failed"], 4);
+        assert_eq!(
+            activity["parsing"]["errorSamples"]
+                .as_array()
+                .unwrap()
+                .len(),
+            3
+        );
+        assert_eq!(activity["analysis"]["queued"], 1);
+        assert_eq!(activity["analysis"]["active"]["demoId"], "demo-2");
+        assert_eq!(
+            activity["analysis"]["latestFailure"]["error"],
+            "fixture analysis failure"
+        );
+        let failure = &activity["render"]["latestFailure"];
+        assert_eq!(activity["render"]["failed"], 2);
+        assert_eq!(failure["error"], "fixture encoding failure");
+        assert_eq!(
+            failure["logTail"],
+            json!(["stage 5", "stage 6", "stage 7", "stage 8", "stage 9"])
+        );
+        assert!(failure.get("options").is_none() && failure.get("outputs").is_none());
+        for tool in ["hlae", "ffmpeg", "vrf"] {
+            assert_eq!(report["tools"][tool]["cache"], "missing");
+            assert!(report["tools"][tool]["lastCheck"].is_null());
+        }
+        assert!(engine.tool_checks.lock().unwrap().is_empty());
+        assert!(engine.parsing.lock().unwrap().is_empty());
+        assert!(receive.try_recv().is_err());
+        assert_eq!(std::fs::read(record).unwrap(), before);
     }
 
     #[test]
@@ -2497,6 +2658,7 @@ mod analysis_queue_tests {
             JobStatus::Cancelled
         );
         assert_eq!(engine.render_queue.lock().unwrap().len(), 2);
+        let preview = engine.analysis_clips("demo", &selection, true).unwrap();
         let merged = engine
             .enqueue_analysis_render(
                 "demo",
@@ -2514,24 +2676,26 @@ mod analysis_queue_tests {
             .unwrap()
             .analysis_clips
             .unwrap();
-        let expected: Vec<_> = jobs
-            .iter()
-            .flat_map(|j| {
-                j.analysis_clips
-                    .as_ref()
-                    .unwrap()
-                    .highlights
-                    .iter()
-                    .map(|h| (&h.id, h.start_tick, h.end_tick))
-            })
-            .collect();
+        let expected = [
+            (448, 1024),
+            (1184, 1440),
+            (1824, 2080),
+            (2464, 2720),
+            (3104, 3360),
+            (3744, 4096),
+        ];
         assert_eq!(
             snapshot
                 .highlights
                 .iter()
-                .map(|h| (&h.id, h.start_tick, h.end_tick))
+                .map(|h| (h.start_tick, h.end_tick))
                 .collect::<Vec<_>>(),
             expected
+        );
+        assert_eq!(snapshot.highlights[0].tags, ["jump", "view"]);
+        assert_eq!(
+            serde_json::to_value(&snapshot).unwrap(),
+            serde_json::to_value(&preview[0]).unwrap()
         );
         assert_eq!(
             engine.render_queue.lock().unwrap().back(),

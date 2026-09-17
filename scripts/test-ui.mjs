@@ -45,8 +45,8 @@ try {
       window.testCalls.push({cmd,args});
       if(cmd==='get_startup_error')return null;
       if(cmd==='preferences_need_reset')return false;
-      if(cmd==='preview_settings')return {target:args.dataDirOverride || 'E:/data',restartRequired:Boolean(args.dataDirOverride && args.dataDirOverride!=='E:/data')};
-      if(cmd==='save_settings'){window.selectedDataDirectory=args.dataDirOverride;return window.__TAURI_INTERNALS__.invoke('get_settings',{});}
+      if(cmd==='preview_settings'){if(window.previewSettingsError)throw window.previewSettingsError;return {target:args.dataDirOverride || 'E:/data',restartRequired:Boolean(args.dataDirOverride && args.dataDirOverride!=='E:/data')};}
+      if(cmd==='save_settings'){window.selectedDataDirectory=args.dataDirOverride;window.savedSettings=args.settings;return window.__TAURI_INTERNALS__.invoke('get_settings',{});}
       if(cmd==='get_map_assets' && window.missingTools)throw new Error('Source 2 Viewer CLI not installed');
       if(cmd==='get_replay' || cmd==='get_map_assets')return new Promise(()=>{});
       if(cmd==='get_kills')return [];
@@ -60,14 +60,14 @@ try {
       if(cmd==='open_path'){window.openedPath=args.path;return;}
       if(cmd==='get_status')return window.missingTools ? {...status,ok:false,missingRenderTools:window.missingRenderTools ?? ['HLAE','ffmpeg']} : status;
       if(cmd==='get_storage_bytes'){if(window.holdStorage)await new Promise(resolve=>window.releaseStorage=resolve);return {parsedBytes:1048576,anomalyBytes:0,clipsBytes:0,radarBytes:0};}
-      if(cmd==='tool_diagnostics')return JSON.stringify({environment:{appVersion:'test'},checks:window.toolChecks ?? {}});
+      if(cmd==='tool_diagnostics')return JSON.stringify({environment:{appVersion:'test'},tools:Object.fromEntries(['hlae','ffmpeg','vrf'].map(tool=>[tool,{path:window.toolPaths?.[tool+'Exe']??null,cache:window.toolChecks?.[tool]?'valid':'missing',lastCheck:window.toolChecks?.[tool]??null}]))});
       if(cmd==='check_tools' && window.holdToolCheck)await new Promise(resolve=>window.releaseToolCheck=resolve);
-      if(cmd==='get_settings' || cmd==='check_tools')return { toolChecks:window.toolChecks ?? Object.fromEntries(['hlae','ffmpeg','vrf'].map(tool=>[tool,{ok:Boolean(window.toolPaths?.[tool+'Exe']),path:window.toolPaths?.[tool+'Exe']??null}])),settings:{language:'en',replayFolders:[],scanGameReplays:true},doctor:{ok:true,problems:[],paths:window.toolPaths || {}},detected:{},setup:window.setupState ?? {},dataDir:'E:/data',dataDirOverride:window.selectedDataDirectory ?? null,restartRequired:Boolean(window.selectedDataDirectory && window.selectedDataDirectory!=='E:/data'),defaultDataDir:'E:/data',parsedBytes:0,anomalyBytes:0,clipsBytes:0,radarBytes:0 };
+      if(cmd==='get_settings' || cmd==='check_tools')return { toolChecks:window.toolChecks ?? Object.fromEntries(['hlae','ffmpeg','vrf'].map(tool=>[tool,{ok:Boolean(window.toolPaths?.[tool+'Exe']),path:window.toolPaths?.[tool+'Exe']??null}])),settings:window.savedSettings ?? {language:'en',replayFolders:[],scanGameReplays:true},doctor:{ok:true,problems:[],paths:window.toolPaths || {}},detected:{},setup:window.setupState ?? {},dataDir:'E:/data',dataDirOverride:window.selectedDataDirectory ?? null,restartRequired:Boolean(window.selectedDataDirectory && window.selectedDataDirectory!=='E:/data'),defaultDataDir:'E:/data',parsedBytes:0,anomalyBytes:0,clipsBytes:0,radarBytes:0 };
       if(cmd==='list_demos'){if(window.holdRefresh)await new Promise(resolve=>window.releaseRefresh=resolve);return demos;}
       if(cmd==='delete_job') { window.queueJobs=(window.queueJobs ?? jobs).filter(job=>job.id!==args.id); return; }
       if(cmd==='list_jobs')return window.queueJobs ?? (window.showQueuedOnCurrentDemo ? jobs.map(j=>j.status==='queued'?{...j,demoId:'demo-0'}:j) : jobs);
       if(cmd==='analysis_clips'&&window.holdClipPreview)await new Promise(resolve=>(window.releaseClipPreviews??=[]).push(resolve));
-      if(cmd==='analysis_clips')return args.selection.ruleIds.map(ruleId=>({ruleId,title:'Opponent — '+ruleId,demoFingerprint:'source-current',highlights:[{id:'clip-'+ruleId,player:{steamid:args.selection.playerId,name:'Opponent'},round:1,startTick:0,endTick:320,anchorTick:64,score:0,tags:[ruleId],title:'Opponent — '+ruleId,kills:[],breakdown:{}}]}));
+      if(cmd==='analysis_clips')return (args.merge && args.selection.ruleIds.length>1 ? [args.selection.ruleIds.join('+')] : args.selection.ruleIds).map(ruleId=>({ruleId,title:'Opponent — '+ruleId,demoFingerprint:'source-current',highlights:[{id:'clip-'+ruleId,player:{steamid:args.selection.playerId,name:'Opponent'},round:1,startTick:0,endTick:320,anchorTick:64,score:0,tags:[ruleId],title:'Opponent — '+ruleId,kills:[],breakdown:{}}]}));
       if(cmd==='start_analysis_render'){
         if(window.failExport)throw Error('Cannot queue export');
         const exports=args.selection.ruleIds.map((ruleId,index)=>({id:'analysis-video-'+index,demoId:args.demoId,highlightIds:['clip-'+ruleId],analysisClips:{ruleId,title:'Opponent — '+ruleId,demoFingerprint:'source-current',highlights:[{id:'clip-'+ruleId,title:'Opponent — '+ruleId}]},options:{...args.options,merge:true},status:'queued',createdAt:new Date().toISOString(),outputs:[],log:[]}));
@@ -196,6 +196,9 @@ try {
   await page.locator('.job-card').first().waitFor();
   await page.getByText('Job interrupted because the app was closed',{exact:true}).waitFor();
   assert.equal(await page.getByText('backend diagnostic changed',{exact:true}).count(),0,'Error code selects translation regardless of backend diagnostic wording');
+  await page.evaluate(async () => { const job = (await window.__TAURI_INTERNALS__.invoke('list_jobs')).find(j => j.id === 'job-3'); window.emitTestEvent({type:'job-changed',job:{...job,status:'error',error:'cs2.exe is already running — close the game first'}}); });
+  await page.getByText('CS2 is running. Close the game first.', {exact:true}).waitFor();
+  await page.evaluate(async () => { window.emitTestEvent({type:'job-changed',job:(await window.__TAURI_INTERNALS__.invoke('list_jobs')).find(j => j.id === 'job-3')}); });
   const progressBar = page.getByRole('progressbar', {name:'Overall progress (estimated)'});
   assert.equal(await progressBar.getAttribute('aria-valuenow'), '35');
   assert.ok(!(await page.locator('.job-card').first().innerText()).includes('Elapsed'), 'Running timer has no redundant prefix');
@@ -664,6 +667,8 @@ try {
   const detailHeaderBounds = await headerButtonBounds();
   assert.ok(detailHeaderBounds.every(b => b.height === 32), 'All header buttons share a 32px height');
   assert.ok(await page.locator('.app-header .rt-IconButton').evaluateAll(buttons => buttons.every(b => b.getBoundingClientRect().width === 32)), 'Header icon buttons are square');
+  const toolCheckCalls = () => page.evaluate(() => window.testCalls.filter(c => c.cmd === 'check_tools').length);
+  const checksBeforeSettings = await toolCheckCalls();
   await page.evaluate(() => { window.holdStorage = true; });
   await page.getByRole('button',{name:'Settings',exact:true}).click();
   await page.getByText('Language',{exact:true}).waitFor();
@@ -671,6 +676,7 @@ try {
   await page.getByLabel('Data directory', {exact:true}).fill('E:/still-responsive');
   await page.evaluate(() => { window.holdStorage = false; window.releaseStorage(); });
   await page.getByText('Calculating…', {exact:true}).first().waitFor({state:'hidden'});
+  assert.equal(await toolCheckCalls(), checksBeforeSettings, 'Entering Settings reads cached tool readiness without running checks');
 
   const settingsPage = page.locator('.settings-page');
   assert.equal(await settingsPage.getByText('Anomaly data', {exact:true}).count(), 1);
@@ -737,6 +743,7 @@ try {
   assert.equal(await settingsPage.locator('button.rt-variant-ghost, button.rt-variant-soft').count(), 0, 'Settings actions use clear outlined or solid controls');
   const toolWarning = settingsPage.getByText('Tools are not fully installed. Some features will be limited.', {exact:true});
   for (const missing of ['hlaeExe', 'hlaeDll', 'ffmpegExe', 'vrfExe', null]) {
+    const checksBeforeManual = await toolCheckCalls();
     await page.evaluate(missing => {
       window.toolPaths = {hlaeExe:'E:/tools/HLAE.exe',hlaeDll:'E:/tools/AfxHookSource2.dll',ffmpegExe:'E:/tools/ffmpeg.exe',vrfExe:'E:/tools/Source2Viewer-CLI.exe'};
       if (missing) delete window.toolPaths[missing];
@@ -744,6 +751,7 @@ try {
     await settingsPage.getByRole('button', {name:'Check again',exact:true}).click();
     await toolWarning.waitFor({state:missing ? 'visible' : 'hidden'});
     await page.locator('.notification-viewport .app-toast').getByRole('button', {name:'Close',exact:true}).click();
+    assert.equal(await toolCheckCalls(), checksBeforeManual + 1, 'Check again runs tool verification once');
   }
   {
   const hlaeField = settingsPage.locator('.tool-field').filter({has:page.getByLabel('HLAE',{exact:true})});
@@ -754,12 +762,15 @@ try {
   await page.waitForFunction(()=>typeof window.releaseToolCheck==='function');
   await page.evaluate(()=>{window.holdToolCheck=false;window.releaseToolCheck();});
   await hlaeField.getByText('Startup failed',{exact:true}).waitFor();
+  const checksBeforeDiagnostics = await toolCheckCalls();
   await settingsPage.getByRole('button',{name:'Diagnostics',exact:true}).click();
   const diagnosticsDialog=page.getByRole('dialog');
   await diagnosticsDialog.getByText(/fixture startup failure/).waitFor();
   await page.evaluate(()=>Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText:async text=>{window.copiedDiagnostics=text;}}}));
   await diagnosticsDialog.getByRole('button',{name:'Copy diagnostics',exact:true}).click();
-  assert.equal(await page.evaluate(()=>JSON.parse(window.copiedDiagnostics).checks.hlae.exitCode),7);
+  assert.equal(await page.evaluate(()=>JSON.parse(window.copiedDiagnostics).tools.hlae.lastCheck.exitCode),7);
+  assert.equal(await page.evaluate(()=>JSON.parse(window.copiedDiagnostics).tools.hlae.cache),'valid');
+  assert.equal(await toolCheckCalls(), checksBeforeDiagnostics, 'Generating and copying diagnostics reuses cached checks without running verification');
   await diagnosticsDialog.getByRole('button',{name:'Close',exact:true}).click();
   await page.evaluate(()=>{delete window.toolChecks;});
   await settingsPage.getByRole('button',{name:'Check again',exact:true}).click();
@@ -942,8 +953,10 @@ try {
   await page.getByRole('button',{name:'Settings',exact:true}).click();
   await page.evaluate(() => { delete window.setupState.vrf; delete window.toolPaths.vrfExe; });
   await page.evaluate(() => { window.holdListener = true; });
+  const checksBeforeReentry = await toolCheckCalls();
   await page.getByRole('button',{name:'Settings',exact:true}).click();
   await page.getByRole('button', {name:'Download: Source 2 Viewer CLI',exact:true}).waitFor();
+  assert.equal(await toolCheckCalls(), checksBeforeReentry, 'Reentering Settings does not run tool verification');
   assert.equal(await page.locator('.driver-popover').count(), 0, 'Ordinary settings navigation does not replay guidance');
   assert.equal(await page.locator('.demo-item.active, .demo-item[aria-pressed="true"]').count(), 0, 'Settings does not mark a demo as active');
   await page.getByRole('button',{name:'Settings',exact:true}).click();
@@ -1008,12 +1021,14 @@ try {
   assert.equal(logSize.width, downloadSize.width);
   assert.equal(logSize.height, downloadSize.height);
   const storageCallsBeforeProgress = await page.evaluate(() => window.testCalls.filter(c => c.cmd === 'get_storage_bytes').length);
+  const checksBeforeProgress = await toolCheckCalls();
   await page.evaluate(() => window.emitTestEvent({type:'setup-progress',tool:'hlae',progress:'9.2 / 185.4 MB (5%)'}));
   await downloadLog.getByText('9.2 / 185.4 MB (5%)',{exact:true}).waitFor();
   await page.evaluate(() => window.emitTestEvent({type:'setup-progress',tool:'hlae',progress:'18.5 / 185.4 MB (10%)'}));
   await downloadLog.getByText('18.5 / 185.4 MB (10%)',{exact:true}).waitFor();
   assert.equal((await downloadLog.boundingBox()).height, (await cancelHlae.boundingBox()).height, 'Progress and download buttons have the same height');
   assert.equal(await page.evaluate(() => window.testCalls.filter(c => c.cmd === 'get_storage_bytes').length), storageCallsBeforeProgress, 'Progress updates must not rescan storage');
+  assert.equal(await toolCheckCalls(), checksBeforeProgress, 'Download progress does not run tool verification');
   const ffmpegDownload = page.getByRole('button',{name:'Download: FFmpeg',exact:true});
   assert.equal(await ffmpegDownload.isDisabled(), false, 'Other tools remain downloadable');
   await ffmpegDownload.click();
@@ -1103,6 +1118,26 @@ try {
     assert.deepEqual(await page.evaluate(() => window.testCalls.filter(c => c.cmd === 'run_setup').at(-1).args), {tool,force:true,directory:null});
     await dialog.getByRole('button', {name:'Close',exact:true}).click();
   }
+  {
+    const pathLabels = ['Steam install folder', 'CS2 install folder', 'HLAE', 'FFmpeg', 'Source 2 Viewer CLI'];
+    for (const [index, label] of pathLabels.entries()) {
+      const checksBeforeSave = await toolCheckCalls();
+      await page.getByLabel(label, {exact:true}).fill('E:/custom/tool-' + index);
+      assert.equal(await toolCheckCalls(), checksBeforeSave, 'Unsaved path edits do not run tool verification');
+      await page.getByRole('button', {name:'Save',exact:true}).click();
+      await page.getByRole('button', {name:'Save',exact:true,disabled:true}).waitFor();
+      assert.equal(await toolCheckCalls(), checksBeforeSave + 1, 'Saving a changed ' + label + ' runs tool verification once');
+    }
+    const checksBeforeUnrelatedSave = await toolCheckCalls();
+    await page.getByRole('switch', {name:'Scan game replays',exact:true}).click();
+    await page.getByRole('button', {name:'Save',exact:true}).click();
+    await page.getByRole('button', {name:'Save',exact:true,disabled:true}).waitFor();
+    assert.equal(await toolCheckCalls(), checksBeforeUnrelatedSave, 'Saving an unrelated setting leaves unchanged tool paths unverified');
+    for (const label of pathLabels) await page.getByLabel(label, {exact:true}).fill('');
+    await page.getByRole('button', {name:'Save',exact:true}).click();
+    await page.getByRole('button', {name:'Save',exact:true,disabled:true}).waitFor();
+    assert.equal(await toolCheckCalls(), checksBeforeUnrelatedSave + 1, 'Clearing saved paths runs tool verification once');
+  }
   const hlaeField = page.locator('.tool-field').filter({has:page.getByLabel('HLAE',{exact:true})});
   await hlaeField.getByRole('button',{name:'Show in Explorer',exact:true}).click();
   assert.equal(await page.evaluate(() => window.openedPath), 'E:/tools');
@@ -1123,13 +1158,13 @@ try {
   assert.equal(await page.getByRole('alertdialog').count(),0,'Editing multiple paths does not ask for confirmation');
   await page.getByRole('button',{name:'Save',exact:true}).click();
   const changeDialog=page.getByRole('alertdialog');
-  await changeDialog.getByText(/Old files will be kept/).waitFor();
+  await changeDialog.getByText(/old files are kept/).waitFor();
   await changeDialog.getByRole('button',{name:'Cancel',exact:true}).click();
   assert.equal(await saveCalls(),beforeSave,'Cancelling confirmation does not submit settings');
   await page.getByRole('button',{name:'Save',exact:true}).click();
   await changeDialog.getByRole('button',{name:'Save',exact:true}).click();
   await changeDialog.waitFor({state:'hidden'});
-  await page.getByText('Restart the app to use the selected data directory. Storage actions below still use the current directory.',{exact:true}).first().waitFor();
+  await page.getByText('Restart the app to use the new folder. Storage actions below still use the old folder.',{exact:true}).first().waitFor();
   const submitted=await page.evaluate(()=>window.testCalls.filter(c=>c.cmd==='save_settings').at(-1).args);
   assert.equal(submitted.dataDirOverride,'E:/new-data');
   assert.equal(submitted.settings.hlaeExe,'E:/custom/hlae','The same save includes the edited tool path');
@@ -1177,6 +1212,7 @@ try {
   await page.evaluate(()=>localStorage.removeItem('test.playerNames'));
   await page.getByRole('tab',{name:'Match anomalies',exact:true}).click();
   const scorePanel=page.getByRole('tabpanel');
+  const analysisNotice = scorePanel.getByText('Statistics are for reference, not a cheating verdict. Concealed cheats may show no anomalies; no anomalies does not mean no cheating.', {exact:true});
   const scoreButton=scorePanel.locator('button[aria-busy]');
   const clearAnomalies = async () => {
     await page.locator('.demo-heading').getByRole('button',{name:'More',exact:true}).click();
@@ -1191,6 +1227,9 @@ try {
   const behaviorCount = (id,rule='aim-snap') => scoreRow(id).locator('[data-rule-count="'+rule+'"]');
   assert.equal(await scorePanel.getByRole('combobox',{name:'Player',exact:true}).count(),0,'No player selector hides the roster');
   assert.equal(await scorePanel.getByRole('table').count(),0,'No empty roster table before analysis');
+  await analysisNotice.waitFor();
+  const emptyAnalysisLayout = await analysisNotice.evaluate(el => { const note = el.getBoundingClientRect(); const button = el.parentElement.querySelector('button[aria-busy]').getBoundingClientRect(); return { above: note.bottom <= button.top, aligned: Math.abs(note.left - button.left) < 1 }; });
+  assert.deepEqual(emptyAnalysisLayout, {above:true,aligned:true}, 'Empty analysis shows left-aligned guidance above the action');
   assert.equal(await scorePanel.getByRole('button',{name:'Details',exact:true}).count(),0,'No disabled details buttons without data');
   const scoringListenerBaseline=await page.evaluate(()=>window.testListenerCount());
   await page.evaluate(()=>{window.holdScore=true;window.holdQueued=true;});
@@ -1222,6 +1261,7 @@ try {
   await scorePanel.getByRole('status').filter({hasText:'Step 2 / 3'}).waitFor();
   await page.evaluate(()=>window.analysisStep(window.analysisJobs[0],3));
   await scorePanel.getByRole('status').filter({hasText:'Step 3 / 3'}).waitFor();
+  await analysisNotice.waitFor();
   await page.evaluate(()=>{window.holdScore=false;window.releaseScore();});
   await page.waitForFunction(count=>window.testListenerCount()===count,scoringListenerBaseline);
   await scoreRow('1').waitFor();
@@ -1230,6 +1270,8 @@ try {
   assert.equal(await behaviorCount('2','aim-linear-acquisition').innerText(),'1','Independent aligned rule columns');
   assert.equal(await behaviorCount('1','aim-linear-acquisition').count(),0,'Unobserved behavior is omitted per player');
   assert.equal(await scorePanel.getByRole('columnheader').count(),3,'Only player, observed behaviors, and details');
+  await analysisNotice.waitFor();
+  assert.ok(await analysisNotice.evaluate(el => el.getBoundingClientRect().bottom <= el.nextElementSibling.getBoundingClientRect().top), 'Analysis notice sits above the result table');
   assert.equal(await scorePanel.getByRole('columnheader',{name:'Empty behavior',exact:true}).count(),0,'Globally empty rules are omitted');
   assert.equal(await scorePanel.locator('[data-rule-count="view-angle-oscillation"]').count(),0,'Unavailable rule is not an event column');
   assert.equal(await scorePanel.getByText('No occurrences',{exact:true}).count(),0,'No repetitive empty-result list');
@@ -1281,6 +1323,7 @@ try {
   assert.equal(await scoreRow('1').getByRole('button',{name:'Export',exact:true}).count(),0,'No export action without occurrences');
   await scoreRow('2').getByRole('button',{name:'Export',exact:true}).click();
   const behaviorExport=page.getByRole('dialog');
+  await behaviorExport.getByText('Select rules', {exact:true}).waitFor();
   assert.equal(await behaviorExport.locator('button[aria-pressed]').count(),4,'Only observed rules can be exported');
   assert.equal(await behaviorExport.getByRole('button',{name:'Export',exact:true}).isDisabled(),true);
   await behaviorExport.evaluate(el=>Promise.all(el.getAnimations().map(animation=>animation.finished)));
@@ -1300,12 +1343,23 @@ try {
   assert.ok(Math.abs(settledBounds.y-exportBounds.y)<1 && Math.abs(settledBounds.height-exportBounds.height)<1,'Resolved rule preview must retain dialog position and height');
   const mergeRules=behaviorExport.getByRole('switch',{name:'Merge different rules',exact:true});
   assert.equal(await mergeRules.isChecked(),false,'Different rules stay separate by default');
+  await behaviorExport.getByText('2 clips - about 10 s', {exact:true}).waitFor();
   await page.evaluate(()=>window.failExport=true);
   await behaviorExport.getByRole('button',{name:'Export',exact:true}).click();
   await behaviorExport.getByRole('alert').filter({hasText:'Cannot queue export'}).waitFor();
   assert.equal(await behaviorExport.getByRole('button',{name:/Instant acquisition/}).getAttribute('aria-pressed'),'true','Failed enqueue retains selection');
   assert.equal(await page.evaluate(()=>window.testCalls.findLast(call=>call.cmd==='start_analysis_render').args.options.merge),false);
+  await page.evaluate(()=>window.holdClipPreview=true);
   await mergeRules.click();
+  await page.waitForFunction(()=>window.releaseClipPreviews?.length>0);
+  assert.equal(await behaviorExport.getByRole('button',{name:'Export',exact:true}).isDisabled(),true,'Changing merge mode waits for its preview');
+  assert.equal(await page.evaluate(()=>window.testCalls.findLast(call=>call.cmd==='analysis_clips').args.merge),true);
+  await page.evaluate(()=>{window.holdClipPreview=false;window.releaseClipPreviews.splice(0).forEach(resolve=>resolve());});
+  await behaviorExport.getByText('1 clips - about 5 s', {exact:true}).waitFor();
+  await mergeRules.click();
+  await behaviorExport.getByText('2 clips - about 10 s', {exact:true}).waitFor();
+  await mergeRules.click();
+  await behaviorExport.getByText('1 clips - about 5 s', {exact:true}).waitFor();
   await page.evaluate(()=>window.failExport=false);
   await behaviorExport.getByRole('button',{name:'Export',exact:true}).click();
   await behaviorExport.waitFor({state:'hidden'});
@@ -1360,6 +1414,7 @@ try {
   await behaviorCount('2').filter({hasText:/^1$/}).waitFor();
   assert.equal(await scorePanel.getByRole('button',{name:'Reanalyze',exact:true}).count(),0);
   assert.equal(await scoreButton.count(),0,'Reloaded results have no analysis button');
+  await analysisNotice.waitFor();
   assert.equal(await scorePanel.getByText('Completed',{exact:true}).count(),0,'Saved results need no completed label');
   assert.equal(await scorePanel.getByRole('button',{name:'Delete data',exact:true}).count(),0,'Deletion is centralized in the demo menu');
 
@@ -1384,6 +1439,7 @@ try {
   await scorePanel.getByRole('button',{name:'Analyze',exact:true}).waitFor();
   assert.equal(await page.evaluate(()=>window.clearMatchCalls),1,'Deletes only match anomaly data');
   assert.equal(await scorePanel.getByRole('table').count(),0,'Deleted data disappears immediately');
+  await analysisNotice.waitFor();
   await page.locator('.demo-heading').getByRole('button',{name:'More',exact:true}).click();
   assert.equal(await page.getByRole('menuitem',{name:'Delete anomaly data',exact:true}).getAttribute('aria-disabled'),'true','No analysis disables deletion');
   await page.keyboard.press('Escape');
@@ -1402,6 +1458,29 @@ try {
   await page.waitForFunction(()=>document.querySelector('.demo-tabs [role=tab]:last-child').getAttribute('aria-selected')==='true');
   await page.setViewportSize({width:2200,height:940});
   assert.ok(await page.locator('.demo-tabs .demo-tab-label').evaluateAll(labels=>labels.every(label=>getComputedStyle(label).display!=='none')),'Wide tabs restore their labels');
+  await page.getByRole('button', {name:'Settings',exact:true}).click();
+  for (const [language, label] of [['zh-TW','繁體中文'],['zh-CN','简体中文'],['ja','日本語'],['ko','한국어'],['ru','Русский'],['en','English']]) {
+    const locale = JSON.parse(await readFile(new URL('../src/i18n/locales/' + language + '.json', import.meta.url), 'utf8'));
+    await page.locator('.settings-page').getByRole('combobox').click();
+    await page.getByRole('option', {name:label,exact:true}).click();
+    await page.locator('.settings-page > .rt-Flex button').first().click();
+    await page.getByRole('button', {name:locale.common.save,exact:true,disabled:true}).waitFor();
+    await page.evaluate(() => { window.previewSettingsError = 'The old and new data directories must not contain one another.'; });
+    const savesBeforeError = await page.evaluate(() => window.testCalls.filter(c => c.cmd === 'save_settings').length);
+    await page.getByLabel(locale.settings.dataDir, {exact:true}).fill('E:/data/nested');
+    await page.getByRole('button', {name:locale.common.save,exact:true}).click();
+    await page.getByText(locale.errors['data-directories-overlap'], {exact:true}).waitFor();
+    assert.equal(await page.evaluate(() => window.testCalls.filter(c => c.cmd === 'save_settings').length), savesBeforeError, 'Rejected directory changes are not saved');
+    await page.evaluate(() => { window.previewSettingsError = 'cs2.exe is already running — close the game first'; });
+    await page.getByRole('button', {name:locale.common.save,exact:true}).click();
+    await page.getByText(locale.errors['cs2-already-running'], {exact:true}).waitFor();
+    await page.evaluate(() => { delete window.previewSettingsError; });
+    await page.getByLabel(locale.settings.dataDir, {exact:true}).fill('');
+  }
+  await page.evaluate(() => { window.previewSettingsError = 'Unrecognized filesystem error: E:/data'; });
+  await page.getByLabel('Data directory', {exact:true}).fill('E:/data/nested');
+  await page.getByRole('button', {name:'Save',exact:true}).click();
+  await page.getByText('Unrecognized filesystem error: E:/data', {exact:true}).waitFor();
   assert.deepEqual(errors,[]);
   console.log('UI checks passed: virtual lists, lazy demo reads, content-sized tabs, themes, charts, filters, queue jump, settings.');
 } finally { await browser.close(); await new Promise(resolve => server.httpServer.close(resolve)); }

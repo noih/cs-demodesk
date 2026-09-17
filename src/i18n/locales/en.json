@@ -1,5 +1,7 @@
 {
   "errors": {
+    "cs2-already-running": "CS2 is running. Close the game first.",
+    "data-directories-overlap": "The new data folder cannot be inside the current data folder or contain it. Choose a separate folder.",
     "app-closed": "Job interrupted because the app was closed"
   },
   "startup": {
@@ -255,6 +257,7 @@
     "dialogTitle": "Export video",
     "summary": "{{n}} clips - about {{seconds}} s",
     "mergeRules": "Merge different rules",
+    "selectRulesHint": "Select rules",
     "merge": "Merge into one video",
     "sizeLimit": "File size limit",
     "sizeMerged": " (merged file)",
@@ -472,10 +475,10 @@
     "setupLogEmpty": "(waiting for output...)",
     "dataDir": "Data directory",
     "dataDirHint": "Confirm when saving. Restart the app yourself to apply the new data folder; old files are kept.",
-    "restartRequired": "Restart the app to use the selected data directory. Storage actions below still use the current directory.",
+    "restartRequired": "Restart the app to use the new folder. Storage actions below still use the old folder.",
     "autoParseHint": "New demos in these folders are parsed automatically. Failed demos can be retried manually.",
     "changeDataTitle": "Change data folder?",
-    "changeDataConfirm": "Existing analysis will not appear in the new location and will need to be rebuilt. Old files will be kept. The change takes effect after you restart the app. Save these changes?"
+    "changeDataConfirm": "Takes effect after restarting the app. Analysis must be rebuilt in the new folder; old files are kept. Save?"
   },
   "ui": {
     "fontSize": "Text size",
@@ -535,7 +538,7 @@
     "title": "Match anomalies",
     "rescore": "Analyze again",
     "history": "Analysis history",
-    "explanation": "Counts show observed behavior in this match. Review the evidence and judge for yourself.",
+    "explanation": "Statistics are for reference, not a cheating verdict. Concealed cheats may show no anomalies; no anomalies does not mean no cheating.",
     "loading": "Analyzing the whole match for all players…",
     "failed": "Analysis failed; retry",
     "unavailable": "Insufficient data",

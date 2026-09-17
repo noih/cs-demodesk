@@ -118,6 +118,41 @@ pub fn build(
     Ok(groups)
 }
 
+pub fn merge(mut groups: Vec<RuleClips>) -> Vec<RuleClips> {
+    if groups.len() < 2 {
+        return groups;
+    }
+    let mut combined = groups.remove(0);
+    for group in groups {
+        combined.rule_id.push('+');
+        combined.rule_id.push_str(&group.rule_id);
+        combined.title.push_str(" / ");
+        combined.title.push_str(&group.title);
+        combined.highlights.extend(group.highlights);
+    }
+    let mut clips = std::mem::take(&mut combined.highlights);
+    clips.sort_by_key(|h| (h.round, h.start_tick, h.end_tick));
+    for clip in clips {
+        if let Some(last) = combined.highlights.last_mut() {
+            if last.round == clip.round
+                && last.player.steamid == clip.player.steamid
+                && clip.start_tick <= last.end_tick
+            {
+                last.end_tick = last.end_tick.max(clip.end_tick);
+                last.anchor_tick = last.anchor_tick.min(clip.anchor_tick);
+                for tag in clip.tags {
+                    if !last.tags.contains(&tag) {
+                        last.tags.push(tag);
+                    }
+                }
+                continue;
+            }
+        }
+        combined.highlights.push(clip);
+    }
+    vec![combined]
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
@@ -176,6 +211,68 @@ pub(crate) mod tests {
         assert_eq!(saved.analysis_clips.unwrap().highlights.len(), 6);
         assert!(build(&record, &demo, 6400, &["unknown".into()]).is_err());
     }
+    #[test]
+    fn cross_rule_merge_unions_duplicate_nested_and_chained_windows() {
+        let (record, demo) = fixture();
+        let template = build(&record, &demo, 6400, &["jump".into()])
+            .unwrap()
+            .remove(0);
+        let group = |rule: &str, windows: &[(i32, i32, i32)]| {
+            let mut group = template.clone();
+            group.rule_id = rule.into();
+            group.highlights = windows
+                .iter()
+                .enumerate()
+                .map(|(index, &(round, start, end))| {
+                    let mut clip = template.highlights[0].clone();
+                    clip.id = format!("{rule}-{index}");
+                    clip.round = round;
+                    clip.start_tick = start;
+                    clip.end_tick = end;
+                    clip.anchor_tick = start;
+                    clip.tags = vec![rule.into()];
+                    clip
+                })
+                .collect();
+            group
+        };
+        let groups = vec![
+            group("first", &[(1, 400, 450), (1, 100, 200)]),
+            group(
+                "second",
+                &[
+                    (1, 100, 200),
+                    (1, 150, 175),
+                    (1, 180, 300),
+                    (1, 300, 350),
+                    (2, 300, 350),
+                ],
+            ),
+        ];
+        let merged = merge(groups.clone()).remove(0);
+        assert_eq!(
+            merged
+                .highlights
+                .iter()
+                .map(|h| (h.round, h.start_tick, h.end_tick))
+                .collect::<Vec<_>>(),
+            [(1, 100, 350), (1, 400, 450), (2, 300, 350)]
+        );
+        assert_eq!(merged.highlights[0].tags, ["first", "second"]);
+        assert_eq!(merged.highlights[0].anchor_tick, 100);
+        let mut other_player = groups[1].clone();
+        other_player.highlights.truncate(1);
+        other_player.highlights[0].player.steamid = "2".into();
+        assert_eq!(
+            merge(vec![groups[0].clone(), other_player])[0]
+                .highlights
+                .len(),
+            3
+        );
+        assert!(merge(vec![]).is_empty());
+        assert_eq!(merge(vec![groups[0].clone()])[0].highlights.len(), 2);
+    }
+
     #[test]
     fn clamps_recording_boundaries_and_rejects_invalid_intervals() {
         let (mut record, demo) = fixture();

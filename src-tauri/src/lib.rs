@@ -327,9 +327,20 @@ async fn check_tools(
 }
 
 #[tauri::command]
-async fn tool_diagnostics(engine: State<'_, Eng>) -> CmdResult<String> {
-    blocking(&engine, |e| {
-        serde_json::to_string_pretty(&e.tool_diagnostics()).map_err(err)
+async fn tool_diagnostics(
+    engine: State<'_, Eng>,
+    directory: State<'_, Directory>,
+) -> CmdResult<String> {
+    let directory = directory.inner().clone();
+    blocking(&engine, move |e| {
+        let mut report = e.tool_diagnostics();
+        let selected = directory
+            .selected()
+            .unwrap_or_else(|| directory.default.clone());
+        if directory.changes(&selected) {
+            report["pendingDataDirectory"] = serde_json::json!(selected);
+        }
+        serde_json::to_string_pretty(&report).map_err(err)
     })
     .await
 }
@@ -457,9 +468,11 @@ async fn analysis_clips(
     engine: State<'_, Eng>,
     demo_id: String,
     selection: demodesk_core::scoring::clips::Selection,
+    merge: Option<bool>,
 ) -> CmdResult<Vec<demodesk_core::scoring::clips::RuleClips>> {
     blocking(&engine, move |e| {
-        e.analysis_clips(&demo_id, &selection).map_err(err)
+        e.analysis_clips(&demo_id, &selection, merge.unwrap_or(false))
+            .map_err(err)
     })
     .await
 }

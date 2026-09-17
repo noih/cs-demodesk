@@ -1,5 +1,7 @@
 {
   "errors": {
+    "cs2-already-running": "CS2 正在執行，請先關閉遊戲。",
+    "data-directories-overlap": "新資料目錄不能位於目前資料目錄內，也不能是它的上層目錄。請選擇彼此獨立的資料夾。",
     "app-closed": "工作因程式關閉而中斷"
   },
   "startup": {
@@ -251,6 +253,7 @@
     "dialogTitle": "輸出影片",
     "summary": "{{n}} 段 · 約 {{seconds}} 秒",
     "mergeRules": "合併不同規則",
+    "selectRulesHint": "選擇規則",
     "merge": "合併成一支影片",
     "sizeLimit": "檔案大小上限",
     "sizeMerged": "（合併後）",
@@ -468,10 +471,10 @@
     "setupLogEmpty": "（等待輸出…）",
     "dataDir": "資料目錄",
     "dataDirHint": "按儲存時確認，手動重新啟動 App 後才會使用新資料目錄；舊檔案會保留。",
-    "restartRequired": "請重新啟動 app 以使用選定的資料目錄。下方儲存空間操作仍使用目前目錄。",
+    "restartRequired": "請重啟 App 以使用新目錄。下方儲存空間操作仍使用舊目錄。",
     "autoParseHint": "來源目錄中的新 Demo 會自動解析；失敗項目可手動重試。",
     "changeDataTitle": "更換資料目錄？",
-    "changeDataConfirm": "切換後，新位置將不會顯示既有分析資料，需要重新建立。舊檔案會保留。設定將在您重新啟動 App 後生效，確定儲存？"
+    "changeDataConfirm": "重啟 App 後生效。新目錄需重新建立分析資料，舊檔案會保留。確定儲存？"
   },
   "ui": {
     "fontSize": "字級",
@@ -531,7 +534,7 @@
     "title": "異常數據",
     "rescore": "重新分析",
     "history": "分析歷史",
-    "explanation": "次數代表本場觀察到的行為，請查看證據自行判斷。",
+    "explanation": "數據僅供參考，不是作弊判定。刻意掩飾的外掛可能沒有異常，無異常也不代表未作弊。",
     "loading": "正在分析整場所有玩家…",
     "failed": "分析失敗，可重試",
     "unavailable": "資料不足",

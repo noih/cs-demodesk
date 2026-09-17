@@ -73,6 +73,4 @@ export function translateRenderStage(stage: string): string {
   return `${i18n.t(`renders.stage.${phase}`)}${count ? ` ${count}` : ''}${detail && isKey(detail) ? ` · ${i18n.t(`renders.stage.${detail}`)}` : ''}`;
 }
 
-export function translateError(error: string | null | undefined, code?: string): string {
-  return code && Object.hasOwn(en.errors, code) ? i18n.t(`errors.${code as keyof typeof en.errors}`) : error ?? '';
-}
+export { translateError } from '../errorCodes.ts';

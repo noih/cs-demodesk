@@ -1,5 +1,7 @@
 {
   "errors": {
+    "cs2-already-running": "CS2 正在运行，请先关闭游戏。",
+    "data-directories-overlap": "新数据目录不能位于当前数据目录内，也不能是它的上级目录。请选择彼此独立的文件夹。",
     "app-closed": "任务因程序关闭而中断"
   },
   "startup": {
@@ -251,6 +253,7 @@
     "dialogTitle": "输出视频",
     "summary": "{{n}} 段 · 约 {{seconds}} 秒",
     "mergeRules": "合并不同规则",
+    "selectRulesHint": "选择规则",
     "merge": "合并为一个视频",
     "sizeLimit": "文件大小上限",
     "sizeMerged": "（合并后）",
@@ -468,10 +471,10 @@
     "setupLogEmpty": "（等待输出…）",
     "dataDir": "数据目录",
     "dataDirHint": "点击保存时确认，手动重新启动 App 后才会使用新数据目录；旧文件会保留。",
-    "restartRequired": "请重启应用以使用所选数据目录。下方存储空间操作仍使用当前目录。",
+    "restartRequired": "请重启 App 以使用新目录。下方存储空间操作仍使用旧目录。",
     "autoParseHint": "来源目录中的新 Demo 会自动解析；失败项目可手动重试。",
     "changeDataTitle": "更换数据目录？",
-    "changeDataConfirm": "切换后，新位置将不会显示已有分析数据，需要重新建立。旧文件会保留。设置将在您重新启动 App 后生效，确定保存？"
+    "changeDataConfirm": "重启 App 后生效。新目录需重新建立分析数据，旧文件会保留。确定保存？"
   },
   "ui": {
     "fontSize": "字号",
@@ -531,7 +534,7 @@
     "title": "异常数据",
     "rescore": "重新分析",
     "history": "分析历史",
-    "explanation": "次数代表本场观察到的行为，请查看证据自行判断。",
+    "explanation": "数据仅供参考，不是作弊判定。刻意掩饰的外挂可能没有异常，无异常也不代表未作弊。",
     "loading": "正在分析整场所有玩家…",
     "failed": "分析失败，可重试",
     "unavailable": "数据不足",

@@ -17,18 +17,20 @@ export function AnalysisExport({record,status,onSetup,onRendered}: {record:Asses
     let alive=true;setError(undefined);
     if(!open||!rules.length){setGroups([]);setLoading(false);return;}
     setLoading(true);
-    void api.analysisClips(record.demoId,{playerId:record.playerId,assessmentId:record.id,ruleIds:rules})
+    void api.analysisClips(record.demoId,{playerId:record.playerId,assessmentId:record.id,ruleIds:rules},mergeRules)
       .then(groups=>{if(alive)setGroups(groups);}).catch(error=>{if(alive)setError(errorText(error));}).finally(()=>{if(alive)setLoading(false);});
     return ()=>{alive=false;};
-  },[open,rules,record.demoId,record.playerId,record.id]);
+  },[open,rules,mergeRules,record.demoId,record.playerId,record.id]);
   if(!observed.length)return null;
   const clips=groups.flatMap(group=>group.highlights);
+  const expectedGroups=mergeRules && rules.length>1 ? [rules.join('+')] : rules;
   return <>
     <Button variant="outline" onClick={()=>{setRules([]);setMergeRules(false);setOpen(true);}}>{t('highlights.export')}</Button>
     <ExportDialog open={open} onOpenChange={setOpen} count={clips.length} seconds={clips.reduce((sum,h)=>sum+(h.endTick-h.startTick)/record.tickRate,0)}
-      status={status} onSetup={onSetup} onSubmitted={onRendered} forceMerge disabled={loading||!!error||!groups.length||groups.length!==rules.length||groups.some(group=>!rules.includes(group.ruleId))}
+      status={status} onSetup={onSetup} onSubmitted={onRendered} forceMerge disabled={loading||!!error||!groups.length||groups.length!==expectedGroups.length||groups.some(group=>!expectedGroups.includes(group.ruleId))}
       onSubmit={options=>api.renderAnalysis(record.demoId,{playerId:record.playerId,assessmentId:record.id,ruleIds:rules},{...options,merge:mergeRules})}>
       <Flex direction="column" gap="3" mt="3">
+        <Text size="2" color="gray">{t('highlights.selectRulesHint')}</Text>
         <Flex wrap="wrap" gap="2" aria-busy={loading}>{observed.map(check=><Button key={check.definition.id} type="button" aria-pressed={rules.includes(check.definition.id)}
           color={rules.includes(check.definition.id)?undefined:'gray'} variant={rules.includes(check.definition.id)?'solid':'outline'}
           onClick={()=>setRules(previous=>previous.includes(check.definition.id)?previous.filter(id=>id!==check.definition.id):[...previous,check.definition.id])}>

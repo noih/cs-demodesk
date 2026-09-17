@@ -38,8 +38,10 @@ clips, and existing tool directories. Failures identify the path through the
 existing startup recovery screen or settings error. This checks app access, not
 whether Windows allows a downloaded executable to initialize.
 
-Settings separately verifies executable startup on entry, after saving paths,
-and after each tool installation. HLAE uses `-customLoader -noGui -noConfig`,
+Settings verifies executable startup after saved game or tool paths change,
+after each tool installation, and on Check again. Opening Settings reuses cached
+results; saving unrelated settings does not rerun verification.
+HLAE uses `-customLoader -noGui -noConfig`,
 Source 2 Viewer uses `--version`, and FFmpeg uses `-version`. Checks have a
 10-second deadline and capture up to 16 KiB per output stream. Windows uses the
 same owned process tree as rendering, so timed-out probes and their children are
@@ -48,11 +50,20 @@ Unverified and failed tools do not show the ready status in Settings. Cached
 results are invalidated when the executable or required companion file changes
 or disappears; Check again reruns the probes without downloading anything.
 
-Diagnostics shows a reviewable report with app/package identity, Windows build,
-.NET Framework release, configured/resolved paths, check times, exit codes,
-captured output and download errors. Copying is explicit; reports are neither
-uploaded nor persisted. Paths can contain usernames. Re-download uses the existing
-tool download button; alternate tool locations use Browse and Save.
+Diagnostics shows a compact, timestamped snapshot: app/package identity, Windows
+build and .NET Framework release, active/pending data directory, configured/resolved
+paths, missing tools, and tool check/download state. Each tool reports its session
+cache as `missing` (not checked this session), `valid` (matches current files, even
+if the check failed), or `stale` (path or required files changed). Last check times,
+results and failure output remain available; restarting clears the tool cache.
+
+Activity summarizes the latest known parsing state, current analysis/export jobs,
+and recent failures with their stage, error and short export log tail when available.
+Analysis jobs belong to the current session. Generating diagnostics does not run
+tool checks, rescan demos, measure cache folders, or include full analysis results.
+Copying is explicit; reports are neither uploaded nor persisted. Paths can contain
+usernames. Re-download uses the existing tool download button; alternate tool
+locations use Browse and Save.
 
 `cargo test -p demodesk-core --lib diagnostics` exercises failed executables,
 missing companion files, deleted files, output limits and hung processes.

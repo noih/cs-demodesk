@@ -1,4 +1,4 @@
-import type { ErrorCode } from './errorCodes.ts';
+import { translateError, type ErrorCode } from './errorCodes.ts';
 import { invoke, convertFileSrc } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 
@@ -462,7 +462,7 @@ export const api = {
   clearAllAnalysis: () => invoke<number>('clear_all_analysis'),
   clearAllClips: () => invoke<number>('clear_all_clips'),
   removeDemo: (id: string) => invoke<void>('remove_demo', { id }),
-  analysisClips: (demoId:string,selection:AnalysisClipSelection)=>invoke<RuleClips[]>('analysis_clips',{demoId,selection}),
+  analysisClips: (demoId:string,selection:AnalysisClipSelection,merge=false)=>invoke<RuleClips[]>('analysis_clips',{demoId,selection,merge}),
   renderAnalysis: (demoId:string,selection:AnalysisClipSelection,options:RenderOptions)=>invoke<RenderJob[]>('start_analysis_render',{demoId,selection,options}),
   render: (demoId: string, highlightIds: string[], options: RenderOptions) => invoke<RenderJob>('start_render', { demoId, highlightIds, options }),
   jobs: () => invoke<RenderJob[]>('list_jobs'),
@@ -482,4 +482,4 @@ export const mmss = (seconds: number): string => {
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 };
 export const clock = (ticks: number, tickRate: number): string => mmss(ticks / tickRate);
-export const errorText = (e: unknown): string => (e instanceof Error ? e.message : typeof e === 'string' ? e : JSON.stringify(e));
+export const errorText = (e: unknown): string => translateError(e instanceof Error ? e.message : typeof e === 'string' ? e : JSON.stringify(e));

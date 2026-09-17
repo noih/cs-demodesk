@@ -199,16 +199,11 @@ export function SettingsView({ onChanged, toolsRequest = 0, toolsTarget = 'rende
   useEffect(() => {
     let disposed = false;
     load()
-      .then(async (r) => {
+      .then((r) => {
         if (disposed) return;
         setForm(r.settings); setDataDirOverride(r.dataDirOverride ?? '');
-        setChecking(true);
-        const verified = await api.checkTools();
-        if (!disposed) setData(verified);
       })
-      .catch((e) => { if (!disposed) setMessage({ ok: false, text: errorText(e) }); })
-      .finally(() => { if (!disposed) setChecking(false); });
-    // Verification runs on entry, never on progress updates.
+      .catch((e) => { if (!disposed) setMessage({ ok: false, text: errorText(e) }); });
     let unlisten: (() => void) | undefined;
     void api
       .onEvent((ev) => {
@@ -247,8 +242,10 @@ export function SettingsView({ onChanged, toolsRequest = 0, toolsTarget = 'rende
       // t() is still bound to the old language here; say it in the one just saved
       setMessage({ ok: true, text: t('settings.saved', { lng: r.settings.language ?? detectLanguage() }) });
       await onChanged();
-      setChecking(true);
-      setData(await api.checkTools());
+      if ((['steamDir', 'cs2Dir', 'hlaeExe', 'ffmpegExe', 'vrfExe'] as const).some(key => r.settings[key] !== data.settings[key])) {
+        setChecking(true);
+        setData(await api.checkTools());
+      }
     } catch (e) {
       setMessage({ ok: false, text: errorText(e) });
     } finally {

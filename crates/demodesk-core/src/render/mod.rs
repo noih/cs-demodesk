@@ -503,7 +503,7 @@ pub fn render_highlights(input: RenderJobInput) -> Result<RenderResult> {
         // One video: the size limit applies to the joined file; the per-clip files are intermediates.
         let merged = output_dir.join(format!("highlights.{}", o.container));
         stage("encoding: merging");
-        // Record chronologically, then restore rule groups for the final video.
+        // Restore the saved analysis clip order for the final video.
         if preserve_merge_order {
             muxed = merge_order
                 .iter()
