@@ -91,11 +91,6 @@ function JobCard({ job, parsed, onChanged }: { job: RenderJob; parsed: ParsedDem
               <Text size="2" color="amber">
                 {job.stage ? translateRenderStage(job.stage) : job.status === 'queued' ? t('renders.waitingPrevious') : t('renders.starting')}
               </Text>
-              {job.log.length > 0 && (
-                <Text size="1" color="gray" truncate style={{ maxWidth: 520 }}>
-                  {job.log[job.log.length - 1]}
-                </Text>
-              )}
             </Flex>
             <Text size="1" color="gray">
               {duration(job, t, now)}

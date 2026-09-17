@@ -1534,7 +1534,7 @@ impl Engine {
             .ok_or_else(|| anyhow!("demo timeline unavailable"))?;
         let groups = crate::scoring::clips::build(&record, &parsed.info, end, &selection.rule_ids)?;
         Ok(if merge {
-            crate::scoring::clips::merge(groups)
+            crate::scoring::clips::merge(groups, parsed.info.tick_rate)
         } else {
             groups
         })

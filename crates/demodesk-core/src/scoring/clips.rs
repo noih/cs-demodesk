@@ -112,13 +112,13 @@ pub fn build(
             rule_id: id.clone(),
             title,
             demo_fingerprint: record.demo_fingerprint.clone(),
-            highlights,
+            highlights: crate::render::merge_nearby_clips(highlights, demo.tick_rate),
         });
     }
     Ok(groups)
 }
 
-pub fn merge(mut groups: Vec<RuleClips>) -> Vec<RuleClips> {
+pub fn merge(mut groups: Vec<RuleClips>, tick_rate: f64) -> Vec<RuleClips> {
     if groups.len() < 2 {
         return groups;
     }
@@ -130,26 +130,7 @@ pub fn merge(mut groups: Vec<RuleClips>) -> Vec<RuleClips> {
         combined.title.push_str(&group.title);
         combined.highlights.extend(group.highlights);
     }
-    let mut clips = std::mem::take(&mut combined.highlights);
-    clips.sort_by_key(|h| (h.round, h.start_tick, h.end_tick));
-    for clip in clips {
-        if let Some(last) = combined.highlights.last_mut() {
-            if last.round == clip.round
-                && last.player.steamid == clip.player.steamid
-                && clip.start_tick <= last.end_tick
-            {
-                last.end_tick = last.end_tick.max(clip.end_tick);
-                last.anchor_tick = last.anchor_tick.min(clip.anchor_tick);
-                for tag in clip.tags {
-                    if !last.tags.contains(&tag) {
-                        last.tags.push(tag);
-                    }
-                }
-                continue;
-            }
-        }
-        combined.highlights.push(clip);
-    }
+    combined.highlights = crate::render::merge_nearby_clips(combined.highlights, tick_rate);
     vec![combined]
 }
 
@@ -249,14 +230,14 @@ pub(crate) mod tests {
                 ],
             ),
         ];
-        let merged = merge(groups.clone()).remove(0);
+        let merged = merge(groups.clone(), 64.0).remove(0);
         assert_eq!(
             merged
                 .highlights
                 .iter()
                 .map(|h| (h.round, h.start_tick, h.end_tick))
                 .collect::<Vec<_>>(),
-            [(1, 100, 350), (1, 400, 450), (2, 300, 350)]
+            [(1, 100, 450), (2, 300, 350)]
         );
         assert_eq!(merged.highlights[0].tags, ["first", "second"]);
         assert_eq!(merged.highlights[0].anchor_tick, 100);
@@ -264,13 +245,13 @@ pub(crate) mod tests {
         other_player.highlights.truncate(1);
         other_player.highlights[0].player.steamid = "2".into();
         assert_eq!(
-            merge(vec![groups[0].clone(), other_player])[0]
+            merge(vec![groups[0].clone(), other_player], 64.0)[0]
                 .highlights
                 .len(),
             3
         );
-        assert!(merge(vec![]).is_empty());
-        assert_eq!(merge(vec![groups[0].clone()])[0].highlights.len(), 2);
+        assert!(merge(vec![], 64.0).is_empty());
+        assert_eq!(merge(vec![groups[0].clone()], 64.0)[0].highlights.len(), 2);
     }
 
     #[test]

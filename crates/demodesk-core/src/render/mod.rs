@@ -274,6 +274,32 @@ pub fn to_render_clips(demo: &DemoInfo, highlights: &[Highlight]) -> Vec<RenderC
         .collect()
 }
 
+/// Union adjacent recording windows; retain the first clip's identity for output mapping.
+pub(crate) fn merge_nearby_clips(mut clips: Vec<Highlight>, tick_rate: f64) -> Vec<Highlight> {
+    clips.sort_by_key(|h| (h.round, h.start_tick, h.end_tick));
+    let mut merged: Vec<Highlight> = Vec::new();
+    for clip in clips {
+        if let Some(last) = merged.last_mut() {
+            let gap = i64::from(clip.start_tick) - i64::from(last.end_tick);
+            if last.round == clip.round
+                && last.player.steamid == clip.player.steamid
+                && (gap as f64) < tick_rate
+            {
+                last.end_tick = last.end_tick.max(clip.end_tick);
+                last.anchor_tick = last.anchor_tick.min(clip.anchor_tick);
+                for tag in clip.tags {
+                    if !last.tags.contains(&tag) {
+                        last.tags.push(tag);
+                    }
+                }
+                continue;
+            }
+        }
+        merged.push(clip);
+    }
+    merged
+}
+
 pub struct RenderJobInput<'a> {
     pub demo: &'a DemoInfo,
     pub demo_path: PathBuf,
@@ -338,6 +364,7 @@ pub fn render_highlights(input: RenderJobInput) -> Result<RenderResult> {
     } else {
         vec![]
     };
+    highlights = merge_nearby_clips(highlights, demo.tick_rate);
     // Render in demo order so the game only seeks forward.
     highlights.sort_by_key(|h| h.start_tick);
     std::fs::create_dir_all(&output_dir)?;

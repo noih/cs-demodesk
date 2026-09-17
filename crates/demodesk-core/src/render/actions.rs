@@ -264,14 +264,31 @@ pub fn build_schedule(clips: &[RenderClip], o: &ActionsOptions) -> Vec<Scheduled
             _ => {}
         }
 
-        // 4. Record.
+        if seq > 0 {
+            push(
+                setup_tick,
+                &mut slot,
+                format!(
+                    "alias demodesk_wait_{} \"demo_pause; echo {MARK} seq {} of {n} settle\"",
+                    seq + 1,
+                    seq + 1
+                ),
+            );
+        }
+
+        // 4. Record. Later clips start only when the app finishes the real-time wait.
         let mut slot = 0;
-        push(
-            start_tick,
-            &mut slot,
-            format!("echo {MARK} seq {} of {n} start", seq + 1),
-        );
-        push(start_tick, &mut slot, "mirv_streams record start".into());
+        if seq > 0 {
+            // The app clears this alias before resuming: HLAE can revisit the pause tick.
+            push(start_tick, &mut slot, format!("demodesk_wait_{}", seq + 1));
+        } else {
+            push(
+                start_tick,
+                &mut slot,
+                format!("echo {MARK} seq {} of {n} start", seq + 1),
+            );
+            push(start_tick, &mut slot, "mirv_streams record start".into());
+        }
         let mut slot = 0;
         push(end_tick, &mut slot, "mirv_streams record end".into());
         push(
@@ -383,6 +400,99 @@ mod tests {
     }
 
     #[test]
+    fn nearby_windows_merge_strictly_below_one_second_for_the_same_view() {
+        for rate in [64.0, 128.0] {
+            for gap in [-10, 0, rate as i32 - 1, rate as i32, rate as i32 + 1] {
+                let first = clip(1000, 1100, Some(3)).highlight;
+                let second = clip(1100 + gap, 1400, Some(3)).highlight;
+                let merged =
+                    super::super::merge_nearby_clips(vec![second.clone(), first.clone()], rate);
+                assert_eq!(merged.len(), if (gap as f64) < rate { 1 } else { 2 });
+                if merged.len() == 1 {
+                    assert_eq!((merged[0].start_tick, merged[0].end_tick), (1000, 1400));
+                }
+                let mut other = second.clone();
+                other.round += 1;
+                assert_eq!(
+                    super::super::merge_nearby_clips(vec![first.clone(), other], rate).len(),
+                    2
+                );
+                let mut other = second;
+                other.player.steamid = "another-player".into();
+                assert_eq!(
+                    super::super::merge_nearby_clips(vec![first, other], rate).len(),
+                    2
+                );
+            }
+        }
+        let merged = super::super::merge_nearby_clips(
+            vec![
+                clip(1400, 1500, Some(3)).highlight,
+                clip(1000, 1200, Some(3)).highlight,
+                clip(1250, 1350, Some(3)).highlight,
+            ],
+            64.0,
+        );
+        assert_eq!(merged.len(), 1);
+        assert_eq!((merged[0].start_tick, merged[0].end_tick), (1000, 1500));
+        let s = build_schedule(
+            &[RenderClip {
+                highlight: merged[0].clone(),
+                slot: Some(3),
+                account_id: None,
+            }],
+            &opts(&RenderOptions::default()),
+        );
+        assert_eq!(
+            s.iter()
+                .filter(|a| a.cmd == "mirv_streams record start")
+                .count(),
+            1
+        );
+        assert_eq!(tick_of(&s, "mirv_streams record end"), 1500);
+        assert!(!s.iter().any(|a| a.cmd.starts_with("demo_pause")));
+    }
+
+    #[test]
+    fn later_clips_cannot_start_recording_in_the_pause_batch() {
+        for second_start in [10_500, 20_000] {
+            let s = build_schedule(
+                &[
+                    clip(second_start, 21_000, Some(3)),
+                    clip(10_000, 11_000, Some(3)),
+                ],
+                &opts(&RenderOptions::default()),
+            );
+            let pauses: Vec<_> = s
+                .iter()
+                .filter(|a| a.cmd.starts_with("demodesk_wait_"))
+                .collect();
+            assert_eq!(pauses.len(), 1);
+            assert_eq!(pauses[0].cmd, "demodesk_wait_2");
+            let setup = tick_of(&s, "echo [demodesk] seq 2 of 2 setup");
+            assert!(s.iter().any(|a| a.tick.floor() as i32 == setup
+                && a.cmd
+                    == "alias demodesk_wait_2 \"demo_pause; echo [demodesk] seq 2 of 2 settle\""));
+            assert_eq!(pauses[0].tick.floor() as i32, second_start.max(setup + 2));
+            assert!(s.iter().any(|a| a.cmd == "spec_player 3"
+                && a.tick < pauses[0].tick
+                && a.tick >= setup as f64));
+            // Even a frame crossing both setup and start cannot enqueue recording early.
+            assert!(!s
+                .iter()
+                .any(|a| a.tick >= setup as f64 && a.cmd == "mirv_streams record start"));
+            assert!(!s.iter().any(|a| a.cmd == "demo_resume"));
+        }
+        let first = build_schedule(
+            &[clip(10_000, 11_000, Some(3))],
+            &opts(&RenderOptions::default()),
+        );
+        assert!(!first
+            .iter()
+            .any(|a| a.cmd.contains("demodesk_wait_") || a.cmd.contains("demo_pause")));
+    }
+
+    #[test]
     fn every_clip_keeps_game_audio_for_recording() {
         let clips = [clip(10_000, 11_000, Some(3)), clip(20_000, 21_000, Some(3))];
         for show_game in [false, true] {
@@ -397,7 +507,9 @@ mod tests {
                 .collect();
             let starts: Vec<_> = schedule
                 .iter()
-                .filter(|a| a.cmd == "mirv_streams record start")
+                .filter(|a| {
+                    a.cmd == "mirv_streams record start" || a.cmd.starts_with("demodesk_wait_")
+                })
                 .collect();
             assert_eq!(volumes.len(), clips.len());
             for (volume, start) in volumes.iter().zip(starts) {

@@ -27,6 +27,25 @@ References: [NVIDIA guidance](https://docs.nvidia.com/video-technologies/video-c
 
 ## Export progress
 
+Highlight and analysis exports merge adjacent windows in the same round and player
+view when their gap is strictly less than one second, including overlaps. The
+merged window records continuously from the earliest start to the latest end;
+a gap of exactly one second stays separate. Analysis previews use the same rule.
+
+Both exports share the recording schedule. Within each new CS2 session, the first
+clip keeps its normal setup. Each later clip pauses at its recording start after
+seeking, camera setup and preroll. The app waits at least three real-time seconds
+for lingering sounds, then starts recording and resumes playback over netcon.
+Later recording starts are not prequeued in the tick schedule, so a frame crossing
+both setup and start cannot bypass the wait. If a frame also crosses the clip's end
+before the wait completes, the job fails rather than starting a recording with no
+remaining end command.
+Each pause uses a per-clip alias that the app clears before resuming, because HLAE
+can execute the pause tick again on resume. Duplicate wait markers do not restart
+the timer or recording. Resume precedes recording startup in the same command batch.
+Cancellation remains available during the wait. Actual sound decay must be
+checked in CS2 with grenade, fire, round-win and C4 sounds across clip boundaries.
+
 Recording reports scheduled demo-time markers, weighted by clip duration. Encoding reads FFmpeg's `out_time_us` while the process runs and combines both CPU passes. Size retries use the remaining progress range; completed output is still verified before reporting success.
 
 The UI labels overall progress as estimated: recording gets 70% of the work budget when size fitting is enabled, 90% otherwise. These phase weights are not time estimates. Elapsed time updates each second; there is no countdown. Progress stays below 100% until the job succeeds, and older job records can omit the optional progress field.
