@@ -234,6 +234,8 @@ export interface RenderOptions {
   keepRawFiles: boolean;
   /** join all clips into one video; the size limit then applies to that file */
   merge: boolean;
+  keyMomentsOnly: boolean;
+  roundResultLabel: string;
   maxSizeMb: number | null;
   audioKbps: number;
   extraLaunchOptions: string[];
@@ -264,12 +266,14 @@ export const DEFAULT_RENDER_OPTIONS: RenderOptions = {
   quitWhenDone: true,
   keepRawFiles: false,
   merge: false,
+  keyMomentsOnly: true,
+  roundResultLabel: "Round result",
   maxSizeMb: 20,
   audioKbps: 192,
   extraLaunchOptions: [],
 };
 
-export type JobStatus = 'queued' | 'running' | 'done' | 'error' | 'cancelled';
+export type JobStatus = 'queued' | 'running' | 'done' | 'partial' | 'error' | 'cancelled';
 export interface JobOutput {
   file: string;
   bytes: number;
@@ -295,6 +299,7 @@ export interface RenderJob {
   finishedAt?: string;
   error?: string;
   outputs: JobOutput[];
+  failedHighlights?: string[];
   log: string[];
 }
 

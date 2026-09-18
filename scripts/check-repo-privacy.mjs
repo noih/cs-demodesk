@@ -8,7 +8,7 @@ function issues(text) {
   if ([...text.matchAll(/(?<![\w.])7656\d{13}(?![\w.])/g)].some(m => m[0] !== steamBase)) found.push('SteamID64');
   if (/\bSTEAM_[0-5]:[01]:\d+\b|\[U:1:\d+\]/.test(text)) found.push('Steam account identifier');
   if (/steamcommunity\.com\/(?:profiles\/\d+|id\/[\w-]+)/i.test(text)) found.push('player profile URL');
-  if ([...text.matchAll(/spec_lock_to_accountid\s+(\d+)/g)].some(m => m[1] !== '123')) found.push('hardcoded account ID');
+  if ([...text.matchAll(/spec_lock_to_accountid\s+(\d+)/g)].some(m => !['0', '123'].includes(m[1]))) found.push('hardcoded account ID');
   if (/[A-Z]:[\\/]+Users[\\/]+(?!Public\b|Default\b|<|\$|%)[\w.-]+/i.test(text)) found.push('personal Windows path');
   return found;
 }
@@ -16,6 +16,7 @@ assert.deepEqual(issues(steamBase), []);
 assert.ok(issues('7656' + '1'.repeat(13)).includes('SteamID64'));
 assert.ok(issues('spec_lock_to_accountid ' + 456).includes('hardcoded account ID'));
 assert.deepEqual(issues('spec_lock_to_accountid ' + 123), []);
+assert.deepEqual(issues('spec_lock_to_accountid ' + 0), []); // Clears the spectator lock.
 
 const staged = process.argv.includes('--staged');
 const git = (...args) => execFileSync('git', ['-c', `safe.directory=${process.cwd().replaceAll('\\','/')}`, ...args], { maxBuffer: 64 * 1024 * 1024 });

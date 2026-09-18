@@ -18,6 +18,7 @@
     "app:msix": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/msix.ps1",
     "app:build": "tauri build --no-bundle && node scripts/portable.mjs",
     "test:privacy": "node scripts/check-repo-privacy.mjs",
+    "test:highlights": "node --experimental-transform-types scripts/test-highlights.mjs",
     "test:core": "cargo test -p demodesk-core",
     "test:recoil": "node --experimental-transform-types --test scripts/test-recoil.mjs",
     "test:replay": "node --experimental-transform-types --test scripts/test-replay.mjs",

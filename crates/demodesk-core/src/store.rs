@@ -196,6 +196,7 @@ pub enum JobStatus {
     Queued,
     Running,
     Done,
+    Partial,
     Error,
     Cancelled,
 }
@@ -242,6 +243,8 @@ pub struct RenderJob {
     pub error_code: Option<crate::ErrorCode>,
     #[serde(default)]
     pub outputs: Vec<JobOutput>,
+    #[serde(default)]
+    pub failed_highlights: Vec<String>,
     #[serde(default)]
     pub log: Vec<String>,
 }
@@ -570,6 +573,7 @@ impl Store {
             error: None,
             error_code: None,
             outputs: vec![],
+            failed_highlights: vec![],
             log: vec![],
         };
         self.save_job(&job)?;

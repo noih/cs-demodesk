@@ -247,8 +247,8 @@
     "col": {
       "score": "Score",
       "round": "Round",
-      "time": "Time",
-      "length": "Length",
+      "time": "Start time",
+      "length": "Full length",
       "player": "Player",
       "what": "What",
       "tags": "Tags"
@@ -258,6 +258,12 @@
     "summary": "{{n}} clips - about {{seconds}} s",
     "mergeRules": "Merge different rules",
     "selectRulesHint": "Select rules",
+    "roundResult": "Round result",
+    "keyMomentsOnly": "Only keep key moments",
+    "fullLengthWarning": "Keeping the full sequence makes the video longer. With the same file size limit, image quality may be lower.",
+    "posthumous": "Posthumous kill",
+    "possibleNinja": "Possible ninja defuse",
+    "postRound": "Post-round",
     "merge": "Merge into one video",
     "sizeLimit": "File size limit",
     "sizeMerged": " (merged file)",
@@ -286,11 +292,13 @@
     "resolutionLimit": "Resolution depends on device and game support"
   },
   "renders": {
+    "failedHighlights": "Not completed: {{titles}}",
     "overallProgress": "Overall progress (estimated)",
     "status": {
       "queued": "Queued",
       "running": "Rendering",
       "done": "Done",
+      "partial": "Partially completed",
       "error": "Failed",
       "cancelled": "Cancelled"
     },
@@ -316,7 +324,7 @@
     "openInPlayer": "Open in player",
     "files": "Files",
     "totalSize": "Total size",
-    "elapsed": "Elapsed",
+    "elapsed": "Processing time",
     "options": "Options",
     "badge": {
       "noHud": "No HUD",

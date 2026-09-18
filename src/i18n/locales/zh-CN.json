@@ -243,8 +243,8 @@
     "col": {
       "score": "分数",
       "round": "回合",
-      "time": "时间",
-      "length": "时长",
+      "time": "起始时间",
+      "length": "完整片长",
       "player": "玩家",
       "what": "内容",
       "tags": "标签"
@@ -254,6 +254,12 @@
     "summary": "{{n}} 段 · 约 {{seconds}} 秒",
     "mergeRules": "合并不同规则",
     "selectRulesHint": "选择规则",
+    "roundResult": "回合结果",
+    "keyMomentsOnly": "只保留精彩片段",
+    "fullLengthWarning": "保留完整过程会增加视频长度。在相同容量限制下，画质可能降低。",
+    "posthumous": "死后击杀",
+    "possibleNinja": "疑似 Ninja defuse",
+    "postRound": "回合结束后",
     "merge": "合并为一个视频",
     "sizeLimit": "文件大小上限",
     "sizeMerged": "（合并后）",
@@ -282,11 +288,13 @@
     "resolutionLimit": "分辨率受限于设备与游戏支持"
   },
   "renders": {
+    "failedHighlights": "未完成：{{titles}}",
     "overallProgress": "整体进度（估计）",
     "status": {
       "queued": "排队中",
       "running": "渲染中",
       "done": "完成",
+      "partial": "部分成功",
       "error": "失败",
       "cancelled": "已取消"
     },
@@ -312,7 +320,7 @@
     "openInPlayer": "在播放器中打开",
     "files": "文件数",
     "totalSize": "总大小",
-    "elapsed": "耗时",
+    "elapsed": "制作耗时",
     "options": "选项",
     "badge": {
       "noHud": "无基本界面",

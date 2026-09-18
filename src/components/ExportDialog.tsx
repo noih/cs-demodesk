@@ -1,7 +1,8 @@
+import { summarizeHighlights } from '../highlightWindows.ts';
 import { useState, type ReactNode } from 'react';
 import { Box, Button, Dialog, Flex, Grid, SegmentedControl, Select, Slider, Switch, Text } from '@radix-ui/themes';
 import { useTranslation } from 'react-i18next';
-import { errorText, DEFAULT_RENDER_OPTIONS, RENDER_QUALITY, type RenderOptions, type Status } from '../api.ts';
+import { errorText, DEFAULT_RENDER_OPTIONS, RENDER_QUALITY, type Highlight, type RenderOptions, type Status } from '../api.ts';
 const RESOLUTIONS = [
   { label: '720p', width: 1280, height: 720 },
   { label: '1080p', width: 1920, height: 1080 },
@@ -11,17 +12,19 @@ const RESOLUTIONS = [
 /** HUD switches in the export dialog, in display order. */
 const HUD_TOGGLES = ['hud', 'crosshair', 'radar', 'killFeed', 'chat', 'viewmodel', 'tracers', 'xray', 'trueView'] as const;
 
-export function ExportDialog({open,onOpenChange,count,seconds,status,onSetup,onSubmit,onSubmitted,forceMerge=false,disabled=false,children}: {
+export function ExportDialog({open,onOpenChange,count,seconds,status,onSetup,onSubmit,onSubmitted,forceMerge=false,disabled=false,children,highlights,tickRate}: {
   open:boolean;onOpenChange:(open:boolean)=>void;count:number;seconds:number;status?:Status;onSetup:()=>void;
+  highlights?:Highlight[];tickRate?:number;
   onSubmit:(options:RenderOptions)=>Promise<unknown>;onSubmitted:()=>void;forceMerge?:boolean;disabled?:boolean;children?:ReactNode;
 }) {
   const {t}=useTranslation();
   const [opts,setOpts]=useState<RenderOptions>(DEFAULT_RENDER_OPTIONS);
   const [submitting,setSubmitting]=useState(false);
   const [error,setError]=useState<string>();
+  const preview = highlights && tickRate ? summarizeHighlights(highlights, tickRate, opts.keyMomentsOnly) : undefined;
   const render=async()=>{
     if(submitting)return;setSubmitting(true);setError(undefined);
-    try {await onSubmit({...opts,merge:forceMerge||opts.merge});onOpenChange(false);onSubmitted();}
+    try {await onSubmit({...opts,roundResultLabel:t('highlights.roundResult'),merge:forceMerge||opts.merge,keyMomentsOnly:!!highlights&&opts.keyMomentsOnly});onOpenChange(false);onSubmitted();}
     catch(error){setError(errorText(error));}finally{setSubmitting(false);}
   };
   return (
@@ -29,12 +32,21 @@ export function ExportDialog({open,onOpenChange,count,seconds,status,onSetup,onS
         <Dialog.Content maxWidth="860px">
           <Dialog.Title>{t('highlights.dialogTitle')}</Dialog.Title>
           <Dialog.Description size="2" color="gray">
-            {t('highlights.summary', { n: count, seconds: Math.round(seconds) })}
+            {t('highlights.summary', { n: count, seconds: Math.round(preview?.seconds ?? seconds) })}
           </Dialog.Description>
           {error && <Text as="p" color="red" role="alert">{error}</Text>}
           {children}
           <Grid columns={{ initial: '1', sm: 'minmax(0, 1fr) minmax(0, 1fr)' }} gap="5" mt="4" align="start">
             <Flex direction="column" gap="3">
+              {highlights && <Box>
+                <Text as="label" size="2"><Flex gap="2" align="center">
+                  <Switch size="1" checked={opts.keyMomentsOnly} onCheckedChange={keyMomentsOnly=>setOpts({...opts,keyMomentsOnly})} />
+                  {t('highlights.keyMomentsOnly')}
+                </Flex></Text>
+                {!opts.keyMomentsOnly && opts.maxSizeMb != null && <Text as="p" role="status" size="1" color="amber" mt="1">
+                  {t('highlights.fullLengthWarning')}
+                </Text>}
+              </Box>}
               {count > 1 && !forceMerge && (
                 <Text as="label" size="2">
                   <Flex gap="2" align="center">

@@ -117,7 +117,7 @@ try {
       if(cmd==='get_demo' && window.emptyParsed)return {meta:demos.find(d=>d.id===args.id)};
       if(cmd==='get_demo' && window.failDemo)throw Error('Cannot read demo');
       if(cmd==='get_demo' && window.holdDemo)await new Promise(resolve=>window.releaseDemo=resolve);
-      if(cmd==='get_demo')return { meta:demos.find(d=>d.id===args.id),parsed:{recoilReference:{ak47:[{x:0,y:0,samples:4},{x:-1,y:-1,samples:4},{x:-2,y:-3,samples:4},{x:-2,y:-4,samples:2}]},info:{mapName:demos.find(d=>d.id===args.id).mapName,tickRate:64,players:[{steamid:'1',name:'Player',teamNumber:3},{steamid:'2',name:'Opponent',teamNumber:2}]},parsedAt:'2026-09-08',score:{A:13,B:9},rounds:[],roundSummaries:[{round:1,winner:'A',killsA:5,killsB:2,players:{'1':{kills:5,deaths:2,damage:450,awp:1,flashed:2,cash:800},'2':{kills:2,deaths:5,damage:220,awp:0,flashed:0,cash:300}}}],stats:[player,{...player,steamid:'2',name:testPlayerNames?.[1] ?? 'Player',team:'B',recoil:{},opponents:{'1':1}}],highlights:[{id:'highlight-1',player:{steamid:'1',name:'Player'},round:8,startTick:640,endTick:1280,score:8,tags:['3k'],title:'Player — 3 kills · R8',kills:[],breakdown:{}}]}};
+      if(cmd==='get_demo')return { meta:demos.find(d=>d.id===args.id),parsed:{recoilReference:{ak47:[{x:0,y:0,samples:4},{x:-1,y:-1,samples:4},{x:-2,y:-3,samples:4},{x:-2,y:-4,samples:2}]},info:{mapName:demos.find(d=>d.id===args.id).mapName,tickRate:64,players:[{steamid:'1',name:'Player',teamNumber:3},{steamid:'2',name:'Opponent',teamNumber:2}]},parsedAt:'2026-09-08',score:{A:13,B:9},rounds:[],roundSummaries:[{round:1,winner:'A',killsA:5,killsB:2,players:{'1':{kills:5,deaths:2,damage:450,awp:1,flashed:2,cash:800},'2':{kills:2,deaths:5,damage:220,awp:0,flashed:0,cash:300}}}],stats:[player,{...player,steamid:'2',name:testPlayerNames?.[1] ?? 'Player',team:'B',recoil:{},opponents:{'1':1}}],highlights:[{id:'highlight-1',player:{steamid:'1',name:'Player'},round:8,startTick:640,endTick:1280,keyMoments:[[640,896],[1024,1280]],score:8,tags:['3k'],title:'Player — 3 kills · R8',kills:[],breakdown:{}}]}};
       if(cmd==='plugin:event|listen') { if(window.holdListener)await new Promise(resolve => window.releaseListener = resolve); await new Promise(resolve => setTimeout(resolve, 10)); listeners.set(args.handler, args.handler); return args.handler; }
       if(cmd==='plugin:event|unlisten') { listeners.delete(args.eventId); return; }
       throw Error('Unexpected command '+cmd);
@@ -194,6 +194,13 @@ try {
   await videoTab.locator('.rt-TabsTriggerInner .bi-hourglass-split').waitFor({state:'detached'});
   await page.locator('.notification-viewport').getByRole('button',{name:'Close',exact:true}).click();
   await page.locator('.job-card').first().waitFor();
+  await page.evaluate(async () => {
+    const job = (await window.__TAURI_INTERNALS__.invoke('list_jobs')).find(j => j.id === 'job-3');
+    window.emitTestEvent({type:'job-changed', job:{...job,status:'partial',failedHighlights:['Missing highlight']}});
+  });
+  await page.getByText('Partially completed', {exact:true}).waitFor();
+  await page.getByText('Not completed: Missing highlight', {exact:true}).waitFor();
+
   await page.getByText('Job interrupted because the app was closed',{exact:true}).waitFor();
   assert.equal(await page.getByText('backend diagnostic changed',{exact:true}).count(),0,'Error code selects translation regardless of backend diagnostic wording');
   await page.evaluate(async () => { const job = (await window.__TAURI_INTERNALS__.invoke('list_jobs')).find(j => j.id === 'job-3'); window.emitTestEvent({type:'job-changed',job:{...job,status:'error',error:'cs2.exe is already running — close the game first'}}); });
@@ -968,6 +975,20 @@ try {
   await page.getByRole('button',{name:/^Export/}).click();
   const exportDialog = page.getByRole('dialog').filter({has:page.getByRole('button',{name:'Export',exact:true})});
   await exportDialog.waitFor();
+  const keyMoments = exportDialog.getByRole('switch',{name:'Only keep key moments',exact:true});
+  assert.equal(await keyMoments.isChecked(),true);
+  await exportDialog.getByText('1 clips - about 8 s',{exact:true}).waitFor();
+  const fullWarning = exportDialog.getByRole('status').filter({hasText:'Keeping the full sequence'});
+  assert.equal(await fullWarning.count(),0);
+  await keyMoments.click();
+  await fullWarning.waitFor();
+  await exportDialog.getByRole('radio',{name:'Unlimited',exact:true}).click();
+  assert.equal(await fullWarning.count(),0);
+  await exportDialog.getByRole('radio',{name:'20 MB',exact:true}).click();
+  await fullWarning.waitFor();
+  await keyMoments.click();
+  assert.equal(await fullWarning.count(),0);
+
   assert.equal(await exportDialog.getByRole("radio", {name:"90", exact:true}).count(), 0, "90 FPS is not offered for new exports");
   assert.equal(await exportDialog.getByRole("radio", {name:"60", exact:true}).getAttribute("aria-checked"), "true", "New exports default to 60 FPS");
   const hideGame = exportDialog.getByRole('switch',{name:'Hide game in background'});
@@ -1367,6 +1388,7 @@ try {
   assert.equal(exportRequest.selection.playerId,'2');
   assert.deepEqual(exportRequest.selection.ruleIds,['aim-snap','aim-linear-acquisition']);
   assert.equal(exportRequest.options.merge,true);
+  assert.equal(exportRequest.options.keyMomentsOnly,false,'Analysis exports preserve their original windows');
   await page.getByRole('tab',{name:'Match anomalies',exact:true}).click();
   await page.setViewportSize({width:760,height:940});
   assert.ok(await scorePanel.getByRole('table').evaluate(el=>el.scrollWidth<=el.clientWidth),'Behavior labels wrap without horizontal scrolling');

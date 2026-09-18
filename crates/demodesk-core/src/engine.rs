@@ -1775,6 +1775,7 @@ impl Engine {
         match outcome {
             Ok(result) => {
                 job.outputs = job_outputs(&result);
+                job.failed_highlights = result.failed_highlights;
                 if let Some(clips) = &job.analysis_clips {
                     for output in &mut job.outputs {
                         if output.is_final {
@@ -1787,6 +1788,8 @@ impl Engine {
                 }
                 job.status = if job.outputs.is_empty() {
                     JobStatus::Error
+                } else if !job.failed_highlights.is_empty() {
+                    JobStatus::Partial
                 } else {
                     JobStatus::Done
                 };

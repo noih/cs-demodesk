@@ -37,6 +37,7 @@ pub struct RecordSession<'a> {
     pub width: u32,
     pub height: u32,
     pub schedule: Vec<Scheduled>,
+    pub completed_clips: Vec<usize>,
     /// Seconds to wait for the game before giving up
     pub timeout_seconds: u64,
     pub extra_launch_options: Vec<String>,
@@ -640,6 +641,9 @@ impl RecordSession<'_> {
             }
             std::thread::sleep(Duration::from_millis(500));
         }
+        for line in con.drain() {
+            self.handle_console_line(&line, &mut progress)?;
+        }
         Ok(progress.done)
     }
 
@@ -674,7 +678,10 @@ impl RecordSession<'_> {
                     (self.stage)(&format!("recording {i}/{n}"));
                     (self.log)(format!("clip {i}/{n}: recording"));
                 }
-                "end" => (self.log)(format!("clip {i}/{n}: done")),
+                "end" => {
+                    self.completed_clips.push(i - 1);
+                    (self.log)(format!("clip {i}/{n}: done"));
+                }
                 _ => {}
             }
         } else if line.contains(MARK) && line.contains("done") {
@@ -820,6 +827,7 @@ mod tests {
             width: 1920,
             height: 1080,
             schedule: vec![],
+            completed_clips: vec![],
             timeout_seconds: 180,
             extra_launch_options: vec![],
             cancel: Arc::new(AtomicBool::new(false)),
@@ -846,6 +854,7 @@ mod tests {
         assert!(session
             .handle_console_line("[demodesk] seq 2 of 2 end", &mut progress)
             .is_err());
+        assert!(session.completed_clips.is_empty());
         assert!(progress.take_recording_due(deadline).is_some());
         session
             .handle_console_line("[demodesk] seq 2 of 2 settle", &mut progress)
@@ -857,6 +866,7 @@ mod tests {
         session
             .handle_console_line("[demodesk] seq 2 of 2 end", &mut progress)
             .unwrap();
+        assert_eq!(session.completed_clips, vec![1]);
     }
 
     #[test]

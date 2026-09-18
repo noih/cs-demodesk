@@ -9,7 +9,7 @@
 //!  - `demo_gototick` lands one tick before the setup tick; the setup commands
 //!    (`spec_mode 1` before `spec_player`) then run on the next frame
 //!  - clips are played in tick order and jumps are forward-only: backward jumps
-//!    execute nothing in mirv_cmd, so overlapping clips are simply pushed later
+//!    execute nothing in mirv_cmd; the renderer splits overlaps into separate sessions
 //!  - `quit` ~1 s after the last clip ends
 //!  - `echo [demodesk] …` markers let the app follow progress on the netcon
 use super::RenderOptions;
@@ -21,6 +21,7 @@ pub struct RenderClip {
     pub highlight: Highlight,
     /// CS2 spec_player slot (user_id + 1)
     pub slot: Option<i32>,
+    pub round_result_slot: Option<i32>,
     /// Steam account id, for `spec_lock_to_accountid`
     pub account_id: Option<String>,
 }
@@ -240,7 +241,44 @@ pub fn build_schedule(clips: &[RenderClip], o: &ActionsOptions) -> Vec<Scheduled
         );
         push(setup_tick, &mut slot, "mp_display_kill_assists 1".into());
         // HLAE unescapes the doubled backslash before the file name; {QUOTE} is its quote placeholder.
-        push(setup_tick, &mut slot, format!("mirv_streams settings add ffmpeg {preset} \"{} {{QUOTE}}{folder}\\\\video.{}{{QUOTE}}\"", o.ffmpeg_preset, r.container));
+        let mut encoding = o.ffmpeg_preset.clone();
+        if let Some(view) = h.round_result.as_ref().filter(|v| v.from_tick < end_tick) {
+            let mut label: String = r
+                .round_result_label
+                .chars()
+                .filter(|c| c.is_alphanumeric() || *c == ' ')
+                .take(80)
+                .collect();
+            let from = (view.from_tick - start_tick).max(0) as f64 / o.tick_rate;
+            let fonts = std::path::PathBuf::from(
+                std::env::var_os("WINDIR").unwrap_or_else(|| "C:/Windows".into()),
+            )
+            .join("Fonts");
+            let mut font = fonts.join(
+                if label
+                    .chars()
+                    .any(|c| ('\u{ac00}'..='\u{d7af}').contains(&c))
+                {
+                    "malgun.ttf"
+                } else {
+                    "msjh.ttc"
+                },
+            );
+            if !font.is_file() {
+                font = fonts.join("arial.ttf");
+                label = "Round result".into();
+            }
+            let font = font
+                .to_string_lossy()
+                .replace('\\', "/")
+                .replace(':', "\\:");
+            let filter = format!("drawtext=fontfile='{font}':text='{label}':fontcolor=white:fontsize=h/30:box=1:boxcolor=black@0.6:boxborderw=10:x=(w-tw)/2:y=h*0.22:enable='gte(t,{from:.6})'");
+            encoding.push_str(&format!(
+                " -vf {{QUOTE}}{}{{QUOTE}}",
+                filter.replace('\\', "\\\\")
+            ));
+        }
+        push(setup_tick, &mut slot, format!("mirv_streams settings add ffmpeg {preset} \"{} {{QUOTE}}{folder}\\\\video.{}{{QUOTE}}\"", encoding, r.container));
         push(
             setup_tick,
             &mut slot,
@@ -262,6 +300,30 @@ pub fn build_schedule(clips: &[RenderClip], o: &ActionsOptions) -> Vec<Scheduled
             ),
             (_, _, Some(slot_no)) => push(setup_tick, &mut slot, format!("spec_player {slot_no}")),
             _ => {}
+        }
+
+        if let Some(view) = &h.round_result {
+            if view.from_tick < end_tick {
+                let switch_tick = if view.from_tick <= start_tick {
+                    setup_tick + 1
+                } else {
+                    view.from_tick + 1
+                };
+                let mut camera_slot = 0;
+                push(
+                    switch_tick,
+                    &mut camera_slot,
+                    "spec_lock_to_accountid 0".into(),
+                );
+                if let Some(target) = clip.round_result_slot {
+                    push(
+                        switch_tick,
+                        &mut camera_slot,
+                        format!("spec_player {target}"),
+                    );
+                }
+                push(switch_tick, &mut camera_slot, "spec_mode 3".into());
+            }
         }
 
         if seq > 0 {
@@ -382,6 +444,7 @@ mod tests {
                 breakdown: BTreeMap::new(),
             },
             slot,
+            round_result_slot: None,
             account_id: steamid_to_account_id(&(76561197960265728_u64 + 123).to_string()),
         }
     }
@@ -399,6 +462,31 @@ mod tests {
             .iter()
             .position(|a| a.cmd == cmd || a.cmd.starts_with(&format!("{cmd} ")))
             .unwrap()
+    }
+
+    #[test]
+    fn round_result_camera_is_third_person_and_next_clip_resets() {
+        let mut ending = clip(40591, 40847, Some(1));
+        ending.highlight.round_result = Some(crate::model::RoundResultView {
+            from_tick: 40288,
+            player: (76561197960265728_u64 + 456).to_string(),
+        });
+        ending.round_result_slot = Some(7);
+        let schedule = build_schedule(
+            &[ending.clone(), clip(42000, 42512, Some(1))],
+            &opts(&RenderOptions::default()),
+        );
+        assert_eq!(tick_of(&schedule, "spec_player 7"), 40528);
+        assert_eq!(tick_of(&schedule, "spec_mode 3"), 40528);
+        assert!(schedule
+            .iter()
+            .any(|c| c.tick.floor() as i32 == 41936 && c.cmd == "spec_mode 1"));
+        assert!(schedule
+            .iter()
+            .any(|c| c.cmd.contains("drawtext=") && c.cmd.contains("gte(t,0.000000)")));
+        ending.highlight.start_tick = 39000;
+        let schedule = build_schedule(&[ending], &opts(&RenderOptions::default()));
+        assert_eq!(tick_of(&schedule, "spec_mode 3"), 40289);
     }
 
     #[test]
@@ -441,6 +529,7 @@ mod tests {
             &[RenderClip {
                 highlight: merged[0].clone(),
                 slot: Some(3),
+                round_result_slot: None,
                 account_id: None,
             }],
             &opts(&RenderOptions::default()),

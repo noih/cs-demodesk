@@ -12,7 +12,7 @@ import { fmtDateTime, translateError, translateRenderStage } from '../i18n/index
 function initializePreview(video: HTMLVideoElement | null) {
   if (video) video.volume = 0.15;
 }
-const COLOR: Record<RenderJob['status'], 'gray' | 'amber' | 'green' | 'red'> = { queued: 'amber', running: 'amber', done: 'green', error: 'red', cancelled: 'gray' };
+const COLOR: Record<RenderJob['status'], 'gray' | 'amber' | 'green' | 'red'> = { queued: 'amber', running: 'amber', done: 'green', partial: 'amber', error: 'red', cancelled: 'gray' };
 
 function duration(job: RenderJob, t: TFunction, now: number): string | undefined {
   if (!job.startedAt) return undefined;
@@ -106,6 +106,11 @@ function JobCard({ job, parsed, onChanged }: { job: RenderJob; parsed: ParsedDem
         </Box>
       )}
 
+      {!!job.failedHighlights?.length && (
+        <Callout.Root color="amber" size="1" mt="3">
+          <Callout.Text>{t('renders.failedHighlights', { titles: job.failedHighlights.join('、') })}</Callout.Text>
+        </Callout.Root>
+      )}
       {(job.error || job.errorCode) && (
         <Callout.Root color="red" size="1" mt="3">
           <Callout.Text className="selectable">{translateError(job.error, job.errorCode)}</Callout.Text>

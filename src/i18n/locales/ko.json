@@ -243,8 +243,8 @@
     "col": {
       "score": "점수",
       "round": "라운드",
-      "time": "시간",
-      "length": "길이",
+      "time": "시작 시간",
+      "length": "전체 길이",
       "player": "플레이어",
       "what": "내용",
       "tags": "태그"
@@ -254,6 +254,12 @@
     "summary": "클립 {{n}}개 - 약 {{seconds}}초",
     "mergeRules": "다른 규칙 합치기",
     "selectRulesHint": "규칙 선택",
+    "roundResult": "라운드 결과",
+    "keyMomentsOnly": "주요 장면만 유지",
+    "fullLengthWarning": "전체 과정을 유지하면 영상이 길어집니다. 같은 파일 크기 제한에서는 화질이 낮아질 수 있습니다.",
+    "posthumous": "사망 후 처치",
+    "possibleNinja": "닌자 해체 추정",
+    "postRound": "라운드 종료 후",
     "merge": "하나의 동영상으로 합치기",
     "sizeLimit": "파일 크기 제한",
     "sizeMerged": " (합친 파일)",
@@ -282,11 +288,13 @@
     "resolutionLimit": "해상도는 기기와 게임의 지원 범위로 제한됩니다"
   },
   "renders": {
+    "failedHighlights": "완료되지 않음: {{titles}}",
     "overallProgress": "전체 진행률 (추정)",
     "status": {
       "queued": "대기 중",
       "running": "렌더링 중",
       "done": "완료",
+      "partial": "일부 성공",
       "error": "실패",
       "cancelled": "취소됨"
     },
@@ -312,7 +320,7 @@
     "openInPlayer": "플레이어로 열기",
     "files": "파일",
     "totalSize": "총 크기",
-    "elapsed": "소요 시간",
+    "elapsed": "처리 시간",
     "options": "옵션",
     "badge": {
       "noHud": "HUD 없음",
