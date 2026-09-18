@@ -236,6 +236,35 @@
     "cumulativeHint": "Cumulative through each round; flashed counts enemy blind events over 1.1 seconds."
   },
   "highlights": {
+    "details": "Details",
+    "scoring": {
+      "title": "Score details",
+      "total": "Total {{score}}",
+      "multikill": {
+        "name": "Multi-kills and fast kills",
+        "rule": "More kills in less time earn more points."
+      },
+      "specialKills": {
+        "name": "Special kills",
+        "rule": "Bonus points for headshots, wallbangs and other special kills."
+      },
+      "posthumous": {
+        "name": "Posthumous kills",
+        "rule": "Grenade or fire kills after death."
+      },
+      "clutch": {
+        "name": "Clutch",
+        "rule": "Bonus points based on opponents faced and clutch performance."
+      },
+      "ninjaDefuse": {
+        "name": "Possible ninja defuse",
+        "rule": "Defuse successfully while enemies are still alive."
+      },
+      "context": {
+        "name": "Round modifiers",
+        "rule": "Bonus points for pistol and match-point rounds."
+      }
+    },
     "allPlayers": "All players",
     "minScore": "Min score {{n}}",
     "shown": "{{shown}} / {{total}} clips",

@@ -232,6 +232,35 @@
     "cumulativeHint": "累積至該回合結束；致盲統計使用超過 1.1 秒的敵人致盲事件。"
   },
   "highlights": {
+    "details": "详情",
+    "scoring": {
+      "title": "评分详情",
+      "total": "总分 {{score}}",
+      "multikill": {
+        "name": "连杀与快速连杀",
+        "rule": "击杀越多、间隔越短，得分越高。"
+      },
+      "specialKills": {
+        "name": "特殊击杀",
+        "rule": "爆头、穿墙等特殊击杀额外加分。"
+      },
+      "posthumous": {
+        "name": "死后击杀",
+        "rule": "死后以手雷或燃烧击杀敌人。"
+      },
+      "clutch": {
+        "name": "残局",
+        "rule": "以少打多，依对手人数与表现加分。"
+      },
+      "ninjaDefuse": {
+        "name": "疑似 Ninja 拆弹",
+        "rule": "敌方仍存活时成功拆弹。"
+      },
+      "context": {
+        "name": "回合加成",
+        "rule": "手枪局与赛点局额外加分。"
+      }
+    },
     "allPlayers": "所有玩家",
     "minScore": "最低分数 {{n}}",
     "shown": "{{shown}} / {{total}} 段",

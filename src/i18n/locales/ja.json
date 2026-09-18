@@ -232,6 +232,35 @@
     "cumulativeHint": "各ラウンド終了までの累計です。フラッシュは敵の視界を1.1秒超奪ったイベントを集計します。"
   },
   "highlights": {
+    "details": "詳細",
+    "scoring": {
+      "title": "スコア詳細",
+      "total": "合計 {{score}}",
+      "multikill": {
+        "name": "連続キル",
+        "rule": "短時間に多く倒すほど高得点。"
+      },
+      "specialKills": {
+        "name": "特殊キル",
+        "rule": "ヘッドショットや壁抜きなどの特殊キルで加点。"
+      },
+      "posthumous": {
+        "name": "死後のキル",
+        "rule": "死亡後の手榴弾や炎によるキル。"
+      },
+      "clutch": {
+        "name": "クラッチ",
+        "rule": "相手の人数とクラッチでの活躍に応じて加点。"
+      },
+      "ninjaDefuse": {
+        "name": "Ninja解除の可能性",
+        "rule": "敵が生存中に爆弾解除に成功。"
+      },
+      "context": {
+        "name": "ラウンド補正",
+        "rule": "ピストルラウンドとマッチポイントで加点。"
+      }
+    },
     "allPlayers": "すべてのプレイヤー",
     "minScore": "最低スコア {{n}}",
     "shown": "{{shown}} / {{total}} クリップ",

@@ -1,10 +1,12 @@
 import { ExportDialog } from './ExportDialog.tsx';
 import { displayPlayerName } from '../playerName.ts';
 import { useMemo, useState } from 'react';
-import { Badge, Box, Button, Checkbox, Flex, Select, Slider, Table, Text } from '@radix-ui/themes';
+import { Badge, Box, Button, Checkbox, Dialog, Flex, Select, Slider, Table, Text } from '@radix-ui/themes';
 import { useTranslation } from 'react-i18next';
 import { api, clock, type DemoMeta, type Highlight, type ParsedDemo, type Status } from '../api.ts';
 
+const TAG_LABELS: Record<string, string> = { 'ninja-defuse': 'highlights.possibleNinja', 'post-round': 'highlights.postRound', posthumous: 'highlights.posthumous' };
+const SCORE_PARTS = ['multikill', 'specialKills', 'posthumous', 'clutch', 'ninjaDefuse', 'context'] as const;
 const HOT_TAGS = new Set(['ace', '4k', 'clutch', 'knife', 'noscope']);
 
 function summaryOf(h: Highlight): string {
@@ -17,6 +19,7 @@ export function HighlightsTab({ meta, parsed, status, onRendered, onSetup }: { m
   const [minScore, setMinScore] = useState(3);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [dialog, setDialog] = useState(false);
+  const [detail, setDetail] = useState<Highlight | null>(null);
   const tr = parsed.info.tickRate;
 
   const visible = useMemo(() => parsed.highlights.filter((h) => (playerFilter === 'all' || h.player.steamid === playerFilter) && h.score >= minScore), [parsed.highlights, playerFilter, minScore]);
@@ -73,13 +76,14 @@ export function HighlightsTab({ meta, parsed, status, onRendered, onSetup }: { m
             <Table.ColumnHeaderCell>{t('highlights.col.player')}</Table.ColumnHeaderCell>
             <Table.ColumnHeaderCell>{t('highlights.col.what')}</Table.ColumnHeaderCell>
             <Table.ColumnHeaderCell>{t('highlights.col.tags')}</Table.ColumnHeaderCell>
+            <Table.ColumnHeaderCell>{t('highlights.details')}</Table.ColumnHeaderCell>
           </Table.Row>
         </Table.Header>
         <Table.Body>
           {visible.map((h) => (
             <Table.Row key={h.id} className={`row-click ${selected.has(h.id) ? 'row-selected' : ''}`} onClick={() => toggle(h.id)}>
-              <Table.Cell>
-                <Checkbox checked={selected.has(h.id)} onCheckedChange={() => toggle(h.id)} onClick={(e) => e.stopPropagation()} />
+              <Table.Cell style={{ verticalAlign: 'middle' }}>
+                <Checkbox style={{ display: 'flex' }} checked={selected.has(h.id)} onCheckedChange={() => toggle(h.id)} onClick={(e) => e.stopPropagation()} />
               </Table.Cell>
               <Table.Cell align="right">
                 <Text weight="bold">{h.score.toFixed(1)}</Text>
@@ -97,22 +101,49 @@ export function HighlightsTab({ meta, parsed, status, onRendered, onSetup }: { m
                 <Flex gap="1" wrap="wrap">
                   {h.tags.map((tag) => (
                     <Badge key={tag} size="1" color={HOT_TAGS.has(tag) ? 'amber' : 'gray'} variant={HOT_TAGS.has(tag) ? 'solid' : 'soft'}>
-                      {tag}
+                      {t(TAG_LABELS[tag] ?? tag, { defaultValue: tag })}
                     </Badge>
                   ))}
                 </Flex>
+              </Table.Cell>
+              <Table.Cell>
+                <Button size="1" variant="soft" onClick={(event) => { event.stopPropagation(); setDetail(h); }}>
+                  {t('highlights.details')}
+                </Button>
               </Table.Cell>
             </Table.Row>
           ))}
           {visible.length === 0 && (
             <Table.Row>
-              <Table.Cell colSpan={8}>
+              <Table.Cell colSpan={9}>
                 <Text color="gray">{t('highlights.empty')}</Text>
               </Table.Cell>
             </Table.Row>
           )}
         </Table.Body>
       </Table.Root>
+
+      <Dialog.Root open={detail !== null} onOpenChange={(open) => { if (!open) setDetail(null); }}>
+        <Dialog.Content maxWidth="640px">
+          <Dialog.Title>{t('highlights.scoring.title')}</Dialog.Title>
+          <Dialog.Description size="2" mb="3">{detail?.title}</Dialog.Description>
+          {detail && <>
+            <Text as="p" weight="bold" size="4" mb="2">{t('highlights.scoring.total', { score: detail.score.toFixed(2) })}</Text>
+            <Box style={{ maxHeight: '55vh', overflowY: 'auto' }}>
+              {SCORE_PARTS.filter((part) => (detail.breakdown[part] ?? 0) > 0).map((part) => (
+                <Box key={part} mb="3">
+                  <Flex justify="between" gap="3">
+                    <Text weight="bold" size="2">{t(`highlights.scoring.${part}.name`)}</Text>
+                    <Text weight="bold" size="2" style={{ fontVariantNumeric: 'tabular-nums' }}>+{(detail.breakdown[part] ?? 0).toFixed(2)}</Text>
+                  </Flex>
+                  <Text as="p" size="2" color="gray">{t(`highlights.scoring.${part}.rule`)}</Text>
+                </Box>
+              ))}
+            </Box>
+          </>}
+          <Flex justify="end" mt="3"><Dialog.Close><Button variant="soft">{t('common.close')}</Button></Dialog.Close></Flex>
+        </Dialog.Content>
+      </Dialog.Root>
 
       <ExportDialog open={dialog} onOpenChange={setDialog} count={chosen.length} highlights={chosen} tickRate={tr} seconds={selectedSeconds} status={status} onSetup={onSetup}
         onSubmit={options=>api.render(meta.id,[...selected],options)} onSubmitted={()=>{setSelected(new Set());onRendered();}} />

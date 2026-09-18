@@ -232,6 +232,35 @@
     "cumulativeHint": "각 라운드 종료까지 누적됩니다. 섬광은 적의 실명 시간이 1.1초를 초과한 이벤트를 집계합니다."
   },
   "highlights": {
+    "details": "상세",
+    "scoring": {
+      "title": "점수 상세",
+      "total": "총점 {{score}}",
+      "multikill": {
+        "name": "연속 처치",
+        "rule": "짧은 시간에 많이 처치할수록 높은 점수."
+      },
+      "specialKills": {
+        "name": "특수 처치",
+        "rule": "헤드샷, 월샷 등 특수 처치에 가산점."
+      },
+      "posthumous": {
+        "name": "사후 처치",
+        "rule": "사망 후 수류탄이나 화염으로 처치."
+      },
+      "clutch": {
+        "name": "클러치",
+        "rule": "상대 수와 클러치 활약에 따라 가산점."
+      },
+      "ninjaDefuse": {
+        "name": "Ninja 해체 추정",
+        "rule": "적이 생존한 상태에서 해체 성공."
+      },
+      "context": {
+        "name": "라운드 보정",
+        "rule": "피스톨 및 매치 포인트 라운드 가산점."
+      }
+    },
     "allPlayers": "모든 플레이어",
     "minScore": "최소 점수 {{n}}",
     "shown": "클립 {{shown}} / {{total}}개",

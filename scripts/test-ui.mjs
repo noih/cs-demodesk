@@ -117,7 +117,7 @@ try {
       if(cmd==='get_demo' && window.emptyParsed)return {meta:demos.find(d=>d.id===args.id)};
       if(cmd==='get_demo' && window.failDemo)throw Error('Cannot read demo');
       if(cmd==='get_demo' && window.holdDemo)await new Promise(resolve=>window.releaseDemo=resolve);
-      if(cmd==='get_demo')return { meta:demos.find(d=>d.id===args.id),parsed:{recoilReference:{ak47:[{x:0,y:0,samples:4},{x:-1,y:-1,samples:4},{x:-2,y:-3,samples:4},{x:-2,y:-4,samples:2}]},info:{mapName:demos.find(d=>d.id===args.id).mapName,tickRate:64,players:[{steamid:'1',name:'Player',teamNumber:3},{steamid:'2',name:'Opponent',teamNumber:2}]},parsedAt:'2026-09-08',score:{A:13,B:9},rounds:[],roundSummaries:[{round:1,winner:'A',killsA:5,killsB:2,players:{'1':{kills:5,deaths:2,damage:450,awp:1,flashed:2,cash:800},'2':{kills:2,deaths:5,damage:220,awp:0,flashed:0,cash:300}}}],stats:[player,{...player,steamid:'2',name:testPlayerNames?.[1] ?? 'Player',team:'B',recoil:{},opponents:{'1':1}}],highlights:[{id:'highlight-1',player:{steamid:'1',name:'Player'},round:8,startTick:640,endTick:1280,keyMoments:[[640,896],[1024,1280]],score:8,tags:['3k'],title:'Player — 3 kills · R8',kills:[],breakdown:{}}]}};
+      if(cmd==='get_demo')return { meta:demos.find(d=>d.id===args.id),parsed:{recoilReference:{ak47:[{x:0,y:0,samples:4},{x:-1,y:-1,samples:4},{x:-2,y:-3,samples:4},{x:-2,y:-4,samples:2}]},info:{mapName:demos.find(d=>d.id===args.id).mapName,tickRate:64,players:[{steamid:'1',name:'Player',teamNumber:3},{steamid:'2',name:'Opponent',teamNumber:2}]},parsedAt:'2026-09-08',score:{A:13,B:9},rounds:[],roundSummaries:[{round:1,winner:'A',killsA:5,killsB:2,players:{'1':{kills:5,deaths:2,damage:450,awp:1,flashed:2,cash:800},'2':{kills:2,deaths:5,damage:220,awp:0,flashed:0,cash:300}}}],stats:[player,{...player,steamid:'2',name:testPlayerNames?.[1] ?? 'Player',team:'B',recoil:{},opponents:{'1':1}}],highlights:[{id:'highlight-1',player:{steamid:'1',name:'Player'},round:8,startTick:640,endTick:1280,keyMoments:[[640,896],[1024,1280]],score:8,tags:['3k'],title:'Player — 3 kills · R8',kills:[],breakdown:{multikill:5,specialKills:3}}]}};
       if(cmd==='plugin:event|listen') { if(window.holdListener)await new Promise(resolve => window.releaseListener = resolve); await new Promise(resolve => setTimeout(resolve, 10)); listeners.set(args.handler, args.handler); return args.handler; }
       if(cmd==='plugin:event|unlisten') { listeners.delete(args.eventId); return; }
       throw Error('Unexpected command '+cmd);
@@ -971,6 +971,17 @@ try {
   await page.waitForFunction(() => window.testCalls.filter(c => c.cmd === 'plugin:event|unlisten').length === window.testCalls.filter(c => c.cmd === 'plugin:event|listen').length - 1);
   assert.equal(await page.evaluate(() => window.testListenerCount()), 1, 'A listener resolved after settings unmount is removed');
   await page.getByRole('tab').filter({hasText:'Highlights'}).click();
+  const highlightRow = page.getByRole('row').filter({has:page.getByRole('button',{name:'Details',exact:true})});
+  const wasSelected = await highlightRow.getByRole('checkbox').isChecked();
+  await highlightRow.getByRole('button',{name:'Details',exact:true}).click();
+  const scoreDialog = page.getByRole('dialog').filter({has:page.getByRole('heading',{name:'Score details',exact:true})});
+  await scoreDialog.getByText('Total 8.00',{exact:true}).waitFor();
+  await scoreDialog.getByText('+5.00',{exact:true}).waitFor();
+  await scoreDialog.getByText('+3.00',{exact:true}).waitFor();
+  assert.equal(await scoreDialog.getByText('+0.00',{exact:true}).count(),0);
+  await scoreDialog.getByRole('button',{name:'Close',exact:true}).click();
+  assert.equal(await highlightRow.getByRole('checkbox').isChecked(),wasSelected,'Score details do not toggle export selection');
+
   await page.getByRole('button',{name:'Select all',exact:true}).click();
   await page.getByRole('button',{name:/^Export/}).click();
   const exportDialog = page.getByRole('dialog').filter({has:page.getByRole('button',{name:'Export',exact:true})});
