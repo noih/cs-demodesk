@@ -58,6 +58,8 @@ export interface Highlight {
   startTick: number;
   endTick: number;
   anchorTick: number;
+  keyMoments?: [number, number][];
+  roundResult?: { fromTick: number; player: string };
   score: number;
   tags: string[];
   title: string;

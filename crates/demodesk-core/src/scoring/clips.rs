@@ -105,6 +105,8 @@ pub fn build(
                 tags: vec![id.clone()],
                 title: format!("{title} · R{}", event.round),
                 kills: vec![],
+                key_moments: vec![],
+                round_result: None,
                 breakdown: Default::default(),
             });
         }

@@ -377,6 +377,8 @@ mod tests {
                 tags: vec![],
                 title: "x".into(),
                 kills: vec![],
+                key_moments: vec![],
+                round_result: None,
                 breakdown: BTreeMap::new(),
             },
             slot,

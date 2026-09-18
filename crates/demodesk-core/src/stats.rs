@@ -125,7 +125,10 @@ pub fn team_of_player(demo: &DemoData) -> impl Fn(&str) -> TeamKey + '_ {
     }
 }
 
-fn round_winner_key(r: &RoundInfo, team_of: &impl Fn(&str) -> TeamKey) -> Option<TeamKey> {
+pub(crate) fn round_winner_key(
+    r: &RoundInfo,
+    team_of: &impl Fn(&str) -> TeamKey,
+) -> Option<TeamKey> {
     let winner = r.winner?;
     let votes: Vec<TeamKey> = r
         .roster

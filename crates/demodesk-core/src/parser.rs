@@ -412,7 +412,7 @@ impl DemoParser {
             r.bomb_defuser = r.bomb_defused_tick.and_then(|t| defusers.get(&t).cloned());
         }
 
-        let damage = damage_from_events(
+        let (damage, damage_ticks) = damage_from_events(
             groups
                 .get("player_hurt")
                 .map(|v| v.as_slice())
@@ -427,7 +427,7 @@ impl DemoParser {
             .iter()
             .map(|r| {
                 let window = std::slice::from_ref(r);
-                let damage = damage_from_events(
+                let (damage, _) = damage_from_events(
                     groups
                         .get("player_hurt")
                         .map(|v| v.as_slice())
@@ -464,6 +464,7 @@ impl DemoParser {
             kills,
             rounds,
             damage,
+            damage_ticks,
             activity,
             aim,
             recoil,
@@ -721,8 +722,9 @@ const UTILITY_WEAPONS: &[&str] = &[
 fn damage_from_events(
     events: &[&GameEvent],
     rounds: &[RoundInfo],
-) -> BTreeMap<String, DamageTotals> {
+) -> (BTreeMap<String, DamageTotals>, BTreeMap<SteamId, Vec<i32>>) {
     let mut out: BTreeMap<String, DamageTotals> = BTreeMap::new();
+    let mut ticks: BTreeMap<SteamId, Vec<i32>> = BTreeMap::new();
     let mut health: HashMap<(usize, String), u32> = HashMap::new();
     let mut events = events.to_vec();
     events.sort_by_key(|ev| Fields(ev).tick());
@@ -768,11 +770,13 @@ fn damage_from_events(
         ) else {
             continue;
         };
-        let entry = out.entry(attacker).or_default();
+        let entry = out.entry(attacker.clone()).or_default();
         if at == vt {
             entry.friendly += damage;
             continue;
         }
+        ticks.entry(attacker).or_default().push(f.tick());
+        ticks.entry(victim).or_default().push(f.tick());
         entry.total += damage;
         match f.str("weapon").as_str() {
             "hegrenade" => entry.he += damage,
@@ -783,7 +787,10 @@ fn damage_from_events(
             entry.utility += damage;
         }
     }
-    out
+    for player_ticks in ticks.values_mut() {
+        player_ticks.dedup();
+    }
+    (out, ticks)
 }
 
 fn ticks_of(groups: &HashMap<&str, Vec<&GameEvent>>, name: &str) -> Vec<i32> {
@@ -921,13 +928,39 @@ mod damage_tests {
     }
 
     #[test]
+    fn key_damage_ticks_include_every_weapon_and_both_players_without_a_kill() {
+        let events: Vec<_> = [
+            "ak47",
+            "hegrenade",
+            "inferno",
+            "taser",
+            "knife",
+            "new_weapon",
+        ]
+        .iter()
+        .enumerate()
+        .map(|(i, weapon)| hurt(10 + i as i32, "enemy", 1, 99 - i as i32, weapon))
+        .collect();
+        let (damage, ticks) = damage_from_events(&events.iter().collect::<Vec<_>>(), &[round(1)]);
+        assert_eq!(damage["enemy"].total, 6);
+        assert_eq!(ticks["enemy"], vec![10, 11, 12, 13, 14, 15]);
+        assert_eq!(ticks["victim"], ticks["enemy"]);
+        let excluded = [
+            hurt(20, "friend", 10, 90, "taser"),
+            hurt(21, "enemy", 0, 90, "inferno"),
+        ];
+        let (_, ticks) = damage_from_events(&excluded.iter().collect::<Vec<_>>(), &[round(1)]);
+        assert!(ticks.is_empty());
+    }
+
+    #[test]
     fn lethal_overkill_and_same_tick_hits_count_only_remaining_hp() {
         let events = [
             hurt(10, "enemy", 21, 79, "hkp2000"),
             hurt(10, "enemy", 134, 0, "hkp2000"),
             hurt(10, "enemy", 134, 0, "hkp2000"),
         ];
-        let damage = damage_from_events(&events.iter().collect::<Vec<_>>(), &[round(1)]);
+        let (damage, _) = damage_from_events(&events.iter().collect::<Vec<_>>(), &[round(1)]);
         assert_eq!(damage["enemy"].total, 100);
         assert_eq!(damage["enemy"].utility, 0);
     }
@@ -940,7 +973,7 @@ mod damage_tests {
             hurt(12, "victim", 5, 65, "inferno"),
             hurt(13, "enemy", 200, 0, "inferno"),
         ];
-        let damage = damage_from_events(&events.iter().collect::<Vec<_>>(), &[round(1)]);
+        let (damage, _) = damage_from_events(&events.iter().collect::<Vec<_>>(), &[round(1)]);
         assert_eq!(damage.len(), 2);
         assert_eq!(damage["friend"].friendly, 20);
         assert_eq!(damage["friend"].total, 0);
@@ -960,7 +993,7 @@ mod damage_tests {
         for event in &mut events {
             event.fields.retain(|f| !f.name.ends_with("team_num"));
         }
-        let damage =
+        let (damage, _) =
             damage_from_events(&events.iter().collect::<Vec<_>>(), &[round(1), round(101)]);
         assert_eq!(damage["enemy"].total, 200);
     }

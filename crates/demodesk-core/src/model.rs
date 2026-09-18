@@ -143,6 +143,9 @@ pub struct DemoData {
     /// Damage dealt to enemies, per attacker steamid (from player_hurt)
     #[serde(default)]
     pub damage: BTreeMap<SteamId, DamageTotals>,
+    /// Enemy damage dealt or received, independent of weapon or whether it was lethal.
+    #[serde(default)]
+    pub damage_ticks: BTreeMap<SteamId, Vec<i32>>,
     #[serde(default)]
     pub activity: BTreeMap<SteamId, ActivityStats>,
     #[serde(default)]
@@ -174,6 +177,14 @@ pub struct HighlightPlayer {
     pub name: String,
 }
 
+/// Explicit context shot after the highlighted player dies; never their first-person POV.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RoundResultView {
+    pub from_tick: i32,
+    pub player: SteamId,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Highlight {
@@ -186,6 +197,11 @@ pub struct Highlight {
     pub end_tick: i32,
     /// Tick of the first notable action
     pub anchor_tick: i32,
+    /// Padded key-event windows. Empty for legacy and analysis clips (keep full window).
+    #[serde(default)]
+    pub key_moments: Vec<[i32; 2]>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub round_result: Option<RoundResultView>,
     pub score: f64,
     pub tags: Vec<String>,
     /// Human readable summary e.g. "Player A — 3K (2 HS, clutch) 1v3 won · R13"
