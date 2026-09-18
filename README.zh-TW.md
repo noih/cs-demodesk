@@ -30,8 +30,6 @@
 
 ![高光評分詳情](docs/images/zh-TW/04-highlights.png)
 
-![高光影片](docs/images/zh-TW/08-video-list.png)
-
 ### 2D 回放
 
 - 玩家位置、視角、血量、護甲、武器、金錢

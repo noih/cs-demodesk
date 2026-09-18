@@ -30,8 +30,6 @@
 
 ![高光评分详情](docs/images/zh-CN/04-highlights.png)
 
-![集锦视频](docs/images/zh-CN/08-video-list.png)
-
 ### 2D 回放
 
 - 玩家位置、视角、血量、护甲、武器、金钱

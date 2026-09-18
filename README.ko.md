@@ -30,8 +30,6 @@ Counter-Strike 2를 위한 Windows용 Demo 관리·분석 도구입니다. 플�
 
 ![하이라이트 점수 상세 정보](docs/images/ko/04-highlights.png)
 
-![하이라이트 영상](docs/images/ko/08-video-list.png)
-
 ### 2D 리플레이
 
 - 플레이어 위치, 시야 방향, 체력, 방탄복, 무기, 소지금

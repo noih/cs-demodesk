@@ -30,8 +30,6 @@ Counter-Strike 2 向けの Windows 用 Demo 管理・分析ツールです。プ
 
 ![ハイライトの評価詳細](docs/images/ja/04-highlights.png)
 
-![ハイライト動画](docs/images/ja/08-video-list.png)
-
 ### 2D リプレイ
 
 - プレイヤーの位置、視線方向、体力、アーマー、武器、所持金

@@ -37,8 +37,6 @@ Statistics are for reference, not a cheating verdict. They cannot identify delib
 
 ![Highlight scoring details](docs/images/en/04-highlights.png)
 
-![Highlight videos](docs/images/en/08-video-list.png)
-
 ### 2D replay
 
 - Player positions, view angles, health, armor, weapon, money
