@@ -12,7 +12,7 @@ import { open } from '@tauri-apps/plugin-dialog';
 import { api, errorText, type DemoMeta, type RenderJob } from '../api.ts';
 import { DateField, dayOf } from './DateField.tsx';
 
-const STATUS_COLOR: Record<DemoMeta['status'], 'gray' | 'amber' | 'green' | 'red'> = { new: 'gray', parsing: 'amber', parsed: 'green', error: 'red' };
+const STATUS_COLOR: Record<DemoMeta['status'], 'gray' | 'amber' | 'green' | 'red'> = { new: 'gray', queued: 'gray', validating: 'amber', parsing: 'amber', parsed: 'green', error: 'red' };
 
 
 export function DemoList({
@@ -103,7 +103,6 @@ export function DemoList({
     try {
       const metas = [];
       for (const p of paths) metas.push(await api.registerDemo(p));
-      for (const m of metas) if (m.status === 'new') await api.parse(m.id);
       await onChanged();
       if (metas[0]) onSelect(metas[0].id);
     } catch (e) {

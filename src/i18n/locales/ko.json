@@ -74,6 +74,8 @@
     "exportJobs": "{{status}} {{n}}",
     "status": {
       "new": "미분석",
+      "queued": "대기 중",
+      "validating": "검증 중",
       "parsing": "분석 중",
       "parsed": "분석 완료",
       "error": "오류"

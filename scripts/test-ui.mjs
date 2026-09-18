@@ -126,6 +126,17 @@ try {
   });
   await page.goto(server.resolvedUrls.local[0]);
   await page.locator('.demo-item').first().waitFor();
+  for (const [status, label] of [['queued', 'Queued'], ['validating', 'Validating'], ['parsing', 'Parsing']]) {
+    await page.evaluate(async status => {
+      const [demo] = await window.__TAURI_INTERNALS__.invoke('list_demos', {});
+      window.emitTestEvent({type: 'demo-changed', demo: {...demo, status}});
+    }, status);
+    await page.locator('.demo-item').first().getByText(label, {exact: true}).waitFor();
+  }
+  await page.evaluate(async () => {
+    const [demo] = await window.__TAURI_INTERNALS__.invoke('list_demos', {});
+    window.emitTestEvent({type: 'demo-changed', demo});
+  });
   const workerFile = (await readdir(new URL('../dist/assets/', import.meta.url))).find(name => name.startsWith('load.worker-') && name.endsWith('.js'));
   assert.ok(workerFile, 'Replay JSON worker is emitted');
   const workerResult = await page.evaluate(async workerUrl => {

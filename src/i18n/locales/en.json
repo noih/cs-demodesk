@@ -74,6 +74,8 @@
     "exportJobs": "{{status}} {{n}}",
     "status": {
       "new": "Not parsed",
+      "queued": "Queued",
+      "validating": "Validating",
       "parsing": "Parsing",
       "parsed": "Parsed",
       "error": "Error"

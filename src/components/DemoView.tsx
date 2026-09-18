@@ -18,7 +18,7 @@ export function DemoView({ analysisJobs, meta, jobs, status, onChanged, onRemove
   const [parsed, setParsed] = useState<ParsedDemo>();
   const [loading, setLoading] = useState(true);
   const [parseRequested, setParseRequested] = useState(false);
-  const parsing = parseRequested || meta.status === 'parsing';
+  const parsing = parseRequested || meta.status === 'queued' || meta.status === 'validating' || meta.status === 'parsing';
   const [tab, setTab] = useState(requestedTab);
   useEffect(() => { setTab(requestedTab); }, [requestedTab, selectionRequest]);
   const tabScrollRef = useRef<HTMLDivElement>(null);
@@ -185,7 +185,7 @@ export function DemoView({ analysisJobs, meta, jobs, status, onChanged, onRemove
           {parsing ? (
             <>
               <Spinner size="3" />
-              <Text color="gray">{t('demoView.parsing')}</Text>
+              <Text color="gray">{t(meta.status === 'queued' ? 'demoList.status.queued' : meta.status === 'validating' ? 'demoList.status.validating' : 'demoView.parsing')}</Text>
             </>
           ) : (
             <>

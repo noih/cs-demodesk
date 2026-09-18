@@ -25,6 +25,8 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
+const PARSE_CONCURRENCY: usize = 3;
+
 /// Events the UI cares about. Payloads are already JSON-serializable.
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "type", rename_all = "kebab-case")]
@@ -98,17 +100,51 @@ impl DemoEntry {
     }
 }
 
+struct ParseRequest {
+    id: String,
+    automatic: bool,
+}
+
+#[derive(Default)]
+struct ParseQueue {
+    pending: VecDeque<ParseRequest>,
+    active: HashSet<String>,
+    workers: usize,
+}
+
+impl ParseQueue {
+    fn contains(&self, id: &str) -> bool {
+        self.active.contains(id) || self.pending.iter().any(|job| job.id == id)
+    }
+    fn is_empty(&self) -> bool {
+        self.active.is_empty() && self.pending.is_empty()
+    }
+}
+
+struct ReplayRequest {
+    id: String,
+    replies: Vec<std::sync::mpsc::Sender<std::result::Result<PathBuf, String>>>,
+}
+
+#[derive(Default)]
+struct ReplayQueue {
+    pending: VecDeque<ReplayRequest>,
+    active: Option<ReplayRequest>,
+    running: bool,
+}
+
 pub struct Engine {
     store: Store,
     data_dir: PathBuf,
     notify: Arc<dyn Notify>,
     demos: Mutex<HashMap<String, DemoEntry>>,
     registered_demos: Mutex<Vec<PathBuf>>,
-    parsing: Mutex<HashSet<String>>,
+    parsing: Mutex<ParseQueue>,
     parser: Arc<DemoParser>,
     render_queue: Mutex<VecDeque<String>>,
-    /// Serializes replay builds (each reads the whole demo again).
-    replay_lock: Mutex<()>,
+    /// Serializes short state/cache mutations, never replay computation.
+    data_lock: Mutex<()>,
+    replay_queue: Mutex<ReplayQueue>,
     /// Serializes radar extraction (one Source2Viewer-CLI at a time).
     radar_lock: Mutex<()>,
     // ponytail: one scoring worker; use per-demo locks if concurrent scoring becomes necessary.
@@ -149,10 +185,11 @@ impl Engine {
             notify,
             demos: Mutex::new(HashMap::new()),
             registered_demos: Mutex::new(registered_demos),
-            parsing: Mutex::new(HashSet::new()),
+            parsing: Mutex::new(ParseQueue::default()),
             parser: Arc::new(DemoParser::new()),
             render_queue: Mutex::new(VecDeque::new()),
-            replay_lock: Mutex::new(()),
+            data_lock: Mutex::new(()),
+            replay_queue: Mutex::new(ReplayQueue::default()),
             radar_lock: Mutex::new(()),
             scoring_lock: Mutex::new(()),
             analysis_queue: Mutex::new(crate::scoring::queue::Queue::default()),
@@ -184,7 +221,7 @@ impl Engine {
         id: &str,
         force: bool,
     ) -> Result<crate::scoring::queue::Job> {
-        let _guard = self.replay_lock.lock().unwrap();
+        let _guard = self.data_lock.lock().unwrap();
         let (meta, parsed) = self.get_demo(id).ok_or_else(|| anyhow!("demo not found"))?;
         anyhow::ensure!(parsed.is_some(), "demo not parsed");
         let mut queue = self.analysis_queue.lock().unwrap();
@@ -758,7 +795,7 @@ impl Engine {
                     }
                 });
                 entry.meta.path = path.to_string_lossy().to_string();
-                if !entry.meta.same_file(bytes, mtime_ms) {
+                if entry.meta.status == DemoStatus::New || !entry.meta.same_file(bytes, mtime_ms) {
                     entry.auto_complete = None;
                 }
                 // File changed under us: the parse result no longer describes it.
@@ -786,10 +823,15 @@ impl Engine {
             list
         };
         self.store.prune_parsed(&keep);
-        self.auto_parse_next();
+        self.enqueue_unparsed();
         let demos = self.demos.lock().unwrap();
         list.into_iter()
-            .map(|meta| demos.get(&meta.id).map(|e| e.meta.clone()).unwrap_or(meta))
+            .map(|meta| {
+                demos
+                    .get(&meta.id)
+                    .map(|entry| entry.meta.clone())
+                    .unwrap_or(meta)
+            })
             .collect()
     }
 
@@ -867,7 +909,7 @@ impl Engine {
         Some(entry.meta.clone())
     }
 
-    fn auto_parse_next(self: &Arc<Self>) {
+    fn enqueue_unparsed(self: &Arc<Self>) {
         let mut candidates: Vec<_> = self
             .demos
             .lock()
@@ -876,148 +918,185 @@ impl Engine {
             .filter(|e| e.meta.status == DemoStatus::New && e.auto_complete != Some(false))
             .map(|e| (e.meta.id.clone(), e.meta.mtime_ms))
             .collect();
-        candidates.sort_by(|a, b| b.1.total_cmp(&a.1));
+        candidates.sort_by(|a, b| b.1.total_cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
         for (id, _) in candidates {
-            if let Err(error) = self.start_parse(&id, true) {
-                eprintln!("could not auto-parse {id}: {error:#}");
-            }
-            if !self.parsing.lock().unwrap().is_empty() {
-                break;
+            if let Err(error) = self.enqueue_parse(&id, true) {
+                eprintln!("could not enqueue {id}: {error:#}");
             }
         }
     }
 
     pub fn parse_demo(self: &Arc<Self>, id: &str) -> Result<()> {
-        self.start_parse(id, false)
+        self.enqueue_parse(id, false)
     }
 
-    fn start_parse(self: &Arc<Self>, id: &str, automatic: bool) -> Result<()> {
-        let source_guard = if automatic {
-            let (meta, complete) = {
-                let demos = self.demos.lock().unwrap();
-                let entry = demos.get(id).ok_or_else(|| anyhow!("demo not found"))?;
-                if entry.meta.status != DemoStatus::New || entry.auto_complete == Some(false) {
-                    return Ok(());
-                }
-                (entry.meta.clone(), entry.auto_complete)
-            };
-            let mut options = std::fs::OpenOptions::new();
-            options.read(true);
-            // Refuse active writers and keep the source unchanged throughout parsing.
-            #[cfg(windows)]
+    fn enqueue_parse(self: &Arc<Self>, id: &str, automatic: bool) -> Result<()> {
+        {
+            let _guard = self.data_lock.lock().unwrap();
+            let mut demos = self.demos.lock().unwrap();
+            let entry = demos.get_mut(id).ok_or_else(|| anyhow!("demo not found"))?;
+            let mut queue = self.parsing.lock().unwrap();
+            if queue.contains(id)
+                || (automatic
+                    && (entry.meta.status != DemoStatus::New || entry.auto_complete == Some(false)))
             {
-                use std::os::windows::fs::OpenOptionsExt;
-                options.share_mode(1); // FILE_SHARE_READ
-            }
-            let Ok(mut file) = options.open(&meta.path) else {
                 return Ok(());
+            }
+            entry.reset();
+            entry.meta.status = DemoStatus::Queued;
+            queue.pending.push_back(ParseRequest {
+                id: id.to_owned(),
+                automatic,
+            });
+            // Publish Queued before a worker can publish Validating or Parsing.
+            self.notify.notify(Event::DemoChanged {
+                demo: entry.meta.clone(),
+            });
+        }
+        self.start_parse_workers();
+        Ok(())
+    }
+
+    fn start_parse_workers(self: &Arc<Self>) {
+        let mut queue = self.parsing.lock().unwrap();
+        let count = queue.pending.len().min(PARSE_CONCURRENCY - queue.workers);
+        let mut failed = Vec::new();
+        for _ in 0..count {
+            queue.workers += 1;
+            let engine = self.clone();
+            if let Err(error) = std::thread::Builder::new()
+                .name("demo-parser".into())
+                .spawn(move || engine.run_parse_queue())
+            {
+                queue.workers -= 1;
+                if let Some(job) = queue.pending.pop_front() {
+                    queue.active.insert(job.id.clone());
+                    failed.push((job.id, error));
+                }
+            }
+        }
+        drop(queue);
+        for (id, error) in failed {
+            self.finish_parse_error(&id, format!("could not start the parse thread: {error}"));
+            self.parsing.lock().unwrap().active.remove(&id);
+        }
+    }
+
+    fn run_parse_queue(self: &Arc<Self>) {
+        loop {
+            let (job, meta) = {
+                let _guard = self.data_lock.lock().unwrap();
+                let mut demos = self.demos.lock().unwrap();
+                let mut queue = self.parsing.lock().unwrap();
+                let Some(job) = queue.pending.pop_front() else {
+                    queue.workers -= 1;
+                    return;
+                };
+                let Some(entry) = demos.get_mut(&job.id) else {
+                    continue;
+                };
+                queue.active.insert(job.id.clone());
+                entry.meta.status = if job.automatic {
+                    DemoStatus::Validating
+                } else {
+                    DemoStatus::Parsing
+                };
+                (job, entry.meta.clone())
             };
-            let metadata = file.metadata()?;
+            self.notify
+                .notify(Event::DemoChanged { demo: meta.clone() });
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                self.parse_source(&job.id, &meta, job.automatic)
+            }));
+            let outcome = match result {
+                Ok(Ok(Some(parsed))) => self
+                    .store
+                    .write_parsed(&job.id, &meta, &parsed)
+                    .and_then(|_| self.store.clear_parse_error(&job.id))
+                    .map(|_| Some(parsed))
+                    .map_err(|e| format!("Cannot save parse result: {e:#}")),
+                Ok(Ok(None)) => Ok(None),
+                Ok(Err(error)) => Err(format!("{error:#}")),
+                Err(_) => Err("parser crashed (unsupported or corrupt demo?)".into()),
+            };
+            match outcome {
+                Ok(parsed) => {
+                    let fresh = self.update_meta(&job.id, |entry| {
+                        if let Some(parsed) = parsed {
+                            entry.meta.status = DemoStatus::Parsed;
+                            entry.meta.error = None;
+                            entry.meta.map_name = Some(parsed.info.map_name.clone());
+                            entry.meta.parsed_at = Some(parsed.parsed_at.clone());
+                            entry.meta.summary = Some(DemoSummary::of(&parsed));
+                            entry.parsed = if job.automatic {
+                                None
+                            } else {
+                                Some(Arc::new(parsed))
+                            };
+                        } else {
+                            entry.meta.status = DemoStatus::New;
+                            entry.auto_complete = Some(false);
+                        }
+                    });
+                    if let Some(demo) = fresh {
+                        self.notify.notify(Event::DemoChanged { demo });
+                    }
+                }
+                Err(error) => self.finish_parse_error(&job.id, error),
+            }
+            self.parsing.lock().unwrap().active.remove(&job.id);
+        }
+    }
+
+    fn parse_source(
+        &self,
+        id: &str,
+        meta: &DemoMeta,
+        automatic: bool,
+    ) -> Result<Option<ParsedDemo>> {
+        use std::io::Read;
+        let mut options = std::fs::OpenOptions::new();
+        options.read(true);
+        #[cfg(windows)]
+        if automatic {
+            use std::os::windows::fs::OpenOptionsExt;
+            options.share_mode(1); // Refuse active writers throughout validation and parsing.
+        }
+        let mut source = match options.open(&meta.path) {
+            Ok(file) => file,
+            Err(_) if automatic => return Ok(None),
+            Err(error) => return Err(error.into()),
+        };
+        if automatic {
+            let metadata = source.metadata()?;
             let modified = metadata
                 .modified()?
                 .duration_since(std::time::UNIX_EPOCH)?
                 .as_millis() as f64;
             if !meta.same_file(metadata.len(), modified) {
-                return Ok(());
+                return Ok(None);
             }
-            let complete = match complete {
-                Some(ready) => ready,
-                None => crate::demo_readiness::is_complete(&mut file)?,
-            };
-            if let Some(entry) = self.demos.lock().unwrap().get_mut(id) {
-                if entry.meta.same_file(metadata.len(), modified) {
-                    entry.auto_complete = Some(complete);
-                }
-            }
-            if !complete {
-                return Ok(());
-            }
-            Some(file)
-        } else {
-            None
-        };
-        // Finish any in-flight replay write before invalidating its cache.
-        let _replay_guard = self.replay_lock.lock().unwrap();
-        let meta = {
-            // Same lock order as scanning; claim the demo and the automatic slot together.
-            let mut demos = self.demos.lock().unwrap();
-            let entry = demos.get_mut(id).ok_or_else(|| anyhow!("demo not found"))?;
-            let mut parsing = self.parsing.lock().unwrap();
-            if parsing.contains(id)
-                || (automatic && (!parsing.is_empty() || entry.meta.status != DemoStatus::New))
-            {
-                return Ok(());
-            }
-            parsing.insert(id.to_string());
-            entry.reset();
-            entry.meta.status = DemoStatus::Parsing;
-            entry.meta.error = None;
-            entry.meta.clone()
-        };
-        let _ = self.store.delete_parsed(id);
-        // Also covers app termination during parsing: retry then requires an explicit click.
-        if let Err(error) = self
-            .store
-            .write_parse_error(id, "Parsing was interrupted; parse manually to retry.")
+        }
+        let mut bytes = Vec::new();
+        source.read_to_end(&mut bytes)?;
+        if automatic && !crate::demo_readiness::is_complete_bytes(&bytes)? {
+            return Ok(None);
+        }
         {
-            self.finish_parse_error(id, format!("Cannot save parse state: {error:#}"));
-            return Err(error);
+            let _guard = self.data_lock.lock().unwrap();
+            self.store.delete_parsed(id)?;
+            self.store
+                .write_parse_error(id, "Parsing was interrupted; parse manually to retry.")?;
         }
-        self.notify
-            .notify(Event::DemoChanged { demo: meta.clone() });
-        let engine = self.clone();
-        let id = id.to_string();
-        let thread_id = id.clone();
-        let spawned = std::thread::Builder::new()
-            .name(format!("parse-{id}"))
-            .spawn(move || {
-                let _source_guard = source_guard;
-                let id = thread_id;
-                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    engine
-                        .parser
-                        .load_demo(Path::new(&meta.path))
-                        .map(build_parsed_demo)
-                }));
-                let outcome = match result {
-                    Ok(Ok(parsed)) => engine
-                        .store
-                        .write_parsed(&id, &meta, &parsed)
-                        .and_then(|_| engine.store.clear_parse_error(&id))
-                        .map(|_| parsed)
-                        .map_err(|e| format!("Cannot save parse result: {e:#}")),
-                    Ok(Err(err)) => Err(format!("{err:#}")),
-                    Err(_) => Err("parser crashed (unsupported or corrupt demo?)".to_string()),
-                };
-                match outcome {
-                    Ok(parsed) => {
-                        let fresh = engine.update_meta(&id, |e| {
-                            e.meta.status = DemoStatus::Parsed;
-                            e.meta.error = None;
-                            e.meta.map_name = Some(parsed.info.map_name.clone());
-                            e.meta.parsed_at = Some(parsed.parsed_at.clone());
-                            e.meta.summary = Some(DemoSummary::of(&parsed));
-                            e.parsed = if automatic {
-                                None
-                            } else {
-                                Some(Arc::new(parsed))
-                            };
-                        });
-                        engine.parsing.lock().unwrap().remove(&id);
-                        if let Some(demo) = fresh {
-                            engine.notify.notify(Event::DemoChanged { demo });
-                        }
-                    }
-                    Err(error) => engine.finish_parse_error(&id, error),
-                }
-                engine.auto_parse_next();
-            });
-        if let Err(error) = spawned {
-            let message = format!("could not start the parse thread: {error}");
-            self.finish_parse_error(&id, message.clone());
-            return Err(anyhow!(message));
+        if automatic {
+            if let Some(demo) = self.update_meta(id, |e| e.meta.status = DemoStatus::Parsing) {
+                self.notify.notify(Event::DemoChanged { demo });
+            }
         }
-        Ok(())
+        self.parser
+            .load_demo_bytes(Path::new(&meta.path), &bytes)
+            .map(build_parsed_demo)
+            .map(Some)
     }
 
     fn finish_parse_error(&self, id: &str, message: String) {
@@ -1029,7 +1108,6 @@ impl Engine {
             e.meta.status = DemoStatus::Error;
             e.meta.error = Some(message);
         });
-        self.parsing.lock().unwrap().remove(id);
         if let Some(demo) = fresh {
             self.notify.notify(Event::DemoChanged { demo });
         }
@@ -1037,19 +1115,99 @@ impl Engine {
 
     /// Path of the replay stream for a parsed demo, building it on first use
     /// (a few seconds: the demo is read again for positions and projectiles).
-    pub fn replay_file(&self, id: &str) -> Result<PathBuf> {
-        let _guard = self.replay_lock.lock().unwrap();
-        let (meta, parsed) = self.get_demo(id).ok_or_else(|| anyhow!("demo not found"))?;
-        let parsed = parsed
-            .filter(|_| meta.status == DemoStatus::Parsed)
-            .ok_or_else(|| anyhow!("demo not parsed"))?;
-        let path = self.store.replay_path(id);
-        if path.is_file() && self.store.replay_is_current(id) {
-            return Ok(path);
+    pub fn replay_file(self: &Arc<Self>, id: &str) -> Result<PathBuf> {
+        let (send, receive) = std::sync::mpsc::channel();
+        {
+            let mut queue = self.replay_queue.lock().unwrap();
+            if let Some(active) = queue.active.as_mut().filter(|job| job.id == id) {
+                active.replies.push(send);
+            } else if let Some(pending) = queue.pending.iter_mut().find(|job| job.id == id) {
+                pending.replies.push(send);
+            } else {
+                queue.pending.push_back(ReplayRequest {
+                    id: id.to_owned(),
+                    replies: vec![send],
+                });
+            }
+            if !queue.running {
+                queue.running = true;
+                let engine = self.clone();
+                if let Err(error) = std::thread::Builder::new()
+                    .name("replay-builder".into())
+                    .spawn(move || engine.run_replay_queue(|id| engine.build_replay_file(id)))
+                {
+                    queue.running = false;
+                    for job in queue.pending.drain(..) {
+                        for reply in job.replies {
+                            let _ = reply.send(Err(format!("cannot start replay worker: {error}")));
+                        }
+                    }
+                }
+            }
         }
+        receive
+            .recv()
+            .map_err(|_| anyhow!("replay worker stopped"))?
+            .map_err(|error| anyhow!(error))
+    }
+
+    fn run_replay_queue(&self, mut build: impl FnMut(&str) -> Result<PathBuf>) {
+        loop {
+            let id = {
+                let mut queue = self.replay_queue.lock().unwrap();
+                let Some(job) = queue.pending.pop_front() else {
+                    queue.running = false;
+                    return;
+                };
+                let id = job.id.clone();
+                queue.active = Some(job);
+                id
+            };
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| build(&id)))
+                .map_err(|_| "replay builder crashed".to_owned())
+                .and_then(|result| result.map_err(|error| format!("{error:#}")));
+            let job = self.replay_queue.lock().unwrap().active.take().unwrap();
+            for reply in job.replies {
+                let _ = reply.send(result.clone());
+            }
+        }
+    }
+
+    fn build_replay_file(&self, id: &str) -> Result<PathBuf> {
+        let (meta, parsed) = {
+            let _guard = self.data_lock.lock().unwrap();
+            let (meta, parsed) = self.get_demo(id).ok_or_else(|| anyhow!("demo not found"))?;
+            let parsed = parsed
+                .filter(|_| meta.status == DemoStatus::Parsed)
+                .ok_or_else(|| anyhow!("demo not parsed"))?;
+            let path = self.store.replay_path(id);
+            if path.is_file() && self.store.replay_is_current(id) {
+                return Ok(path);
+            }
+            (meta, parsed)
+        };
         let bytes = std::fs::read(&meta.path).map_err(|e| anyhow!("reading {}: {e}", meta.path))?;
         let replay = build_replay(&self.parser, &parsed.info, &parsed.rounds, &bytes)?;
-        self.store.write_replay(id, &replay)
+        let staged = self.store.stage_replay(&replay)?;
+        self.publish_replay(id, &parsed, staged)
+    }
+
+    fn publish_replay(
+        &self,
+        id: &str,
+        parsed: &Arc<ParsedDemo>,
+        staged: tempfile::NamedTempFile,
+    ) -> Result<PathBuf> {
+        let _guard = self.data_lock.lock().unwrap();
+        anyhow::ensure!(
+            self.get_demo(id)
+                .is_some_and(|(current, result)| current.status == DemoStatus::Parsed
+                    && result.is_some_and(|result| Arc::ptr_eq(&result, parsed))),
+            "demo changed while building replay; open it again"
+        );
+        let path = self.store.replay_path(id);
+        staged.persist(&path)?;
+        Ok(path)
     }
 
     /// Radar image(s) + world mapping for a map, extracted from the game files
@@ -1080,7 +1238,7 @@ impl Engine {
     }
 
     pub fn clear_match_anomaly(&self, id: &str) -> Result<()> {
-        let _guard = self.replay_lock.lock().unwrap();
+        let _guard = self.data_lock.lock().unwrap();
         let _scoring = self
             .scoring_lock
             .try_lock()
@@ -1132,7 +1290,7 @@ impl Engine {
 
     /// Clear all demo-owned derived data; preserve the source file.
     pub fn clear_analysis(&self, id: &str) -> Result<()> {
-        let _replay_guard = self.replay_lock.lock().unwrap();
+        let _replay_guard = self.data_lock.lock().unwrap();
         let _scoring = self
             .scoring_lock
             .try_lock()
@@ -1148,7 +1306,7 @@ impl Engine {
 
     /// Delete every parse result (disk + memory). Refused while something is parsing or rendering.
     pub fn clear_all_analysis(&self) -> Result<u64> {
-        let _replay_guard = self.replay_lock.lock().unwrap();
+        let _replay_guard = self.data_lock.lock().unwrap();
         if !self.parsing.lock().unwrap().is_empty() {
             return Err(anyhow!("a demo is being parsed"));
         }
@@ -1205,7 +1363,7 @@ impl Engine {
 
     /// Delete the demo, its analysis and all of its render jobs; shared radar maps remain.
     pub fn remove_demo(&self, id: &str) -> Result<()> {
-        let _guard = self.replay_lock.lock().unwrap();
+        let _guard = self.data_lock.lock().unwrap();
         let _scoring = self
             .scoring_lock
             .try_lock()
@@ -1311,6 +1469,8 @@ impl Engine {
             json!({
                 "known": demos.len(),
                 "new": demos.values().filter(|d| d.meta.status == DemoStatus::New).count(),
+                "queued": demos.values().filter(|d| d.meta.status == DemoStatus::Queued).count(),
+                "validating": demos.values().filter(|d| d.meta.status == DemoStatus::Validating).count(),
                 "parsing": demos.values().filter(|d| d.meta.status == DemoStatus::Parsing).count(),
                 "parsed": demos.values().filter(|d| d.meta.status == DemoStatus::Parsed).count(),
                 "failed": demos.values().filter(|d| d.meta.status == DemoStatus::Error).count(),
@@ -1493,7 +1653,7 @@ impl Engine {
         highlight_ids: Vec<String>,
         options: RenderOptions,
     ) -> Result<RenderJob> {
-        let _guard = self.replay_lock.lock().unwrap();
+        let _guard = self.data_lock.lock().unwrap();
         let (meta, parsed) = self
             .get_demo(demo_id)
             .ok_or_else(|| anyhow!("demo not found"))?;
@@ -1546,7 +1706,7 @@ impl Engine {
         selection: crate::scoring::clips::Selection,
         mut options: RenderOptions,
     ) -> Result<Vec<RenderJob>> {
-        let _guard = self.replay_lock.lock().unwrap();
+        let _guard = self.data_lock.lock().unwrap();
         let groups = self.analysis_clips(demo_id, &selection, options.merge)?;
         let (meta, _) = self
             .get_demo(demo_id)
@@ -1610,7 +1770,7 @@ impl Engine {
     }
 
     pub fn delete_job(&self, id: &str) -> Result<()> {
-        let _guard = self.replay_lock.lock().unwrap();
+        let _guard = self.data_lock.lock().unwrap();
         if self.active_job_id().as_deref() == Some(id) {
             return Err(anyhow!("job is running"));
         }
@@ -1620,7 +1780,7 @@ impl Engine {
 
     /// Delete every render job and its videos. Refused while a render is running or queued.
     pub fn clear_all_clips(&self) -> Result<u64> {
-        let _guard = self.replay_lock.lock().unwrap();
+        let _guard = self.data_lock.lock().unwrap();
         if self.active_job_id().is_some() || !self.render_queue.lock().unwrap().is_empty() {
             return Err(anyhow!("a render is running"));
         }
@@ -1677,7 +1837,7 @@ impl Engine {
 
     fn run_job(self: &Arc<Self>, mut job: RenderJob) {
         // Serialize claiming a queued job with demo removal, including already-dequeued jobs.
-        let guard = self.replay_lock.lock().unwrap();
+        let guard = self.data_lock.lock().unwrap();
         if !self
             .store
             .get_job(&job.id)
@@ -1769,7 +1929,7 @@ impl Engine {
         job.log = latest.log;
         job.progress = latest.progress;
 
-        let _guard = self.replay_lock.lock().unwrap();
+        let _guard = self.data_lock.lock().unwrap();
         job.finished_at = Some(now());
         job.stage = None;
         match outcome {
@@ -2054,14 +2214,25 @@ mod tests {
     fn terminal_events(receiver: &mpsc::Receiver<Event>, count: usize) -> Vec<DemoMeta> {
         let mut finished = vec![];
         let mut running = HashSet::new();
+        let mut validating = HashSet::new();
         while finished.len() < count {
             if let Event::DemoChanged { demo } =
                 receiver.recv_timeout(Duration::from_secs(10)).unwrap()
             {
                 match demo.status {
+                    DemoStatus::Validating => {
+                        assert!(validating.insert(demo.id.clone()), "duplicate validation");
+                        assert!(running.insert(demo.id.clone()), "duplicate worker");
+                        assert!(running.len() <= PARSE_CONCURRENCY);
+                    }
                     DemoStatus::Parsing => {
-                        assert!(running.insert(demo.id.clone()));
-                        assert_eq!(running.len(), 1, "automatic parsing must be sequential");
+                        if !validating.remove(&demo.id) {
+                            assert!(running.insert(demo.id.clone()));
+                        }
+                        assert!(
+                            running.len() <= PARSE_CONCURRENCY,
+                            "automatic parsing exceeded its limit"
+                        );
                     }
                     DemoStatus::Error | DemoStatus::Parsed => {
                         assert!(running.remove(&demo.id));
@@ -2150,7 +2321,7 @@ mod tests {
                     if job.status == JobStatus::Error {
                         let engine = self.0.lock().unwrap().as_ref().unwrap().upgrade().unwrap();
                         assert_eq!(engine.active_job_id(), Some(job.id.clone()));
-                        assert!(engine.replay_lock.try_lock().is_err());
+                        assert!(engine.data_lock.try_lock().is_err());
                         assert_eq!(
                             engine.store.get_job(&job.id).unwrap().status,
                             JobStatus::Error
@@ -2293,9 +2464,9 @@ mod tests {
             .lock()
             .unwrap()
             .extend([queued.id.clone(), other.id.clone()]);
-        engine.parsing.lock().unwrap().insert(id.clone());
+        engine.parsing.lock().unwrap().active.insert(id.clone());
         assert!(engine.remove_demo(&id).is_err());
-        engine.parsing.lock().unwrap().clear();
+        engine.parsing.lock().unwrap().active.clear();
         *engine.active_job.lock().unwrap() =
             Some((queued.id.clone(), Arc::new(AtomicBool::new(false))));
         assert!(engine.remove_demo(&id).is_err());
@@ -2419,6 +2590,292 @@ mod tests {
     }
 
     #[test]
+    fn shared_parse_queue_refills_three_workers_while_replay_is_busy() {
+        struct GatedEvents {
+            events: mpsc::Sender<Event>,
+            finished: mpsc::Sender<()>,
+            gate: Arc<(Mutex<usize>, std::sync::Condvar)>,
+        }
+        impl Notify for GatedEvents {
+            fn notify(&self, event: Event) {
+                if matches!(&event, Event::DemoChanged { demo } if demo.status == DemoStatus::Error)
+                {
+                    let _ = self.finished.send(());
+                    let (lock, ready) = &*self.gate;
+                    // Hold completed workers' slots until the test releases them; no timing race.
+                    let (mut permits, timeout) = ready
+                        .wait_timeout_while(
+                            lock.lock().unwrap(),
+                            Duration::from_secs(10),
+                            |permits| *permits == 0,
+                        )
+                        .unwrap();
+                    assert!(!timeout.timed_out(), "worker was not released");
+                    *permits -= 1;
+                }
+                let _ = self.events.send(event);
+            }
+        }
+        let temp = tempfile::tempdir().unwrap();
+        let data = temp.path().join("data");
+        let demos = temp.path().join("demos");
+        std::fs::create_dir(&demos).unwrap();
+        for i in 0..5 {
+            std::fs::write(demos.join(format!("{i}.dem")), complete_invalid_demo()).unwrap();
+        }
+        Store::open(data.clone())
+            .unwrap()
+            .save_settings(&Settings {
+                scan_game_replays: false,
+                replay_folders: vec![demos.to_string_lossy().into_owned()],
+                ..Default::default()
+            })
+            .unwrap();
+        let (send, receive) = mpsc::channel();
+        let (finished, finished_receive) = mpsc::channel();
+        let gate = Arc::new((Mutex::new(0), std::sync::Condvar::new()));
+        let engine = Engine::new(
+            data,
+            Arc::new(GatedEvents {
+                events: send,
+                finished,
+                gate: gate.clone(),
+            }),
+        )
+        .unwrap();
+        // Keep the independent 2D worker busy for the entire parsing test.
+        let (replay_reply, _) = mpsc::channel();
+        {
+            let mut queue = engine.replay_queue.lock().unwrap();
+            queue.running = true;
+            queue.pending.push_back(ReplayRequest {
+                id: "replay".into(),
+                replies: vec![replay_reply],
+            });
+        }
+        let (replay_started, replay_ready) = mpsc::channel();
+        let (release_replay, replay_release) = mpsc::channel();
+        let replay_engine = engine.clone();
+        let replay_worker = std::thread::spawn(move || {
+            replay_engine.run_replay_queue(|_| {
+                replay_started.send(()).unwrap();
+                replay_release
+                    .recv_timeout(Duration::from_secs(15))
+                    .unwrap();
+                Ok(PathBuf::from("replay.json"))
+            })
+        });
+        replay_ready.recv_timeout(Duration::from_secs(2)).unwrap();
+        let (listed_send, listed_receive) = mpsc::channel();
+        let scanner = engine.clone();
+        let scan = std::thread::spawn(move || {
+            listed_send.send(scanner.list_demos()).unwrap();
+        });
+        let listed = listed_receive.recv_timeout(Duration::from_secs(2));
+        scan.join().unwrap();
+        let listed = listed.expect("scanning must not wait for parsing or replay generation");
+        assert_eq!(listed.len(), 5);
+        for _ in 0..3 {
+            finished_receive
+                .recv_timeout(Duration::from_secs(5))
+                .unwrap();
+        }
+        assert_eq!(engine.parsing.lock().unwrap().active.len(), 3);
+        let manual_source = temp.path().join("manual.dem");
+        std::fs::write(&manual_source, complete_invalid_demo()).unwrap();
+        let manual_id = Engine::demo_id(&manual_source);
+        engine
+            .store
+            .write_parse_error(&manual_id, "manual retry")
+            .unwrap();
+        engine.add_demo(&manual_source).unwrap();
+        engine.parse_demo(&manual_id).unwrap();
+        for demo in &listed {
+            engine.parse_demo(&demo.id).unwrap();
+        }
+        engine.parse_demo(&manual_id).unwrap();
+        assert_eq!(engine.parsing.lock().unwrap().workers, 3);
+        assert_eq!(engine.parsing.lock().unwrap().pending.len(), 3);
+        assert_eq!(
+            engine.get_demo(&manual_id).unwrap().0.status,
+            DemoStatus::Queued
+        );
+
+        std::thread::scope(|scope| {
+            for _ in 0..3 {
+                scope.spawn(|| {
+                    engine.list_demos();
+                });
+            }
+        });
+        assert_eq!(engine.parsing.lock().unwrap().active.len(), 3);
+        assert_eq!(
+            engine
+                .demos
+                .lock()
+                .unwrap()
+                .values()
+                .filter(|e| e.meta.status == DemoStatus::Queued)
+                .count(),
+            3
+        );
+        // Release only one worker: its replacement must start before the other two finish.
+        *gate.0.lock().unwrap() = 1;
+        gate.1.notify_one();
+        finished_receive
+            .recv_timeout(Duration::from_secs(5))
+            .unwrap();
+        assert_eq!(engine.parsing.lock().unwrap().active.len(), 3);
+        assert_eq!(
+            engine
+                .demos
+                .lock()
+                .unwrap()
+                .values()
+                .filter(|entry| entry.meta.status == DemoStatus::Queued)
+                .count(),
+            2
+        );
+        *gate.0.lock().unwrap() = usize::MAX;
+        gate.1.notify_all();
+        let completed = terminal_events(&receive, 6);
+        assert_eq!(
+            completed
+                .iter()
+                .map(|d| &d.id)
+                .collect::<HashSet<_>>()
+                .len(),
+            6
+        );
+        assert!(completed.iter().all(|d| d.status == DemoStatus::Error));
+        assert!(engine.replay_queue.lock().unwrap().active.is_some());
+        release_replay.send(()).unwrap();
+        replay_worker.join().unwrap();
+    }
+
+    #[test]
+    fn replay_publication_rejects_results_invalidated_during_build() {
+        use serde_json::json;
+        let temp = tempfile::tempdir().unwrap();
+        let (send, _) = mpsc::channel();
+        let engine = Engine::new(temp.path().join("data"), Arc::new(Events(send))).unwrap();
+        let (_, info) = crate::scoring::clips::tests::fixture();
+        let parsed = Arc::new(
+            serde_json::from_value::<ParsedDemo>(json!({
+                "info": info, "rounds": [], "kills": [], "highlights": [], "stats": [],
+                "score": {}, "roundSummaries": [], "parsedAt": "same timestamp"
+            }))
+            .unwrap(),
+        );
+        let meta = serde_json::from_value(json!({
+            "id": "demo", "name": "fixture.dem", "path": "fixture.dem",
+            "bytes": 0, "mtimeMs": 0, "createdMs": 0, "status": "parsed"
+        }))
+        .unwrap();
+        let entry = DemoEntry {
+            meta,
+            parsed: Some(parsed.clone()),
+            auto_complete: None,
+        };
+        let replay = serde_json::from_value(json!({
+            "schemaVersion": crate::replay::REPLAY_SCHEMA_VERSION, "tickRate": 64,
+            "step": 4, "firstTick": 0, "lastTick": 0, "players": [], "weapons": [],
+            "frames": [], "events": []
+        }))
+        .unwrap();
+        for scenario in 0..4 {
+            engine
+                .demos
+                .lock()
+                .unwrap()
+                .insert("demo".into(), entry.clone());
+            let staged = engine.store.stage_replay(&replay).unwrap();
+            let staged_path = staged.path().to_path_buf();
+            engine.store.prune_parsed(&HashSet::new());
+            assert!(
+                staged_path.exists(),
+                "rescanning must not remove staged replay data"
+            );
+            match scenario {
+                1 => {
+                    engine.update_meta("demo", DemoEntry::reset);
+                }
+                2 => {
+                    engine.update_meta("demo", |e| e.parsed = Some(Arc::new((*parsed).clone())));
+                }
+                3 => {
+                    engine.demos.lock().unwrap().remove("demo");
+                }
+                _ => {}
+            }
+            let result = engine.publish_replay("demo", &parsed, staged);
+            assert_eq!(result.is_ok(), scenario == 0);
+            assert_eq!(engine.store.replay_path("demo").exists(), scenario == 0);
+            assert!(
+                !staged_path.exists(),
+                "staged data must be consumed or discarded"
+            );
+        }
+    }
+
+    #[test]
+    fn replay_queue_is_fifo_coalesces_requests_and_continues_after_failure() {
+        let temp = tempfile::tempdir().unwrap();
+        let (send, _) = mpsc::channel();
+        let engine = Engine::new(temp.path().join("data"), Arc::new(Events(send))).unwrap();
+        // Start the worker explicitly so pending and active coalescing are deterministic.
+        engine.replay_queue.lock().unwrap().running = true;
+        let request = |id: &'static str| {
+            let engine = engine.clone();
+            std::thread::spawn(move || engine.replay_file(id))
+        };
+        let wait_for = |condition: &dyn Fn(&ReplayQueue) -> bool| {
+            let deadline = std::time::Instant::now() + Duration::from_secs(5);
+            while !condition(&engine.replay_queue.lock().unwrap()) {
+                assert!(std::time::Instant::now() < deadline);
+                std::thread::sleep(Duration::from_millis(1));
+            }
+        };
+        let a = request("a");
+        wait_for(&|q| q.pending.len() == 1);
+        let a2 = request("a");
+        wait_for(&|q| q.pending[0].replies.len() == 2);
+        let b = request("b");
+        wait_for(&|q| q.pending.len() == 2);
+        let (started, start) = mpsc::channel();
+        let (release, released) = mpsc::channel();
+        let worker_engine = engine.clone();
+        let worker = std::thread::spawn(move || {
+            let mut order = vec![];
+            worker_engine.run_replay_queue(|id| {
+                order.push(id.to_owned());
+                if id == "a" {
+                    started.send(()).unwrap();
+                    released.recv_timeout(Duration::from_secs(5)).unwrap();
+                    return Err(anyhow!("fixture build failure"));
+                }
+                Ok(PathBuf::from("b.replay.json"))
+            });
+            order
+        });
+        start.recv_timeout(Duration::from_secs(5)).unwrap();
+        let a3 = request("a");
+        wait_for(&|q| q.active.as_ref().is_some_and(|job| job.replies.len() == 3));
+        release.send(()).unwrap();
+        for reply in [a, a2, a3] {
+            assert!(reply
+                .join()
+                .unwrap()
+                .unwrap_err()
+                .to_string()
+                .contains("fixture build failure"));
+        }
+        assert_eq!(b.join().unwrap().unwrap(), PathBuf::from("b.replay.json"));
+        assert_eq!(worker.join().unwrap(), ["a", "b"]);
+        assert!(!engine.replay_queue.lock().unwrap().running);
+    }
+
+    #[test]
     fn automatic_parse_waits_for_complete_source() {
         let temp = tempfile::tempdir().unwrap();
         let data = temp.path().join("data");
@@ -2435,10 +2892,31 @@ mod tests {
         let (send, receive) = mpsc::channel();
         let engine = Engine::new(data, Arc::new(Events(send))).unwrap();
         let demo = engine.add_demo(&source).unwrap();
-        assert_eq!(demo.status, DemoStatus::New);
-        assert!(store.parse_error(&demo.id).is_none());
-        engine.list_demos();
-        assert!(receive.try_recv().is_err());
+        let wait_skipped = || {
+            let mut validating = false;
+            loop {
+                if let Event::DemoChanged { demo } =
+                    receive.recv_timeout(Duration::from_secs(5)).unwrap()
+                {
+                    match demo.status {
+                        DemoStatus::Queued => {}
+                        DemoStatus::Validating => validating = true,
+                        DemoStatus::New => {
+                            assert!(validating);
+                            break;
+                        }
+                        _ => panic!("incomplete or writable file must not be parsed"),
+                    }
+                }
+            }
+            let deadline = std::time::Instant::now() + Duration::from_secs(5);
+            while engine.is_parsing(&demo.id) {
+                assert!(std::time::Instant::now() < deadline);
+                std::thread::sleep(Duration::from_millis(1));
+            }
+            assert!(store.parse_error(&demo.id).is_none());
+        };
+        wait_skipped();
         assert_eq!(
             engine.demos.lock().unwrap()[&demo.id].auto_complete,
             Some(false)
@@ -2451,8 +2929,7 @@ mod tests {
                 .open(&source)
                 .unwrap();
             engine.list_demos();
-            assert!(receive.try_recv().is_err());
-            assert!(store.parse_error(&demo.id).is_none());
+            wait_skipped();
             drop(writer);
         }
         engine.list_demos();

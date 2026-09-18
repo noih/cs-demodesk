@@ -99,6 +99,8 @@ impl Settings {
 #[serde(rename_all = "lowercase")]
 pub enum DemoStatus {
     New,
+    Queued,
+    Validating,
     Parsing,
     Parsed,
     Error,
@@ -404,10 +406,16 @@ impl Store {
         String::from_utf8_lossy(&head[..n])
             .contains(&format!("\"schemaVersion\":{},", REPLAY_SCHEMA_VERSION))
     }
-    pub fn write_replay(&self, id: &str, replay: &ReplayData) -> Result<PathBuf> {
-        let path = self.replay_path(id);
-        write_atomic(&path, &serde_json::to_vec(replay)?)?;
-        Ok(path)
+    /// Prepare outside the parsed directory so a concurrent rescan cannot prune the staged file.
+    pub fn stage_replay(&self, replay: &ReplayData) -> Result<tempfile::NamedTempFile> {
+        use std::io::Write;
+        let mut file = tempfile::NamedTempFile::new_in(&self.root)?;
+        {
+            let mut writer = std::io::BufWriter::new(file.as_file_mut());
+            serde_json::to_writer(&mut writer, replay)?;
+            writer.flush()?;
+        }
+        Ok(file)
     }
     /// Write both files atomically (tmp + rename) so a crash never leaves a half file.
     pub fn write_parsed(&self, id: &str, meta: &DemoMeta, parsed: &ParsedDemo) -> Result<()> {

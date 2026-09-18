@@ -4,7 +4,15 @@ use std::io::{self, BufReader, Read, Seek};
 pub(crate) fn is_complete(file: &mut std::fs::File) -> io::Result<bool> {
     let length = file.metadata()?.len();
     let mut reader = BufReader::new(file);
-    let result = check(&mut reader, length);
+    match check(&mut reader, length) {
+        Err(e) if e.kind() == io::ErrorKind::UnexpectedEof => Ok(false),
+        result => result,
+    }
+}
+
+pub(crate) fn is_complete_bytes(bytes: &[u8]) -> io::Result<bool> {
+    let mut reader = BufReader::new(std::io::Cursor::new(bytes));
+    let result = check(&mut reader, bytes.len() as u64);
     match result {
         Err(e) if e.kind() == io::ErrorKind::UnexpectedEof => Ok(false),
         result => result,
@@ -61,7 +69,6 @@ fn check(reader: &mut BufReader<impl Read + Seek>, length: u64) -> io::Result<bo
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::Write;
 
     #[test]
     fn only_complete_frames_with_stop_are_ready() {
@@ -71,19 +78,13 @@ mod tests {
         bytes.extend_from_slice(&[71, 1, 3, 0, 0, 0]);
         bytes.extend_from_slice(&[0, 2, 0]);
         for end in 0..=bytes.len() {
-            let mut file = tempfile::tempfile().unwrap();
-            file.write_all(&bytes[..end]).unwrap();
-            file.rewind().unwrap();
             assert_eq!(
-                is_complete(&mut file).unwrap(),
+                is_complete_bytes(&bytes[..end]).unwrap(),
                 end == bytes.len(),
                 "prefix {end}"
             );
         }
         bytes.extend_from_slice(&[255, 255]); // Trailer is outside the gameplay stream.
-        let mut file = tempfile::tempfile().unwrap();
-        file.write_all(&bytes).unwrap();
-        file.rewind().unwrap();
-        assert!(is_complete(&mut file).unwrap());
+        assert!(is_complete_bytes(&bytes).unwrap());
     }
 }

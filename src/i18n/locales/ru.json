@@ -74,6 +74,8 @@
     "exportJobs": "{{status}} {{n}}",
     "status": {
       "new": "Не разобрано",
+      "queued": "В очереди",
+      "validating": "Проверка",
       "parsing": "Разбор",
       "parsed": "Разобрано",
       "error": "Ошибка"

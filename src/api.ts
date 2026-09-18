@@ -190,7 +190,7 @@ export interface MapAssets {
   layers: MapLayer[];
 }
 
-export type DemoStatus = 'new' | 'parsing' | 'parsed' | 'error';
+export type DemoStatus = 'new' | 'queued' | 'validating' | 'parsing' | 'parsed' | 'error';
 export interface DemoMeta {
   id: string;
   name: string;

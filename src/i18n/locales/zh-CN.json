@@ -74,6 +74,8 @@
     "exportJobs": "{{status}} {{n}}",
     "status": {
       "new": "未解析",
+      "queued": "排队中",
+      "validating": "验证中",
       "parsing": "解析中",
       "parsed": "已解析",
       "error": "错误"
