@@ -31,9 +31,11 @@ After `npm run build`, run `node scripts/store-screenshots.mjs <data-directory>/
 with `PLAYWRIGHT_MODULE` set when necessary. The source needs a completed anomaly
 analysis in the sibling `behavior-analysis` directory and enough matches to fill
 the sidebar. Additional source directories are deduplicated by demo path. The script reads caches,
-anonymizes players, and writes five screenshots per language plus a theme comparison
+anonymizes players, and writes eight screenshots per language plus a theme comparison
 to ignored `out/store-screenshots/`. Copy only the selected README images into
 `docs/images/<language>/`; keep source caches and diagnostics local.
+Replay screenshots require cached smoke and radar data. Videos are read from the
+sibling `clips` directory; without completed videos, the video page shows its empty state.
 
 ## Private test data
 

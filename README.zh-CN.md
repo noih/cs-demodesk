@@ -28,6 +28,8 @@
 - 逐项画面元素开关，可合并为单个视频
 - 文件大小上限（10 / 20 / 50 MB），便于在聊天软件分享
 
+![高光评分详情](docs/images/zh-CN/04-highlights.png)
+
 ![集锦视频](docs/images/zh-CN/08-video-list.png)
 
 ### 2D 回放

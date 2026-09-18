@@ -49,7 +49,7 @@ for (const source of sources) for (const file of (await readdir(source)).filter(
     } catch (error) { if (error.code !== 'ENOENT') throw error; }
     try {
       const jobs = [];
-      const renderDir = path.join(source, '../renders');
+      const renderDir = path.join(source, '../clips');
       for (const entry of await readdir(renderDir)) {
         const job = JSON.parse(await readFile(path.join(renderDir, entry, 'job.json'), 'utf8'));
         if (job.demoId !== file.slice(0,-5) || job.status !== 'done') continue;
@@ -104,12 +104,12 @@ assert.equal(probe.highlights[0].title,'Falcon — 3K');
 matches.sort((a,b)=>Number(Boolean(b.screenshotAssessments?.length))-Number(Boolean(a.screenshotAssessments?.length)) || b.highlights.length-a.highlights.length);
 const parsed = matches.map(anonymize);
 const jobs = matches.flatMap((match,i)=>(renderJobs.get(match.info.path) ?? []).map(job=>({...job,demoId:String(i)})));
-assert(jobs.length, 'No existing completed videos found');
 const replayIndex = matches.findIndex(match=>replays.has(match.info.path) && mapAssets[match.info.mapName]);
 assert(replayIndex >= 0, 'No replay with smoke and radar found');
 const replay = replays.get(matches[replayIndex].info.path);
 assets.set('/__screenshot-assets/replay.json',{body:JSON.stringify(replay),contentType:'application/json'});
-const firstRound = parsed[replayIndex].rounds[0];
+const firstRound = parsed[replayIndex].rounds.find(round => replay.smoke.some(frame => frame.cells.length && frame.t > round.freezeEndTick && frame.t < round.endTick));
+assert(firstRound, 'Replay needs a round with visible smoke');
 const smokeFrame = replay.smoke.filter(frame=>frame.t > firstRound.freezeEndTick && frame.t < firstRound.endTick).sort((a,b)=>b.cells.length-a.cells.length)[0];
 assert(smokeFrame?.cells.length, 'First round needs visible smoke');
 // Give matches stable anonymous names; the app applies its normal date sorting.
@@ -154,6 +154,7 @@ try {
       const status = {ok:true,missingRenderTools:[],problems:[],dataDir:'D:/DemoDesk',version:appVersion};
       window.__TAURI_INTERNALS__ = {convertFileSrc: file=>new URL(file.startsWith('/__screenshot-assets/') ? file : '/__screenshot-assets/'+encodeURIComponent(file),location.origin).href,transformCallback:()=>1,unregisterCallback:()=>{},invoke:async(cmd,args)=>{
         if(cmd==='get_startup_error')return null;
+        if(cmd==='preferences_need_reset')return false;
         if(cmd==='get_status')return status;
         if(cmd==='check_for_updates')return {status:'packaged'};
         if(cmd==='get_settings')return {settings:{language:locale},doctor:{ok:true,problems:[],paths:{}},setup:{running:false,log:[]}};
@@ -205,13 +206,14 @@ try {
     await selectMatch(page,String(replayIndex));
     await tabs.nth(5).click();
     await page.locator('.replay-box canvas').waitFor({timeout:60000});
+    await page.locator('.round-pill').getByText(String(firstRound.round), {exact:true}).click();
     const timeline = page.locator('.round-timeline');
     const box = await timeline.boundingBox();
     await timeline.click({position:{x:box.width*(smokeFrame.t-firstRound.startTick)/(firstRound.officiallyEndedTick-firstRound.startTick),y:box.height/2}});
     await capture('07-2d-view');
-    await selectMatch(page,jobs[0].demoId);
+    await selectMatch(page,jobs[0]?.demoId ?? '0');
     await tabs.nth(4).click();
-    await page.locator('.job-previews video').first().waitFor();
+    if (jobs.length) await page.locator('.job-previews video').first().waitFor();
     await page.locator('.job-previews video').evaluateAll(videos=>Promise.all(videos.map(video=>video.readyState>=1 ? Promise.resolve() : new Promise(resolve=>video.addEventListener('loadedmetadata',resolve,{once:true})))));
     await capture('08-video-list');
     if (locale === 'en') {

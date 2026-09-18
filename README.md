@@ -35,6 +35,8 @@ Statistics are for reference, not a cheating verdict. They cannot identify delib
 - Per-element HUD toggles, optional merge into one video
 - File size limit (10 / 20 / 50 MB) for sharing in chat apps
 
+![Highlight scoring details](docs/images/en/04-highlights.png)
+
 ![Highlight videos](docs/images/en/08-video-list.png)
 
 ### 2D replay

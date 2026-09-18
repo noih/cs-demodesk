@@ -28,6 +28,8 @@ Counter-Strike 2를 위한 Windows용 Demo 관리·분석 도구입니다. 플�
 - HUD 요소별 표시 전환, 하나의 영상으로 합치기
 - 채팅 앱 공유용 파일 크기 제한 (10 / 20 / 50 MB)
 
+![하이라이트 점수 상세 정보](docs/images/ko/04-highlights.png)
+
 ![하이라이트 영상](docs/images/ko/08-video-list.png)
 
 ### 2D 리플레이

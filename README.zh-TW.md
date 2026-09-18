@@ -28,6 +28,8 @@
 - 逐項畫面元素開關，可合併為單一影片
 - 檔案大小上限（10 / 20 / 50 MB），便於在通訊軟體分享
 
+![高光評分詳情](docs/images/zh-TW/04-highlights.png)
+
 ![高光影片](docs/images/zh-TW/08-video-list.png)
 
 ### 2D 回放
