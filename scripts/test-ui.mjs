@@ -13,7 +13,7 @@ assert.equal(initialAppearance('invalid', true), 'dark');
 assert.equal(initialAppearance(null, false), 'light');
 assert.equal(Object.keys(THEMES.dark).join(), Object.keys(THEMES.light).join());
 const server = await preview({ preview: { port: 0, host: '127.0.0.1' } });
-const browser = await chromium.launch({ channel: 'chrome', headless: true });
+const browser = await chromium.launch({ channel: 'chrome', headless: true, ignoreDefaultArgs: ['--hide-scrollbars'], args: ['--disable-features=OverlayScrollbar'] });
 try {
   const page = await browser.newPage({ viewport: { width: 1360, height: 940 } });
   const errors = [];
@@ -253,6 +253,30 @@ try {
     assert.deepEqual(overlaps, [], 'Progress updates preserve measured card heights after resizing');
   }
 
+  // A running job above a video can alternate between overflowing and fitting
+  // as the scrollbar changes the preview width and the virtualizer measures it.
+  await page.evaluate(async () => {
+    const jobs = await window.__TAURI_INTERNALS__.invoke('list_jobs');
+    window.queueJobs = [jobs[0], {...jobs[3], outputs: [jobs[3].outputs[0]]}];
+  });
+  await page.locator('.header-tools .bi-arrow-clockwise').locator('..').click();
+  await page.waitForFunction(() => document.querySelectorAll('.job-card').length === 2);
+  for (const height of [920, 924, 926, 930]) {
+    await page.setViewportSize({width:1333, height});
+    const widths = await page.evaluate(async () => {
+      const widths = [];
+      for (let frame = 0; frame < 45; frame++) {
+        await new Promise(requestAnimationFrame);
+        if (frame >= 10) widths.push(document.querySelector('.tab-body').clientWidth);
+      }
+      return [...new Set(widths)];
+    });
+    assert.equal(widths.length, 1, `Video layout stays stable near overflow at height ${height}: ${widths}`);
+  }
+  await page.evaluate(() => { delete window.queueJobs; });
+  await page.locator('.header-tools .bi-arrow-clockwise').locator('..').click();
+  await page.setViewportSize(viewport);
+
   const reparseButton = page.locator('.demo-heading button').filter({ has: page.locator('.bi-arrow-clockwise') });
   await reparseButton.click();
   const pendingParse = page.locator('.demo-heading button[aria-busy="true"]');
@@ -327,7 +351,7 @@ try {
   assert.equal(await page.evaluate(() => window.openedUrl), 'https://apps.microsoft.com/detail/9N5G4VXSDGS5');
   await page.getByRole('button', {name:'GitHub: Version 1.0.10 available',exact:true}).click();
   assert.equal(await page.evaluate(() => window.openedUrl), 'https://github.com/noih/cs-demodesk/releases/latest');
-  await page.getByRole('button', { name: 'Close', exact: true }).click();
+  await page.getByRole('dialog').getByRole('button', { name: 'Close', exact: true }).click();
   const updateCount = () => page.evaluate(() => window.testCalls.filter(c => c.cmd === 'check_for_updates').length);
   const initialChecks = await updateCount();
   await page.evaluate(() => { window.failUpdate = true; window.holdUpdate = true; });

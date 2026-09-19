@@ -51,6 +51,7 @@ body {
   flex: 1;
   min-height: 0;
   overflow: auto;
+  scrollbar-gutter: stable;
   margin: 0 calc(-1 * var(--pad-x)) calc(-1 * var(--pad-bottom)) 0;
   padding: 16px var(--pad-x) var(--pad-bottom) 0;
 }
