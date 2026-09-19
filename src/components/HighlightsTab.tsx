@@ -101,7 +101,7 @@ export function HighlightsTab({ meta, parsed, status, onRendered, onSetup }: { m
                 <Flex gap="1" wrap="wrap">
                   {h.tags.map((tag) => (
                     <Badge key={tag} size="1" color={HOT_TAGS.has(tag) ? 'amber' : 'gray'} variant={HOT_TAGS.has(tag) ? 'solid' : 'soft'}>
-                      {t(TAG_LABELS[tag] ?? tag, { defaultValue: tag })}
+                      {t(TAG_LABELS[tag] ?? `highlights.tags.${tag}`, { defaultValue: tag })}
                     </Badge>
                   ))}
                 </Flex>

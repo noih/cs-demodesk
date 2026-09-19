@@ -117,7 +117,7 @@ try {
       if(cmd==='get_demo' && window.emptyParsed)return {meta:demos.find(d=>d.id===args.id)};
       if(cmd==='get_demo' && window.failDemo)throw Error('Cannot read demo');
       if(cmd==='get_demo' && window.holdDemo)await new Promise(resolve=>window.releaseDemo=resolve);
-      if(cmd==='get_demo')return { meta:demos.find(d=>d.id===args.id),parsed:{recoilReference:{ak47:[{x:0,y:0,samples:4},{x:-1,y:-1,samples:4},{x:-2,y:-3,samples:4},{x:-2,y:-4,samples:2}]},info:{mapName:demos.find(d=>d.id===args.id).mapName,tickRate:64,players:[{steamid:'1',name:'Player',teamNumber:3},{steamid:'2',name:'Opponent',teamNumber:2}]},parsedAt:'2026-09-08',score:{A:13,B:9},rounds:[],roundSummaries:[{round:1,winner:'A',killsA:5,killsB:2,players:{'1':{kills:5,deaths:2,damage:450,awp:1,flashed:2,cash:800},'2':{kills:2,deaths:5,damage:220,awp:0,flashed:0,cash:300}}}],stats:[player,{...player,steamid:'2',name:testPlayerNames?.[1] ?? 'Player',team:'B',recoil:{},opponents:{'1':1}}],highlights:[{id:'highlight-1',player:{steamid:'1',name:'Player'},round:8,startTick:640,endTick:1280,keyMoments:[[640,896],[1024,1280]],score:8,tags:['3k'],title:'Player — 3 kills · R8',kills:[],breakdown:{multikill:5,specialKills:3}}]}};
+      if(cmd==='get_demo')return { meta:demos.find(d=>d.id===args.id),parsed:{recoilReference:{ak47:[{x:0,y:0,samples:4},{x:-1,y:-1,samples:4},{x:-2,y:-3,samples:4},{x:-2,y:-4,samples:2}]},info:{mapName:demos.find(d=>d.id===args.id).mapName,tickRate:64,players:[{steamid:'1',name:'Player',teamNumber:3},{steamid:'2',name:'Opponent',teamNumber:2}]},parsedAt:'2026-09-08',score:{A:13,B:9},rounds:[],roundSummaries:[{round:1,winner:'A',killsA:5,killsB:2,players:{'1':{kills:5,deaths:2,damage:450,awp:1,flashed:2,cash:800},'2':{kills:2,deaths:5,damage:220,awp:0,flashed:0,cash:300}}}],stats:[player,{...player,steamid:'2',name:testPlayerNames?.[1] ?? 'Player',team:'B',recoil:{},opponents:{'1':1}}],highlights:[{id:'highlight-1',player:{steamid:'1',name:'Player'},round:8,startTick:640,endTick:1280,keyMoments:[[640,896],[1024,1280]],score:8,tags:['3k','wallbang','blind','future-tag'],title:'Player — 3 kills · R8',kills:[],breakdown:{multikill:5,specialKills:3}}]}};
       if(cmd==='plugin:event|listen') { if(window.holdListener)await new Promise(resolve => window.releaseListener = resolve); await new Promise(resolve => setTimeout(resolve, 10)); listeners.set(args.handler, args.handler); return args.handler; }
       if(cmd==='plugin:event|unlisten') { listeners.delete(args.eventId); return; }
       throw Error('Unexpected command '+cmd);
@@ -426,8 +426,8 @@ try {
   assert.equal(await page.evaluate(() => window.timelineWheelPrevented), false, 'Timeline wheel allows page scrolling');
   await page.mouse.move(0, 0);
   const recoil = page.getByTestId('recoil-chart');
-  await recoil.getByText('2 bursts',{exact:true}).waitFor();
-  assert.equal(await recoil.getByText('No qualifying bursts',{exact:true}).count(),2);
+  await recoil.getByText('2 sprays',{exact:true}).waitFor();
+  assert.equal(await recoil.getByText('No qualifying sprays',{exact:true}).count(),2);
   await recoil.scrollIntoViewIfNeeded();
   const recoilPlayers = recoil.getByRole('button', { name: '━ Player', exact: true });
   await recoilPlayers.first().click();
@@ -459,9 +459,9 @@ try {
     }, { zoom, playerPoint, weapons: Object.fromEntries(Object.entries(calibration.weapons).map(([id,points])=>[id,projectReference(points)])), accent: (playerPoint ? THEMES.light.players.split(',')[7] : THEMES.light.accent).match(/[a-f0-9]{2}/gi).map(v => parseInt(v, 16)) });
   };
   await checkPlot(1);
-  const burstView = recoil.getByRole('combobox', { name: 'AK-47 Burst view' });
-  const previousBurst = recoil.getByRole('button', { name: 'AK-47 Previous burst', exact: true });
-  const nextBurst = recoil.getByRole('button', { name: 'AK-47 Next burst', exact: true });
+  const burstView = recoil.getByRole('combobox', { name: 'AK-47 Spray' });
+  const previousBurst = recoil.getByRole('button', { name: 'AK-47 Previous spray', exact: true });
+  const nextBurst = recoil.getByRole('button', { name: 'AK-47 Next spray', exact: true });
   await recoilPlayers.first().click();
   const fixedReferenceImage = await recoil.locator('canvas').first().evaluate(canvas=>canvas.toDataURL());
   for (const button of [nextBurst,nextBurst,previousBurst,previousBurst]) {
@@ -474,10 +474,10 @@ try {
   assert.equal(await resetZoom.innerText(), '120%');
   assert.ok(await previousBurst.isDisabled());
   await nextBurst.click();
-  assert.match(await burstView.innerText(), /Burst 1/);
+  assert.match(await burstView.innerText(), /Spray 1/);
   await checkPlot(1.2);
   await nextBurst.click();
-  assert.match(await burstView.innerText(), /Burst 2/);
+  assert.match(await burstView.innerText(), /Spray 2/);
   await checkPlot(1.2); // The extreme second-shot outlier must not rescale the reference.
   assert.ok(await nextBurst.isDisabled());
   await previousBurst.click();
@@ -486,12 +486,12 @@ try {
   const selectorBox = await burstView.boundingBox();
   const previousBox = await previousBurst.boundingBox(), nextBox = await nextBurst.boundingBox();
   assert.ok(selectorBox.width > 200 && Math.abs(selectorBox.x - previousBox.x - previousBox.width - 4) < 2 && Math.abs(nextBox.x - selectorBox.x - selectorBox.width - 4) < 2, 'Selector fills the space between navigation buttons');
-  assert.ok(await recoil.getByRole('button', { name: 'M4A4 Next burst', exact: true }).isDisabled());
+  assert.ok(await recoil.getByRole('button', { name: 'M4A4 Next spray', exact: true }).isDisabled());
   const meanImage = await recoil.locator('canvas').first().evaluate(canvas => canvas.toDataURL());
   await burstView.click();
-  await page.getByRole('option', { name: 'Burst 2 · R2 · tick 200 · 3 shots', exact: true }).click();
+  await page.getByRole('option', { name: 'Spray 2 · R2 · tick 200 · 3 shots', exact: true }).click();
   await page.waitForFunction(before => document.querySelector('[data-testid="recoil-chart"] canvas').toDataURL() !== before, meanImage);
-  assert.match(await burstView.innerText(), /Burst 2/);
+  assert.match(await burstView.innerText(), /Spray 2/);
   await checkPlot(1.2); // The extreme second-shot outlier must not rescale the reference.
   await burstView.click();
   await page.getByRole('option', { name: 'Average', exact: true }).click();
@@ -623,13 +623,13 @@ try {
     if(process.env.UI_SCREENSHOT_DIR) await recoil.screenshot({path:process.env.UI_SCREENSHOT_DIR+'/recoil-'+width+'.png'});
   }
   await playShots.click();
-  await recoil.getByRole('combobox',{name:'Spray player'}).click();
+  await recoil.getByRole('combobox',{name:'Player'}).click();
   await page.getByRole('option',{name:'Player',exact:true}).nth(1).click();
-  assert.equal(await recoil.getByText('No qualifying bursts',{exact:true}).count(),3);
+  assert.equal(await recoil.getByText('No qualifying sprays',{exact:true}).count(),3);
   assert.equal(await page.evaluate(() => window.shotIntervals.size), 0, 'Changing player clears the interval');
   assert.equal(await resetZoom.innerText(),'120%','Changing player preserves zoom');
   assert.ok(!(await resetZoom.isDisabled()),'Reference remains available without player bursts');
-  await recoil.getByText('━ Compensation reference',{exact:true}).first().waitFor();
+  await recoil.getByText('━ Spray pattern',{exact:true}).first().waitFor();
   await page.setViewportSize({width:1360,height:940});
   await page.getByRole('button',{name:'Switch to dark mode'}).click();
   await page.getByRole('button',{name:'Filter demos'}).click();
@@ -984,6 +984,9 @@ try {
   await page.getByRole('tab').filter({hasText:'Highlights'}).click();
   const highlightRow = page.getByRole('row').filter({has:page.getByRole('button',{name:'Details',exact:true})});
   const wasSelected = await highlightRow.getByRole('checkbox').isChecked();
+  for (const label of ['3k', 'Wallbang', 'Blind kill', 'future-tag']) {
+    assert.equal(await highlightRow.getByText(label, { exact: true }).count(), 1);
+  }
   await highlightRow.getByRole('button',{name:'Details',exact:true}).click();
   const scoreDialog = page.getByRole('dialog').filter({has:page.getByRole('heading',{name:'Score details',exact:true})});
   await scoreDialog.getByText('Total 8.00',{exact:true}).waitFor();
@@ -1172,7 +1175,7 @@ try {
       assert.equal(await toolCheckCalls(), checksBeforeSave + 1, 'Saving a changed ' + label + ' runs tool verification once');
     }
     const checksBeforeUnrelatedSave = await toolCheckCalls();
-    await page.getByRole('switch', {name:'Scan game replays',exact:true}).click();
+    await page.getByRole('switch', {name:'Scan downloaded demos',exact:true}).click();
     await page.getByRole('button', {name:'Save',exact:true}).click();
     await page.getByRole('button', {name:'Save',exact:true,disabled:true}).waitFor();
     assert.equal(await toolCheckCalls(), checksBeforeUnrelatedSave, 'Saving an unrelated setting leaves unchanged tool paths unverified');
@@ -1224,7 +1227,7 @@ try {
   await page.reload();
   await page.locator('.demo-item').first().click();
   await page.getByRole('tab', { name: 'Charts', exact: true }).click();
-  const shortNameSelector = page.getByRole('combobox', { name: 'Spray player' });
+  const shortNameSelector = page.getByTestId('recoil-chart').getByRole('combobox', { name: 'Player', exact: true });
   await shortNameSelector.waitFor();
   const selectorLayout = () => page.locator('.bounded-select').evaluateAll(nodes => nodes.map(node => {
     const r = node.getBoundingClientRect(); return { x:r.x,y:r.y-node.closest('.rt-Card').getBoundingClientRect().y,width:r.width,height:r.height };
@@ -1372,13 +1375,13 @@ try {
   await behaviorExport.evaluate(el=>Promise.all(el.getAnimations().map(animation=>animation.finished)));
   const exportBounds=await behaviorExport.boundingBox();
   await page.evaluate(()=>window.holdClipPreview=true);
-  await behaviorExport.getByRole('button',{name:/Instant acquisition/}).click();
+  await behaviorExport.getByRole('button',{name:/Aim snap/}).click();
   await page.waitForFunction(()=>window.releaseClipPreviews?.length>0);
   const loadingBounds=await behaviorExport.boundingBox();
   assert.ok(Math.abs(loadingBounds.y-exportBounds.y)<1 && Math.abs(loadingBounds.height-exportBounds.height)<1,'Rule preview loading must not move or resize the dialog');
   await page.evaluate(()=>{window.holdClipPreview=false;window.releaseClipPreviews.splice(0).forEach(resolve=>resolve());});
 
-  await behaviorExport.getByRole('button',{name:/Rapid straight turn/}).click();
+  await behaviorExport.getByRole('button',{name:/Straight-line flick/}).click();
   await page.waitForFunction(()=>document.querySelectorAll('[role=dialog] button[aria-pressed=true]').length===2);
   assert.equal(await behaviorExport.locator('[data-export-rule]').count(),0,'Selected rules do not add round or interval descriptions');
   await page.waitForFunction(()=>!document.querySelector('[role=dialog] [aria-busy=true]'));
@@ -1390,7 +1393,7 @@ try {
   await page.evaluate(()=>window.failExport=true);
   await behaviorExport.getByRole('button',{name:'Export',exact:true}).click();
   await behaviorExport.getByRole('alert').filter({hasText:'Cannot queue export'}).waitFor();
-  assert.equal(await behaviorExport.getByRole('button',{name:/Instant acquisition/}).getAttribute('aria-pressed'),'true','Failed enqueue retains selection');
+  assert.equal(await behaviorExport.getByRole('button',{name:/Aim snap/}).getAttribute('aria-pressed'),'true','Failed enqueue retains selection');
   assert.equal(await page.evaluate(()=>window.testCalls.findLast(call=>call.cmd==='start_analysis_render').args.options.merge),false);
   await page.evaluate(()=>window.holdClipPreview=true);
   await mergeRules.click();
