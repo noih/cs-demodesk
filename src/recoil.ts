@@ -64,6 +64,33 @@ export function averagePaths(paths: (RecoilPoint | null)[][]): (RecoilPoint | nu
   return mean;
 }
 
+/** Hold the last angular correction through gaps; resume estimates without a frame jump. */
+export function withOriginalFallback(original: (RecoilPoint | null)[], estimated: (RecoilPoint | null)[]): (RecoilPoint | null)[] {
+  const angles = (p: RecoilPoint) => [Math.atan2(p.x, PLANE_DISTANCE_CM), Math.atan2(p.y, Math.hypot(PLANE_DISTANCE_CM, p.x))];
+  let offset = [0, 0], shift = [0, 0];
+  let previous = false, previousEstimated = false;
+  return original.map((point, i) => {
+    const estimate = estimated[i];
+    if (!point) { previous = false; previousEstimated = false; return estimate ?? null; }
+    const raw = angles(point);
+    let adjusted = raw.map((a, j) => a + offset[j]!);
+    if (estimate) {
+      const measured = angles(estimate);
+      // The first recovered sample continues raw motion. Subsequent samples use
+      // measured changes, without retrospectively subtracting unknown tracking.
+      if (previous && !previousEstimated) shift = adjusted.map((a, j) => a - measured[j]!);
+      adjusted = measured.map((a, j) => a + shift[j]!);
+      offset = adjusted.map((a, j) => a - raw[j]!);
+    }
+    previous = true; previousEstimated = !!estimate;
+    if (!estimate && offset.every(v => v === 0)) return point;
+    if (estimate && shift.every(v => v === 0)) return estimate;
+    const [yaw, pitch] = adjusted;
+    if (Math.cos(yaw!) * Math.cos(pitch!) <= 1e-6) return null;
+    return { x: PLANE_DISTANCE_CM * Math.tan(yaw!), y: PLANE_DISTANCE_CM * Math.tan(pitch!) / Math.cos(yaw!), samples: estimate?.samples ?? point.samples };
+  });
+}
+
 /** The reference is the eye movement needed to counter the measured recoil angles. */
 export function projectReference(points: RecoilPoint[]): (RecoilPoint | null)[] {
   return projectRays(points.map(p => ({ origin: [0, 0, 0], yaw: -p.x, pitch: -p.y })))

@@ -31,6 +31,8 @@ try {
       {round:1,startTick:100,shots:[[0,0],[-40,40],[0,80],[40,100]].map(ray)},
       {round:2,startTick:200,shots:[[0,0],[4000,40],[40,80]].map((p,i)=>({...ray(p,i),tick:200+i*6,origin:[i*20,-i*10,64-i*5]}))},
     ]};
+    player.recoil.ak47[0].tracking = Array.from({ length: 39 }, (_, i) => ({ tick: 80 + i, eye: [0,0,64], view: [0,0], targets: [{ id: '2', position: [1000,0,64] }] }));
+    player.recoil.ak47[0].contacts = [{ tick: 106, targetId: '2', kill: false }, { tick: 118, targetId: '2', kill: true }];
     const status = { missingRenderTools:[],ok:true,problems:[],dataDir:'E:/data',activeRender:'job-0',version:'test' };
     window.testCalls = [];
     window.scoreHistory=JSON.parse(localStorage.getItem("test.scoreHistory") || "null");
@@ -426,10 +428,33 @@ try {
   assert.equal(await page.evaluate(() => window.timelineWheelPrevented), false, 'Timeline wheel allows page scrolling');
   await page.mouse.move(0, 0);
   const recoil = page.getByTestId('recoil-chart');
+  assert.match(await recoil.getByRole('combobox', { name: 'AK-47 Spray' }).innerText(), /Spray 1/);
+  assert.equal(await recoil.getByRole('button', { name: 'Tracking correction (estimated)', exact: true }).count(), 0);
+  assert.equal(await recoil.getByText('4★', { exact: true }).count(), 0);
+  if (process.env.UI_SCREENSHOT_DIR) await recoil.screenshot({ path: process.env.UI_SCREENSHOT_DIR + '/spray-corrected.png' });
+  // A spray without tracking context still shows every original shot in correction mode.
+  await recoil.getByRole('button', { name: 'AK-47 Next spray', exact: true }).click();
+  assert.ok(await recoil.getByRole('button', { name: 'Play AK-47', exact: true }).isEnabled());
+  await page.waitForTimeout(100);
+  const correctionRgb = await recoil.getByRole('button', { name: '━ Tracking correction (estimated)', exact: true }).first().evaluate(button => getComputedStyle(button).color.match(/\d+/g).map(Number));
+  await recoil.getByRole('button', { name: '━ Original trajectory', exact: true }).first().click();
+  await page.waitForTimeout(100);
+  const fallbackPixels = await recoil.locator('canvas').first().evaluate((canvas, rgb) => {
+    const pixels = canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height).data;
+    let count = 0;
+    for (let i = 0; i < pixels.length; i += 4) if (rgb.every((v, j) => Math.abs(pixels[i + j] - v) < 2)) count++;
+    return count;
+  }, correctionRgb);
+  assert.ok(fallbackPixels > 10, 'Corrected series retains fallback points when the original series is hidden');
+  await recoil.getByRole('button', { name: '━ Original trajectory', exact: true }).first().click();
+  await recoil.getByRole('button', { name: '━ Tracking correction (estimated)', exact: true }).first().click();
+  await page.waitForTimeout(100);
+  await recoil.getByRole('combobox', { name: 'AK-47 Spray' }).click();
+  await page.getByRole('option', { name: 'Average', exact: true }).click();
   await recoil.getByText('2 sprays',{exact:true}).waitFor();
   assert.equal(await recoil.getByText('No qualifying sprays',{exact:true}).count(),2);
   await recoil.scrollIntoViewIfNeeded();
-  const recoilPlayers = recoil.getByRole('button', { name: '━ Player', exact: true });
+  const recoilPlayers = recoil.getByRole('button', { name: '━ Original trajectory', exact: true });
   await recoilPlayers.first().click();
   assert.deepEqual(await recoilPlayers.evaluateAll(buttons => buttons.map(button => button.getAttribute('aria-pressed'))), ['false', 'false', 'false']);
   await recoilPlayers.last().click();

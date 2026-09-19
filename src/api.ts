@@ -73,7 +73,9 @@ export interface AimStats {
 }
 export interface RecoilPoint { x: number; y: number; samples: number }
 export interface RecoilShot { tick: number; origin: [number, number, number]; viewPitch: number; viewYaw: number }
-export interface RecoilBurst { round: number; startTick: number; shots: RecoilShot[] }
+export interface RecoilFrame { tick: number; eye: [number, number, number]; view: [number, number]; targets: { id: string; position: [number, number, number] }[] }
+export interface RecoilContact { tick: number; targetId: string; kill: boolean }
+export interface RecoilBurst { round: number; startTick: number; shots: RecoilShot[]; tracking?: RecoilFrame[]; contacts?: RecoilContact[] }
 export interface PlayerStats {
   steamid: string;
   name: string;

@@ -5,6 +5,8 @@ use parser::second_pass::game_events::GameEvent;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
 
+pub(crate) mod tracking;
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AimStats {
@@ -259,6 +261,10 @@ pub struct RecoilBurst {
     pub round: i32,
     pub start_tick: i32,
     pub shots: Vec<RecoilShot>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tracking: Vec<tracking::Frame>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub contacts: Vec<tracking::Contact>,
 }
 
 pub fn recoil(
@@ -366,6 +372,8 @@ pub fn recoil(
                     .push(RecoilBurst {
                         round: first.round,
                         start_tick: first.tick,
+                        tracking: Vec::new(),
+                        contacts: Vec::new(),
                         shots: shots[start..end]
                             .iter()
                             .map(|s| s.ray.clone().expect("validated burst sample"))

@@ -420,7 +420,8 @@ impl DemoParser {
             &rounds,
         );
 
-        let recoil = crate::aim::recoil(&out.game_events, &rounds, tick_rate);
+        let mut recoil = crate::aim::recoil(&out.game_events, &rounds, tick_rate);
+        crate::aim::tracking::attach(self, bytes, &mut recoil, &out.game_events, tick_rate)?;
         let aim = crate::aim::compute(&out.game_events, &rounds, tick_rate);
         let activity = activity_from_events(&out.game_events, &rounds);
         let round_metrics = rounds

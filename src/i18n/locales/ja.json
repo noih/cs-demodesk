@@ -567,7 +567,20 @@
     "burst": "スプレー {{n}} · R{{round}} · tick {{tick}} · {{shots}} 発",
     "projectionLimit": "前方の平面と交差しない射線は表示しません。",
     "previousBurst": "前のスプレー",
-    "nextBurst": "次のスプレー"
+    "nextBurst": "次のスプレー",
+    "corrected": "追いエイム補正（推定）",
+    "raw": "元の軌跡",
+    "tracking": "追いエイム",
+    "reaction": "反応待ち",
+    "transfer": "ターゲット切り替え",
+    "unknown": "ターゲット不明",
+    "delay": "推定遅延：{{ms}} ms",
+    "kill": "キル",
+    "hit": "ヒット",
+    "trackingDefinition": "元の軌跡と推定補正を別の色で表示します。補正できない場合は直前の補正量を維持し、元の動きを引き継ぎます。点にカーソルを合わせると詳細を確認できます。追従遅延は最大 200 ms です。",
+    "uncorrectedPoint": "この弾は補正を推定できません。直前の補正量を維持し、元の動きを引き継ぎます。",
+    "timingUnknown": "追従遅延を判定できません",
+    "partialTracking": "遅延は未確定：方向が一致する追従移動を補正"
   },
   "diagnostics": {
     "windows": "録画には Windows が必要です。",

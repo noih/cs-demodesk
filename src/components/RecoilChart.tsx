@@ -1,14 +1,15 @@
 import { displayPlayerName } from '../playerName.ts';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Box, Button, Card, Flex, Grid, Heading, IconButton, Select, Text } from '@radix-ui/themes';
 import { useTranslation } from 'react-i18next';
 import { useAppTheme } from '../AppTheme.tsx';
 import { EChart } from '../charts/EChart.tsx';
 import type { ParsedDemo, RecoilPoint } from '../api.ts';
 
-import { averagePaths, projectReference, projectShots, stepRecoilZoom } from '../recoil.ts';
+import { averagePaths, projectReference, projectShots, stepRecoilZoom, withOriginalFallback } from '../recoil.ts';
 
 import calibration from '../data/recoil-reference.json';
+import { analyseSpray } from '../sprayTracking.ts';
 
 const SHOT_INTERVAL_MS = 100;
 const DEFAULT_ZOOM_SCALE = 0.84375;
@@ -19,7 +20,7 @@ export function RecoilChart({ parsed }: { parsed: ParsedDemo }) {
   const { colors, typography } = useAppTheme();
   const [selected, setSelected] = useState(parsed.stats.find(p => Object.keys(p.recoil ?? {}).length)?.steamid ?? parsed.stats[0]?.steamid ?? '');
   const [burstSelection, setBurstSelection] = useState<Record<string, string>>({});
-  const [visible, setVisible] = useState({ player: true, reference: true });
+  const [visible, setVisible] = useState({ player: true, reference: true, correction: true });
   const [playback, setPlayback] = useState<Record<string, { elapsed: number; total: number; startedAt: number | null }>>({});
   const isPlaying = Object.values(playback).some(state => state.startedAt !== null);
   useEffect(() => { setPlayback({}); setBurstSelection({}); }, [parsed, selected]);
@@ -53,16 +54,23 @@ export function RecoilChart({ parsed }: { parsed: ParsedDemo }) {
     return () => element.removeEventListener('wheel', wheel);
   }, []);
   const player = parsed.stats.find(p => p.steamid === selected) ?? parsed.stats[0];
+  const analyses = useMemo(() => Object.fromEntries(WEAPONS.map(([id]) => [id,
+    (player?.recoil?.[id] ?? []).map(b => analyseSpray(b, calibration.weapons[id], parsed.info.tickRate)),
+  ])), [player, parsed.info.tickRate]);
   const plots = WEAPONS.map(([id, label]) => {
     const bursts = player?.recoil?.[id] ?? [];
-    const selection = burstSelection[id] ?? 'average';
+    const selection = burstSelection[id] ?? String(bursts[0]?.startTick ?? 'average');
     const burst = bursts.find(b => String(b.startTick) === selection);
+    const analysis = burst ? analyses[id]![bursts.indexOf(burst)] : undefined;
+    const eligible = analyses[id]!.filter(a => a.states.every(s => s === 'tracking' || s === 'partialTracking') && new Set(a.segments).size === 1);
     const points = burst ? projectShots(burst.shots) : averagePaths(bursts.map(b => projectShots(b.shots)));
+    const estimated = analysis?.points ?? averagePaths(eligible.map(a => a.points));
+    const correction = withOriginalFallback(points, estimated);
     const standard = projectReference(calibration.weapons[id]).filter(p => p !== null);
     const reference = standard;
     const minX = Math.min(0, ...standard.map(p => p.x)), maxX = Math.max(0, ...standard.map(p => p.x));
     const minY = Math.min(0, ...standard.map(p => p.y)), maxY = Math.max(0, ...standard.map(p => p.y));
-    return { id, label, points, reference, standard, bursts, selection: burst ? selection : 'average', cx: (minX + maxX) / 2, cy: (minY + maxY) / 2 };
+    return { id, label, points, correction, estimated, reference, standard, bursts, burst, analysis, selection: burst ? selection : 'average', cx: (minX + maxX) / 2, cy: (minY + maxY) / 2 };
   });
   const all = plots.flatMap(p => [...p.points, ...p.reference]).filter(p => p !== null);
   // Reference-only bounds keep each zoom percentage stable across players and bursts.
@@ -70,6 +78,7 @@ export function RecoilChart({ parsed }: { parsed: ParsedDemo }) {
     .map(v => Math.max(Math.abs(v.x - p.cx), Math.abs(v.y - p.cy)) * 1.2))) / (zoom * 0.8 * DEFAULT_ZOOM_SCALE);
   const inset = Math.ceil(typography[3]! * 3 + 8);
   const playerColor = colors.players.split(',')[7]!;
+  const correctionColor = colors.players.split(',')[0]!;
   const pointDescription = (point: RecoilPoint | null, index: number) => point ? t('recoil.point', { shot: index + 1, x: point.x.toFixed(2), y: point.y.toFixed(2), n: point.samples }) : t('recoil.projectionLimit');
 
   return <Card ref={root} data-testid="recoil-chart">
@@ -88,7 +97,7 @@ export function RecoilChart({ parsed }: { parsed: ParsedDemo }) {
       </Flex>
     </Flex>
     <Grid style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 360px), 1fr))' }} gap="3">
-      {plots.map(({ id, label, points, reference, bursts, selection, cx: referenceX, cy: referenceY }) => {
+      {plots.map(({ id, label, points, correction, estimated, reference, bursts, burst, analysis, selection, cx: referenceX, cy: referenceY }) => {
         const cx = referenceX + pan.x, cy = referenceY + pan.y;
         const state = playback[id];
         const playing = !!state && state.startedAt !== null;
@@ -100,6 +109,14 @@ export function RecoilChart({ parsed }: { parsed: ParsedDemo }) {
         const selectBurst = (value: string) => {
           setBurstSelection(current => ({ ...current, [id]: value }));
           setPlayback(current => { const next = { ...current }; delete next[id]; return next; });
+        };
+        const shotDetail = (index: number) => {
+          const contact = burst?.contacts?.filter(c => c.tick >= burst.shots[index]!.tick && c.tick <= burst.shots[index]!.tick + 1) ?? [];
+          const targetId = analysis?.targets[index];
+          const target = targetId ? parsed.info.players.find(p => p.steamid === targetId)?.name : undefined;
+          return [analysis && t(`recoil.${analysis.states[index] ?? 'unknown'}`), target && displayPlayerName(target),
+            analysis?.delayMs[index] != null && t('recoil.delay', { ms: Math.round(analysis.delayMs[index]!) }),
+            contact.length > 0 && t(contact.some(c => c.kill) ? 'recoil.kill' : 'recoil.hit')].filter(Boolean).join(' · ');
         };
         return <Card key={id} style={{ minWidth: 0 }}>
           <Flex justify="between" align="center" gap="2">
@@ -118,8 +135,9 @@ export function RecoilChart({ parsed }: { parsed: ParsedDemo }) {
             <IconButton variant="outline" disabled={choiceIndex >= choices.length - 1} aria-label={`${label} ${t('recoil.nextBurst')}`} onClick={() => selectBurst(choices[choiceIndex + 1]!)} style={{ flexShrink: 0 }}>〉</IconButton>
           </Flex>
           <Flex className="chart-legend" gap="3" wrap="wrap" mt="2" mb="1">
-            <button type="button" aria-pressed={visible.player} onClick={() => setVisible(v => ({ ...v, player: !v.player }))} style={{ color: playerColor }}>━ {t('recoil.you')}</button>
+            <button type="button" aria-pressed={visible.player} onClick={() => setVisible(v => ({ ...v, player: !v.player }))} style={{ color: playerColor }}>━ {t('recoil.raw')}</button>
             {reference.length > 0 && <button type="button" aria-pressed={visible.reference} onClick={() => setVisible(v => ({ ...v, reference: !v.reference }))} style={{ color: colors.accent }}>━ {t('recoil.reference')}</button>}
+            <button type="button" aria-pressed={visible.correction} onClick={() => setVisible(v => ({ ...v, correction: !v.correction }))} style={{ color: correctionColor }}>━ {t('recoil.corrected')}</button>
           </Flex>
           {points.length === 0 && reference.length === 0 ? <Flex align="center" justify="center" style={{ minHeight: 180 }}><Text size="2" color="gray">{t('recoil.empty')}</Text></Flex> : <>
             <Box style={{ position: 'relative', aspectRatio: '1', width: '100%', maxWidth: 420, margin: 'auto' }}>
@@ -141,18 +159,24 @@ export function RecoilChart({ parsed }: { parsed: ParsedDemo }) {
               onLostPointerCapture={event => { drag.current = undefined; event.currentTarget.classList.remove('dragging'); }}
               role="img" aria-label={`${displayPlayerName(player?.name)} · ${label} · ${t('recoil.title')}`} style={{ width: '100%', height: '100%' }}>
               <EChart height="100%" option={{
-                tooltip: { trigger: 'item', renderMode: 'richText', formatter: (param: { dataIndex: number; seriesIndex: number }) => `${param.seriesIndex === 0 ? t('recoil.reference') : t('recoil.you')}\n${pointDescription((param.seriesIndex === 0 ? reference : points)[param.dataIndex]!, param.dataIndex)}` },
+                tooltip: { trigger: 'item', renderMode: 'richText', formatter: (param: { data: { shotIndex: number }; seriesIndex: number }) => {
+                  const i = param.data.shotIndex;
+                  const path = [reference, points, correction][param.seriesIndex]!;
+                  const name = [t('recoil.reference'), t('recoil.raw'), t('recoil.corrected')][param.seriesIndex];
+                  const fallback = param.seriesIndex === 2 && !estimated[i] ? `\n${t('recoil.uncorrectedPoint')}` : '';
+                  return `${name}\n${pointDescription(path[i]!, i)}${param.seriesIndex > 0 ? `\n${shotDetail(i)}` : ''}${fallback}`;
+                } },
                 grid: { left: inset, right: 20, top: 20, bottom: inset, outerBoundsMode: 'none' },
                 xAxis: { type: 'value', min: cx - halfSpan, max: cx + halfSpan, name: t('recoil.horizontal'), nameLocation: 'middle', nameGap: typography[3]! + 16, axisLabel: { color: colors.muted, formatter: (value: number) => String(Number(value.toFixed(1))) }, splitLine: { lineStyle: { color: colors.border } } },
                 yAxis: { type: 'value', min: cy - halfSpan, max: cy + halfSpan, axisLabel: { color: colors.muted, formatter: (value: number) => String(Number(value.toFixed(1))) }, splitLine: { lineStyle: { color: colors.border } } },
-                series: [reference, points.slice(0, shown)].map((path, index) => ({ type: 'line', z: index + 2, data: (index === 0 ? visible.reference : visible.player) ? path.map(p => p ? [p.x, p.y] : null) : [], symbol: 'circle', symbolSize: (_value: unknown, params: { dataIndex: number }) => index === 0 ? 5 : pulse && params.dataIndex === shown - 1 ? 10 : 4, showSymbol: true,
-                  lineStyle: { width: index === 0 ? 2 : 1.5, color: index === 0 ? colors.accent : playerColor }, itemStyle: { color: index === 0 ? colors.accent : playerColor },
+                series: [reference, points.slice(0, shown), correction.slice(0, shown)].map((path, index) => ({ type: 'line', z: index + 2, connectNulls: index === 2, data: [visible.reference, visible.player, visible.correction][index] ? path.map((p, i) => p ? { value: [p.x, p.y], shotIndex: i } : null) : [], symbol: 'circle', symbolSize: (_value: unknown, params: { data: { shotIndex: number } }) => index === 0 ? 5 : pulse && params.data?.shotIndex === shown - 1 ? 10 : 4, showSymbol: true,
+                  lineStyle: { width: index === 1 ? 1.5 : 2, color: [colors.accent, playerColor, correctionColor][index] }, itemStyle: { color: [colors.accent, playerColor, correctionColor][index] },
                   label: { show: false },
                   markLine: index === 1 ? { silent: true, symbol: 'none', label: { show: false }, lineStyle: { color: colors.muted, type: 'dashed' }, data: [{ xAxis: 0 }, { yAxis: 0 }] } : undefined,
                 })),
               }} />
             </Box>
-            <IconButton size="2" variant="ghost" style={{ position: 'absolute', right: 20 + 8, bottom: inset + 8, margin: 0, padding: 0, boxSizing: 'border-box', width: 30, height: 30, zIndex: 1 }} disabled={!points.length} aria-label={playbackLabel} title={playbackLabel}
+            <IconButton size="2" variant="ghost" style={{ position: 'absolute', right: 20 + 8, bottom: inset + 8, margin: 0, padding: 0, boxSizing: 'border-box', width: 30, height: 30, zIndex: 1 }} disabled={!points.some(p => p !== null)} aria-label={playbackLabel} title={playbackLabel}
               onClick={() => {
                 setVisible(current => ({ ...current, player: true }));
                 const now = performance.now();
@@ -168,13 +192,13 @@ export function RecoilChart({ parsed }: { parsed: ParsedDemo }) {
             </Box>
             {[...points, ...reference].some(p => p === null) && <Text as="p" size="1" color="gray">{t('recoil.projectionLimit')}</Text>}
             {reference.length === 0 && <Text as="p" size="1" color="gray">{t('recoil.noReference')}</Text>}
-            {points.length === 0 && <Text as="p" size="1" color="gray">{t('recoil.empty')}</Text>}
+            {bursts.length === 0 && <Text as="p" size="1" color="gray">{t('recoil.empty')}</Text>}
           </>}
 
         </Card>;
       })}
     </Grid>
     <Text as="p" size="1" color="gray" mt="2">{t('recoil.vertical')}</Text>
-    <Text as="p" size="1" color="gray" mt="2">{t('recoil.definition')}</Text>
+    <Text as="p" size="1" color="gray" mt="2">{t('recoil.trackingDefinition')}</Text>
   </Card>;
 }

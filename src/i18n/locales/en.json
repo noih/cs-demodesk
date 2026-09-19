@@ -571,7 +571,20 @@
     "burst": "Spray {{n}} · R{{round}} · tick {{tick}} · {{shots}} shots",
     "projectionLimit": "Some rays do not intersect the plane in front of the player; those points are omitted.",
     "previousBurst": "Previous spray",
-    "nextBurst": "Next spray"
+    "nextBurst": "Next spray",
+    "corrected": "Tracking correction (estimated)",
+    "raw": "Original trajectory",
+    "tracking": "Target tracking",
+    "reaction": "Reaction window",
+    "transfer": "Spray transfer",
+    "unknown": "Target uncertain",
+    "delay": "Estimated lag: {{ms}} ms",
+    "kill": "Kill",
+    "hit": "Hit",
+    "trackingDefinition": "Original and estimated corrected trajectories use different colours. When correction is unavailable, original movement continues with the last correction offset. Hover a point for details. Tracking lag is limited to 200 ms.",
+    "uncorrectedPoint": "No correction estimate for this shot; original movement continues with the last correction offset.",
+    "timingUnknown": "Tracking delay undetermined",
+    "partialTracking": "Delay undetermined; consistent tracking movement corrected"
   },
   "diagnostics": {
     "windows": "Recording requires Windows.",

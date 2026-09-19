@@ -20,7 +20,7 @@
     "test:privacy": "node scripts/check-repo-privacy.mjs",
     "test:highlights": "node --experimental-transform-types scripts/test-highlights.mjs",
     "test:core": "cargo test -p demodesk-core",
-    "test:recoil": "node --experimental-transform-types --test scripts/test-recoil.mjs",
+    "test:recoil": "node --experimental-transform-types --test scripts/test-recoil.mjs scripts/test-spray-tracking.mjs",
     "test:replay": "node --experimental-transform-types --test scripts/test-replay.mjs",
     "test:sync": "node --experimental-transform-types --test scripts/test-app-sync.mjs",
     "test:ui": "node --experimental-transform-types scripts/test-ui.mjs"

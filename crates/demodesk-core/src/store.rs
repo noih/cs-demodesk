@@ -133,7 +133,7 @@ impl DemoSummary {
 /// Bump when the parse output or the highlight rules change: every stored
 /// result then silently counts as "not parsed" and is re-computed on demand.
 // Version 14 stores eye angles for compensation paths instead of bullet directions.
-pub const PARSED_SCHEMA_VERSION: u32 = 19;
+pub const PARSED_SCHEMA_VERSION: u32 = 20;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

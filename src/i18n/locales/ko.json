@@ -567,7 +567,20 @@
     "burst": "스프레이 {{n}} · R{{round}} · tick {{tick}} · {{shots}}발",
     "projectionLimit": "전방 평면과 교차하지 않는 조준 궤적의 점은 표시하지 않습니다.",
     "previousBurst": "이전 스프레이",
-    "nextBurst": "다음 스프레이"
+    "nextBurst": "다음 스프레이",
+    "corrected": "트래킹 보정 (추정)",
+    "raw": "원본 궤적",
+    "tracking": "트래킹",
+    "reaction": "반응 구간",
+    "transfer": "스프레이 전환",
+    "unknown": "대상 불명",
+    "delay": "추정 지연: {{ms}} ms",
+    "kill": "킬",
+    "hit": "명중",
+    "trackingDefinition": "원본과 추정 보정 궤적을 서로 다른 색으로 표시합니다. 보정할 수 없으면 이전 보정량을 유지하며 원래 움직임을 이어갑니다. 점에 마우스를 올리면 상세 정보가 표시됩니다. 추적 지연은 최대 200 ms입니다.",
+    "uncorrectedPoint": "이 탄의 보정을 추정할 수 없어 이전 보정량을 유지하며 원래 움직임을 이어갑니다.",
+    "timingUnknown": "추적 지연을 판단할 수 없음",
+    "partialTracking": "지연 미확정: 방향이 일치하는 추적 이동 보정"
   },
   "diagnostics": {
     "windows": "녹화는 Windows에서만 지원됩니다.",

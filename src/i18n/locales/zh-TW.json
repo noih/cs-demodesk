@@ -567,7 +567,20 @@
     "burst": "第 {{n}} 段 · 第 {{round}} 回合 · tick {{tick}} · {{shots}} 發",
     "projectionLimit": "部分射線未與前方目標平面相交，對應的軌跡點不顯示。",
     "previousBurst": "上一段壓槍",
-    "nextBurst": "下一段壓槍"
+    "nextBurst": "下一段壓槍",
+    "corrected": "跟槍校正（估計）",
+    "raw": "原始軌跡",
+    "tracking": "跟槍",
+    "reaction": "反應過渡",
+    "transfer": "壓槍轉移",
+    "unknown": "目標不明",
+    "delay": "估計延遲：{{ms}} ms",
+    "kill": "擊殺",
+    "hit": "命中",
+    "trackingDefinition": "原始軌跡與跟槍校正以不同顏色呈現。無法校正時，沿用先前校正偏移並保留原始移動；將滑鼠移至該點即可查看說明。跟槍延遲上限為 200 ms。",
+    "uncorrectedPoint": "此槍無法估計校正，沿用先前校正偏移並保留原始移動。",
+    "timingUnknown": "跟槍延遲未能判定",
+    "partialTracking": "延遲未定，已校正一致方向的跟槍位移"
   },
   "diagnostics": {
     "windows": "錄製僅支援 Windows。",

@@ -1,8 +1,23 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { averagePaths, projectReference, projectShots, stepRecoilZoom } from '../src/recoil.ts';
+import { averagePaths, projectReference, projectShots, stepRecoilZoom, withOriginalFallback } from '../src/recoil.ts';
 const shot = (origin = [0,0,64], pitch = 0, yaw = 0) => ({ tick:0, origin, viewPitch: pitch, viewYaw: yaw });
 const close = (a,b) => assert.ok(Math.abs(a-b)<1e-8, `${a} != ${b}`);
+
+test('corrected display keeps a continuous angular frame through gaps and recovery', () => {
+  const raw = [{x:0,y:0,samples:1},{x:10,y:20,samples:1},{x:30,y:40,samples:1}];
+  const estimate = {x:5,y:8,samples:1};
+  assert.deepEqual(withOriginalFallback(raw,[]),raw);
+  const rays = angles => projectReference(angles.map(x => ({x,y:0,samples:1})));
+  const original = rays([0,2,4,6,8,10]);
+  const measured = rays([0,1,2,3,4,5]);
+  const shown = withOriginalFallback(original,[measured[0],measured[1],null,null,measured[4],measured[5]]);
+  const expected = rays([0,1,3,5,7,8]);
+  shown.forEach((p,i) => close(p.x,expected[i].x));
+  assert.equal(shown.length,original.length);
+  const acquired = withOriginalFallback(raw,[null,estimate]);
+  acquired.forEach((p,i) => { close(p.x,raw[i].x); close(p.y,raw[i].y); });
+});
 
 test('view trajectory corrects movement and crouch height at fixed 10 m', () => {
   const points=projectShots([shot(),shot([0,-20,64]),shot([0,-20,54]),shot([50,-20,46],-5,-4)]);

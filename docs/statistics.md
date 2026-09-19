@@ -63,7 +63,7 @@ reaction times, crosshair placement, spotted accuracy or trade opportunities.
 
 ## Recoil
 
-The player trajectory uses `fire_bullets` eye angles (`user_pitch` and
+The original player trajectory uses `fire_bullets` eye angles (`user_pitch` and
 `user_yaw`) and firing origins, not the recoil-bearing firing angles or bullet
 impacts. Each burst retains its round, start tick and individual shot samples.
 Set a fixed target 10 m ahead of the first view, using 2.54 cm per game unit.
@@ -84,8 +84,65 @@ can cancel in the average, so it cannot replace individual inspection.
 The complete negated calibration is projected once into the standard frame.
 The reference never depends on player origins, burst length or aim errors.
 
-Parsed schema 14 stores per-burst eye angles and origins. Earlier cached
+Parsed schema 20 adds tick-resolution context to per-burst eye angles and origins. Earlier cached
 statistics are invalidated and rebuilt through the normal parsing workflow.
+
+The default view selects an individual burst and estimates target-relative spray
+movement. One additional tick pass samples the union of burst windows, including
+250 ms before each burst. It retains living enemy positions, shooter view angles,
+and matching same-weapon hurt/death contacts at the shot tick or one tick later.
+Missing positions or duck amounts remain unavailable. Shot origins are measured;
+between shots eye height is estimated as `64 - 18 * duck_amount` units. The fixed
+torso reference is `48 - 18 * duck_amount` above the pawn origin. These are geometric
+proxies, not reconstructed hitboxes or verified body animation.
+
+Target assignment uses recoil-adjusted view direction, a 24-unit body allowance
+plus 3 degrees, and 50 ms persistence. Candidates within 0.75 degrees of each other
+are ambiguous unless a single matched contact disambiguates them. A single matched
+victim with an available live target position takes precedence over the approximate
+angular gate; this identifies the target without removing the player's aim error.
+Multiple victims hit by one shot do not establish intent. Death alone never establishes transfer:
+there must also be a different acquired target afterward. Unknown gaps and transfers
+are excluded from the numerical correction estimate.
+Original and estimated corrected paths use different colours and independent legend
+toggles. Shots lacking an estimate continue their original angular movement while
+holding the last established correction offset. The first recovered estimate is
+aligned to that continuation; later estimates contribute their changes rather than
+snapping back to an absolute position. Tooltips explain the fallback. It never changes the
+analysis or enters the corrected average. The displayed corrected path connects
+successive points across reaction windows and target changes. Missing correction does not hide shots or
+disable playback. Shot state and hit/kill details appear only in point tooltips.
+
+Tracking lag is estimated once per continuous target segment from angular velocities,
+using the same observations for all candidate delays from zero through 200 ms.
+It requires at least 250 ms of comparable observations, changing target motion,
+and a sufficiently strong fit. Constant-speed motion cannot establish lag.
+Unidentifiable lag remains unknown, never zero or 200 ms. For these segments,
+evaluate each inter-shot target-angle change at every tick delay in 0–200 ms.
+For each axis, subtract only the signed component shared by all candidate delays
+(the value nearest zero in their range, or zero if the range spans both signs).
+Integrate these partial corrections instead of discarding the whole segment.
+All candidate histories must be present; reaction intervals and their recovery
+boundary retain original movement. Tooltips distinguish partial tracking from
+a fitted delay. Fully classified single-target partial tracks may enter averages.
+A zero lag for stationary targets requires at least 50 ms of motion
+samples below 0.1 degrees/s; empty or shorter tracks do not establish stationarity.
+Abrupt motion changes open a reaction interval of at most 200 ms, ending earlier
+when a sustained directional response is detected. Reaction shots are retained in
+both displayed paths using the held-offset fallback, but omitted from the
+numerical correction estimate. This is an operational
+tolerance, not a measured human reaction-time claim or per-shot best-fit alignment.
+
+For each engagement, subtract the direction to the target (at the estimated delayed
+position, from the current firing origin), then align the first eligible sample
+once to that shot's reference. Reacquisition of the same target preserves this
+anchor. Switching target changes the anchor but does not reset recoil/shot index.
+Consequently the chart shows changes in control, not absolute initial aim error.
+Calibration is interpolated between shots for target/lag estimation; actual recoil,
+subtick input and animation can differ. This estimator does not verify screen
+visibility, smoke, walls or player intent and must not become a skill score.
+The corrected average includes only fully classified, uninterrupted single-target
+bursts. The original view remains available for every sample.
 
 The fixed reference comes from `src/data/recoil-reference.json`. See the
 [calibration SOP](recoil-calibration.md) for capture, evidence and updates.
