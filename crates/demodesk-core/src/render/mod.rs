@@ -381,7 +381,8 @@ fn recording_passes(clips: &[RenderClip], tick_rate: f64) -> Vec<Vec<usize>> {
         let start = i64::from(clips[i].highlight.start_tick);
         if let Some(pass) = passes.iter_mut().find(|pass| {
             let end = i64::from(clips[*pass.last().unwrap()].highlight.end_tick);
-            start - end >= tick_rate.round() as i64 + 2
+            let rate = tick_rate.round() as i64;
+            start - end >= rate * i64::from(actions::AUDIO_PREROLL_SECONDS) + rate / 2 + 2
         }) {
             pass.push(i);
         } else {
@@ -942,6 +943,33 @@ mod tests {
     }
 
     #[test]
+    fn nearby_clips_use_separate_passes_to_preserve_audio_preroll() {
+        for rate in [64.0_f64, 128.0] {
+            let minimum_gap = 3 * rate as i32 + rate as i32 / 2 + 2;
+            for gap in [minimum_gap - 1, minimum_gap] {
+                let clips: Vec<_> = [[1000, 2000], [2000 + gap, 3000]]
+                    .into_iter()
+                    .map(|[start, end]| {
+                        let mut highlight = sample_highlight("clip", "player", vec![]);
+                        highlight.start_tick = start;
+                        highlight.end_tick = end;
+                        super::RenderClip {
+                            highlight,
+                            slot: Some(1),
+                            round_result_slot: None,
+                            account_id: None,
+                        }
+                    })
+                    .collect();
+                assert_eq!(
+                    super::recording_passes(&clips, rate).len(),
+                    if gap < minimum_gap { 2 } else { 1 }
+                );
+            }
+        }
+    }
+
+    #[test]
     fn overlapping_views_preserve_recording_boundaries_in_separate_passes() {
         let windows = [[2310, 3162], [2535, 3605], [3227, 4000], [4066, 4500]];
         let clips: Vec<_> = windows
@@ -978,7 +1006,7 @@ mod tests {
                     ("start", clip.highlight.start_tick),
                     ("end", clip.highlight.end_tick),
                 ] {
-                    let command = if marker == "start" && index > 0 {
+                    let command = if marker == "start" {
                         format!("demodesk_wait_{}", index + 1)
                     } else {
                         format!(

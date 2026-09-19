@@ -57,6 +57,17 @@ Do not add worker startup, library loading, or waits under the loader lock.
 
 ## Queue and restart behavior
 
+Every clip, including a single-clip export and the first clip of each pass,
+seeks three seconds before its recording boundary. After seeking, the schedule
+clears deferred sound events (`snd_soundevent_clear_deferred`) and stops active
+sound events (`snd_sos_stop_all_soundevents`), then plays normally at speed 1.
+At the recording boundary it pauses for three wall-clock seconds before starting
+capture. Audio reset/preroll and the wait are included in the job log.
+Clips too close together for preroll use separate recording passes. Near the
+beginning of a demo, preroll is limited by the earliest usable setup tick; the
+three-second wall-clock wait still applies. These commands require in-game
+validation after CS2 audio changes; schedule tests cannot prove audible results.
+
 Only one render worker processes the FIFO queue. Enqueue remains available while
 another job runs. Empty-queue detection and clearing the worker-running flag occur
 under the same queue lock, preventing a missed wakeup at worker shutdown.

@@ -666,12 +666,16 @@ impl RecordSession<'_> {
             match what {
                 "seek" => (self.stage)(&format!("recording {i}/{n}: seeking")),
                 "setup" => (self.stage)(&format!("recording {i}/{n}: setup")),
+                "preroll" => {
+                    (self.log)(format!("clip {i}/{n}: audio reset commands sent; preroll"))
+                }
                 "settle" => {
                     if i <= progress.last_settled_clip {
                         return Ok(());
                     }
                     progress.last_settled_clip = i;
-                    // Real time, not demo ticks: let sounds finish without losing clip footage.
+                    (self.log)(format!("clip {i}/{n}: waiting 3 seconds before recording"));
+                    // Keep the wall-clock guard even when the demo starts too early for full preroll.
                     progress.pending_recording = Some((Instant::now() + AUDIO_SETTLE_TIME, i, n));
                 }
                 "start" => {
@@ -836,10 +840,25 @@ mod tests {
             progress: &mut report,
         };
         let mut progress = Progress::default();
+        let before_settle = Instant::now();
         session
-            .handle_console_line("[demodesk] seq 1 of 2 start", &mut progress)
+            .handle_console_line("[demodesk] seq 1 of 1 settle", &mut progress)
+            .unwrap();
+        let (first_deadline, i, n) = progress.pending_recording.unwrap();
+        assert_eq!((i, n), (1, 1));
+        assert!(first_deadline >= before_settle + Duration::from_secs(3));
+        assert!(progress
+            .take_recording_due(first_deadline - Duration::from_millis(1))
+            .is_none());
+        assert_eq!(
+            progress.take_recording_due(first_deadline).as_deref(),
+            Some("alias demodesk_wait_1 \"\"; demo_resume; mirv_streams record start; echo [demodesk] seq 1 of 1 start")
+        );
+        session
+            .handle_console_line("[demodesk] seq 1 of 1 start", &mut progress)
             .unwrap();
         assert!(progress.pending_recording.is_none());
+        let mut progress = Progress::default();
         session
             .handle_console_line("[demodesk] seq 2 of 2 settle", &mut progress)
             .unwrap();

@@ -52,6 +52,7 @@ pub struct Scheduled {
 }
 
 const MIN_TICK: i32 = 96;
+pub(super) const AUDIO_PREROLL_SECONDS: i32 = 3;
 /// Marker prefix echoed to the console at every milestone.
 pub const MARK: &str = "[demodesk]";
 
@@ -94,8 +95,8 @@ pub fn build_schedule(clips: &[RenderClip], o: &ActionsOptions) -> Vec<Scheduled
     for (seq, &ci) in order.iter().enumerate() {
         let clip = &clips[ci];
         let h = &clip.highlight;
-        // Setup one second before the clip, never before the previous clip ended.
-        let mut setup_tick = (h.start_tick - rate).max(MIN_TICK + 4);
+        // Clear seek audio before normal playback rebuilds sound at the clip boundary.
+        let mut setup_tick = (h.start_tick - rate * AUDIO_PREROLL_SECONDS).max(MIN_TICK + 4);
         if let Some(pe) = prev_end {
             setup_tick = setup_tick.max(pe + rate / 2);
         }
@@ -132,6 +133,9 @@ pub fn build_schedule(clips: &[RenderClip], o: &ActionsOptions) -> Vec<Scheduled
         );
         for cmd in [
             "sv_cheats 1",
+            "snd_soundevent_clear_deferred",
+            "snd_sos_stop_all_soundevents",
+            "demo_timescale 1",
             "demo_ui_mode 0",
             // keep rendering at full speed when the window is not in front
             "engine_no_focus_sleep 0",
@@ -146,6 +150,11 @@ pub fn build_schedule(clips: &[RenderClip], o: &ActionsOptions) -> Vec<Scheduled
         ] {
             push(setup_tick, &mut slot, cmd.to_string());
         }
+        push(
+            setup_tick,
+            &mut slot,
+            format!("echo {MARK} seq {} of {n} preroll", seq + 1),
+        );
         push(setup_tick, &mut slot, "volume 1".into());
         push(
             setup_tick,
@@ -326,31 +335,20 @@ pub fn build_schedule(clips: &[RenderClip], o: &ActionsOptions) -> Vec<Scheduled
             }
         }
 
-        if seq > 0 {
-            push(
-                setup_tick,
-                &mut slot,
-                format!(
-                    "alias demodesk_wait_{} \"demo_pause; echo {MARK} seq {} of {n} settle\"",
-                    seq + 1,
-                    seq + 1
-                ),
-            );
-        }
+        push(
+            setup_tick,
+            &mut slot,
+            format!(
+                "alias demodesk_wait_{} \"demo_pause; echo {MARK} seq {} of {n} settle\"",
+                seq + 1,
+                seq + 1
+            ),
+        );
 
-        // 4. Record. Later clips start only when the app finishes the real-time wait.
+        // 4. Record only when the app finishes the real-time wait at the clip start.
         let mut slot = 0;
-        if seq > 0 {
-            // The app clears this alias before resuming: HLAE can revisit the pause tick.
-            push(start_tick, &mut slot, format!("demodesk_wait_{}", seq + 1));
-        } else {
-            push(
-                start_tick,
-                &mut slot,
-                format!("echo {MARK} seq {} of {n} start", seq + 1),
-            );
-            push(start_tick, &mut slot, "mirv_streams record start".into());
-        }
+        // The app clears this alias before resuming: HLAE can revisit the pause tick.
+        push(start_tick, &mut slot, format!("demodesk_wait_{}", seq + 1));
         let mut slot = 0;
         push(end_tick, &mut slot, "mirv_streams record end".into());
         push(
@@ -476,11 +474,11 @@ mod tests {
             &[ending.clone(), clip(42000, 42512, Some(1))],
             &opts(&RenderOptions::default()),
         );
-        assert_eq!(tick_of(&schedule, "spec_player 7"), 40528);
-        assert_eq!(tick_of(&schedule, "spec_mode 3"), 40528);
+        assert_eq!(tick_of(&schedule, "spec_player 7"), 40400);
+        assert_eq!(tick_of(&schedule, "spec_mode 3"), 40400);
         assert!(schedule
             .iter()
-            .any(|c| c.tick.floor() as i32 == 41936 && c.cmd == "spec_mode 1"));
+            .any(|c| c.tick.floor() as i32 == 41808 && c.cmd == "spec_mode 1"));
         assert!(schedule
             .iter()
             .any(|c| c.cmd.contains("drawtext=") && c.cmd.contains("gte(t,0.000000)")));
@@ -536,7 +534,7 @@ mod tests {
         );
         assert_eq!(
             s.iter()
-                .filter(|a| a.cmd == "mirv_streams record start")
+                .filter(|a| a.cmd.starts_with("demodesk_wait_"))
                 .count(),
             1
         );
@@ -545,7 +543,35 @@ mod tests {
     }
 
     #[test]
-    fn later_clips_cannot_start_recording_in_the_pause_batch() {
+    fn single_and_multiple_clips_clear_audio_before_three_seconds_of_preroll() {
+        for count in [1, 2] {
+            for rate in [64.0, 128.0] {
+                let clips = [clip(10_000, 11_000, Some(3)), clip(20_000, 21_000, Some(3))];
+                let render = RenderOptions::default();
+                let mut options = opts(&render);
+                options.tick_rate = rate;
+                let schedule = build_schedule(&clips[..count], &options);
+                for (index, clip) in clips[..count].iter().enumerate() {
+                    let setup = clip.highlight.start_tick - 3 * rate as i32;
+                    for command in [
+                        "snd_soundevent_clear_deferred",
+                        "snd_sos_stop_all_soundevents",
+                    ] {
+                        assert!(schedule
+                            .iter()
+                            .any(|s| s.cmd == command && s.tick.floor() as i32 == setup));
+                    }
+                    assert_eq!(
+                        tick_of(&schedule, &format!("demodesk_wait_{}", index + 1)),
+                        clip.highlight.start_tick
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn every_clip_waits_at_its_start_before_recording() {
         for second_start in [10_500, 20_000] {
             let s = build_schedule(
                 &[
@@ -558,29 +584,31 @@ mod tests {
                 .iter()
                 .filter(|a| a.cmd.starts_with("demodesk_wait_"))
                 .collect();
-            assert_eq!(pauses.len(), 1);
-            assert_eq!(pauses[0].cmd, "demodesk_wait_2");
+            assert_eq!(pauses.len(), 2);
+            assert_eq!(pauses[0].cmd, "demodesk_wait_1");
+            assert_eq!(pauses[0].tick.floor() as i32, 10_000);
+            assert_eq!(pauses[1].cmd, "demodesk_wait_2");
             let setup = tick_of(&s, "echo [demodesk] seq 2 of 2 setup");
             assert!(s.iter().any(|a| a.tick.floor() as i32 == setup
                 && a.cmd
                     == "alias demodesk_wait_2 \"demo_pause; echo [demodesk] seq 2 of 2 settle\""));
-            assert_eq!(pauses[0].tick.floor() as i32, second_start.max(setup + 2));
+            assert_eq!(pauses[1].tick.floor() as i32, second_start.max(setup + 2));
             assert!(s.iter().any(|a| a.cmd == "spec_player 3"
-                && a.tick < pauses[0].tick
+                && a.tick < pauses[1].tick
                 && a.tick >= setup as f64));
             // Even a frame crossing both setup and start cannot enqueue recording early.
-            assert!(!s
-                .iter()
-                .any(|a| a.tick >= setup as f64 && a.cmd == "mirv_streams record start"));
+            assert!(!s.iter().any(|a| a.cmd == "mirv_streams record start"));
             assert!(!s.iter().any(|a| a.cmd == "demo_resume"));
         }
         let first = build_schedule(
             &[clip(10_000, 11_000, Some(3))],
             &opts(&RenderOptions::default()),
         );
-        assert!(!first
-            .iter()
-            .any(|a| a.cmd.contains("demodesk_wait_") || a.cmd.contains("demo_pause")));
+        assert!(first.iter().any(|a| a.cmd
+            == "alias demodesk_wait_1 \"demo_pause; echo [demodesk] seq 1 of 1 settle\""
+            && a.tick < 10_000.0));
+        assert_eq!(tick_of(&first, "demodesk_wait_1"), 10_000);
+        assert!(!first.iter().any(|a| a.cmd == "mirv_streams record start"));
     }
 
     #[test]
@@ -638,15 +666,15 @@ mod tests {
             &opts(&RenderOptions::default()),
         );
         assert_eq!(tick_of(&s, "demo_gototick"), 96);
-        assert!(s.iter().any(|a| a.cmd == "demo_gototick 9935"));
-        assert_eq!(tick_of(&s, "mirv_streams record name"), 9936);
-        assert_eq!(tick_of(&s, "spec_mode 1"), 9936);
-        assert_eq!(tick_of(&s, "spec_player"), 9936);
-        assert_eq!(tick_of(&s, "mirv_streams record start"), 10_000);
+        assert!(s.iter().any(|a| a.cmd == "demo_gototick 9807"));
+        assert_eq!(tick_of(&s, "mirv_streams record name"), 9808);
+        assert_eq!(tick_of(&s, "spec_mode 1"), 9808);
+        assert_eq!(tick_of(&s, "spec_player"), 9808);
+        assert_eq!(tick_of(&s, "demodesk_wait_1"), 10_000);
         assert_eq!(tick_of(&s, "mirv_streams record end"), 11_000);
         assert_eq!(tick_of(&s, "quit"), 11_064);
         assert!(idx(&s, "spec_mode 1") < idx(&s, "spec_player 3"));
-        assert!(idx(&s, "mirv_streams record name") < idx(&s, "mirv_streams record start"));
+        assert!(idx(&s, "mirv_streams record name") < idx(&s, "demodesk_wait_1"));
         assert!(s.windows(2).all(|w| w[0].tick <= w[1].tick));
         let preset = s
             .iter()
@@ -657,7 +685,7 @@ mod tests {
         assert!(xml.starts_with(
             "<commandSystem>\n<commands>\n<c tick=\"96.000\">echo [demodesk] seq 1 of 1 seek</c>"
         ));
-        assert!(xml.contains("<c tick=\"9936.000\">echo [demodesk] seq 1 of 1 setup</c>"));
+        assert!(xml.contains("<c tick=\"9808.000\">echo [demodesk] seq 1 of 1 setup</c>"));
     }
 
     #[test]
@@ -674,7 +702,7 @@ mod tests {
         assert!(s
             .iter()
             .any(|a| a.cmd.contains("/2-sequence") && a.tick > 19_000.0));
-        assert!(s.iter().any(|a| a.cmd == "demo_gototick 19935"));
+        assert!(s.iter().any(|a| a.cmd == "demo_gototick 19807"));
         assert_eq!(s.iter().filter(|a| a.cmd == "quit").count(), 1);
         let locked = RenderOptions {
             camera: Camera::Lock,
