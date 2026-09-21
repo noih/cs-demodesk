@@ -1,7 +1,6 @@
 //! Highlight detection: turns [`DemoData`] into a ranked list of [`Highlight`]s.
 //!
-//! Per round: group the round's enemy kills by attacker and split them into
-//! "moments" wherever two kills are further apart than `cluster_gap_seconds`;
+//! Per round: group the round's enemy kills by attacker into one moment;
 //! attach round-level situations (clutch, ninja defuse); run every scorer;
 //! apply context multipliers; pad the tick window; filter, sort, keep top N.
 
@@ -191,11 +190,7 @@ fn add_tag(tags: &mut Vec<String>, tag: &str) {
 }
 
 fn score_multikill(m: &Moment, tick_rate: f64, tags: &mut Vec<String>) -> f64 {
-    let kills: Vec<_> = m
-        .kills
-        .iter()
-        .filter(|k| k.tick <= m.round.end_tick)
-        .collect();
+    let kills = &m.kills;
     let n = kills.len().min(5);
     if n < 2 {
         return 0.0;
@@ -424,7 +419,6 @@ fn describe(m: &Moment, tags: &[String]) -> String {
 
 pub fn detect(demo: &DemoData, opts: &DetectOptions) -> Vec<Highlight> {
     let tick_rate = demo.info.tick_rate;
-    let gap_ticks = seconds_to_ticks(opts.cluster_gap_seconds, tick_rate);
     let lead_in = seconds_to_ticks(opts.lead_in_seconds, tick_rate);
     let lead_out = seconds_to_ticks(opts.lead_out_seconds, tick_rate);
     let player_filter: HashSet<&str> = opts.players.iter().map(|s| s.as_str()).collect();
@@ -445,7 +439,7 @@ pub fn detect(demo: &DemoData, opts: &DetectOptions) -> Vec<Highlight> {
         let kills: Vec<&KillEvent> = per_round.get(&round.round).cloned().unwrap_or_default();
         let match_point = match_points.contains(&round.round);
 
-        // 1. Cluster enemy kills per attacker.
+        // 1. Keep each attacker's round kills together, regardless of gaps.
         let mut by_attacker: BTreeMap<&str, Vec<&KillEvent>> = BTreeMap::new();
         for k in &kills {
             let Some(a) = &k.attacker else { continue };
@@ -464,40 +458,14 @@ pub fn detect(demo: &DemoData, opts: &DetectOptions) -> Vec<Highlight> {
         for (attacker, list) in by_attacker {
             let mut list = list;
             list.sort_by_key(|k| k.tick);
-            let mut current: Vec<KillEvent> = vec![];
-            for k in list {
-                if let Some(prev) = current.last() {
-                    if k.tick - prev.tick > gap_ticks {
-                        push_moment(&mut moments, &mut current, attacker, round, match_point);
-                    }
-                }
-                current.push(k.clone());
-            }
+            let mut current: Vec<KillEvent> = list.into_iter().cloned().collect();
             push_moment(&mut moments, &mut current, attacker, round, match_point);
         }
 
-        // 2. Clutches: every cluster of the clutcher from the clutch start onwards becomes one moment.
+        // 2. Attach the clutch to the player's round moment.
         for situation in find_clutches(round, &kills) {
-            let involved: Vec<usize> = moments
-                .iter()
-                .enumerate()
-                .filter(|(_, m)| {
-                    m.steamid == situation.player
-                        && m.kills.iter().any(|k| k.tick >= situation.start_tick)
-                })
-                .map(|(i, _)| i)
-                .collect();
-            if let Some(&target) = involved.first() {
-                let mut merged: Vec<KillEvent> = involved
-                    .iter()
-                    .flat_map(|&i| moments[i].kills.clone())
-                    .collect();
-                merged.sort_by_key(|k| k.tick);
-                moments[target].kills = merged;
-                moments[target].clutch = Some(situation);
-                for &i in involved.iter().skip(1).rev() {
-                    moments.remove(i);
-                }
+            if let Some(m) = moments.iter_mut().find(|m| m.steamid == situation.player) {
+                m.clutch = Some(situation);
             } else if situation.won {
                 moments.push(Moment {
                     steamid: situation.player.clone(),
@@ -512,11 +480,11 @@ pub fn detect(demo: &DemoData, opts: &DetectOptions) -> Vec<Highlight> {
             }
         }
 
-        // Attach the successful defuse to the player's latest moment only.
+        // Attach the successful defuse to the player's round moment.
         if let (Some(defused_tick), Some(defuser)) = (round.bomb_defused_tick, &round.bomb_defuser)
         {
             let ninja = enemies_alive_at(round, &kills, Team::Ct, defused_tick) >= 1;
-            if let Some(m) = moments.iter_mut().rev().find(|m| &m.steamid == defuser) {
+            if let Some(m) = moments.iter_mut().find(|m| &m.steamid == defuser) {
                 m.ninja_defuse = ninja;
                 m.defused_tick = Some(defused_tick);
             } else if ninja {
@@ -810,7 +778,7 @@ mod tests {
     }
 
     #[test]
-    fn splits_clusters_by_gap_and_ignores_team_kills() {
+    fn counts_round_kills_across_gaps_and_ignores_team_kills() {
         let r = round(2, Team::Ct);
         let f = r.freeze_end_tick;
         let d = demo(
@@ -825,9 +793,47 @@ mod tests {
         );
         let hl = detect(&d, &opts(0.0));
         let ct1: Vec<_> = hl.iter().filter(|h| h.player.steamid == "ct1").collect();
-        assert_eq!(ct1.len(), 2);
-        assert!(ct1.iter().all(|h| h.tags.contains(&"2k".to_string())));
+        assert_eq!(ct1.len(), 1);
+        assert!(ct1[0].tags.contains(&"4k".to_string()));
         assert!(hl.iter().all(|h| h.player.steamid != "ct2"));
+    }
+
+    #[test]
+    fn multikills_do_not_depend_on_living_teammates_or_kill_gaps() {
+        for count in 2..=5 {
+            for teammates_alive in [true, false] {
+                let r = round(2, Team::Ct);
+                let f = r.freeze_end_tick;
+                let mut kills = vec![];
+                if !teammates_alive {
+                    kills.extend(CT[1..].iter().map(|victim| kill(f + 1, "t5", victim)));
+                }
+                kills.extend(
+                    TS[..count]
+                        .iter()
+                        .enumerate()
+                        .map(|(i, victim)| kill(f + 100 + i as i32 * 21 * 64, "ct1", victim)),
+                );
+                let highlights = detect(&demo(vec![r], kills), &opts(0.0));
+                let player: Vec<_> = highlights
+                    .iter()
+                    .filter(|h| h.player.steamid == "ct1")
+                    .collect();
+                assert_eq!(
+                    player.len(),
+                    1,
+                    "{count} kills, teammates alive: {teammates_alive}"
+                );
+                let tag = if count == 5 {
+                    "ace".into()
+                } else {
+                    format!("{count}k")
+                };
+                assert!(player[0].tags.contains(&tag));
+                assert_eq!(player[0].breakdown["multikill"], Score::MULTIKILL[count]);
+                assert!(!player[0].tags.contains(&"fast".into()));
+            }
+        }
     }
 
     #[test]
@@ -1147,19 +1153,44 @@ mod tests {
     }
 
     #[test]
-    fn post_round_kill_does_not_turn_four_kills_into_ace() {
-        let r = round(2, Team::Ct);
-        let mut kills: Vec<_> = TS[..4]
-            .iter()
-            .enumerate()
-            .map(|(i, victim)| kill(r.end_tick - 1000 + i as i32 * 64, "ct1", victim))
-            .collect();
-        kills.push(kill(r.end_tick + 100, "ct1", "t5"));
-        let h = detect(&demo(vec![r], kills), &opts(0.0));
-        assert_eq!(h[0].kills.len(), 5);
-        assert!(h[0].tags.contains(&"4k".into()));
-        assert!(h[0].tags.contains(&"post-round".into()));
-        assert!(!h[0].tags.contains(&"ace".into()));
+    fn post_round_kills_match_statistics_through_official_round_end() {
+        for count in 2..=5 {
+            for after_official_end in [false, true] {
+                let r = round(2, Team::Ct);
+                let mut kills: Vec<_> = TS[..count - 1]
+                    .iter()
+                    .enumerate()
+                    .map(|(i, victim)| kill(r.end_tick - 1000 + i as i32 * 64, "ct1", victim))
+                    .collect();
+                kills.push(kill(
+                    r.officially_ended_tick + i32::from(after_official_end),
+                    "ct1",
+                    TS[count - 1],
+                ));
+                let parsed = crate::stats::build_parsed_demo(demo(vec![r], kills));
+                let expected = count - usize::from(after_official_end);
+                let stats = parsed.stats.iter().find(|s| s.steamid == "ct1").unwrap();
+                assert_eq!(stats.kills as usize, expected);
+                if expected == 1 {
+                    assert!(parsed.highlights.iter().all(|h| h.player.steamid != "ct1"));
+                    continue;
+                }
+                assert_eq!(stats.multi_kills[&format!("{expected}k")], 1);
+                let h = parsed
+                    .highlights
+                    .iter()
+                    .find(|h| h.player.steamid == "ct1")
+                    .unwrap();
+                assert_eq!(h.kills.len(), expected);
+                let tag = if expected == 5 {
+                    "ace".into()
+                } else {
+                    format!("{expected}k")
+                };
+                assert!(h.tags.contains(&tag));
+                assert_eq!(h.tags.contains(&"post-round".into()), !after_official_end);
+            }
+        }
     }
 
     #[test]
@@ -1210,7 +1241,7 @@ mod tests {
         }
     }
     #[test]
-    fn successful_defuse_is_attached_to_latest_moment_only() {
+    fn successful_defuse_is_included_with_all_round_kills() {
         let mut r = round(2, Team::Ct);
         let first = r.freeze_end_tick + 100;
         let last = first + 30 * 64;
@@ -1224,11 +1255,11 @@ mod tests {
             ),
             &opts(0.0),
         );
-        let first_h = h.iter().find(|h| h.anchor_tick == first).unwrap();
-        let last_h = h.iter().find(|h| h.anchor_tick == last).unwrap();
-        assert_eq!(first_h.key_moments.len(), 1);
-        assert_eq!(last_h.key_moments.len(), 2);
-        assert!(last_h.end_tick >= defuse);
-        assert_eq!(last_h.key_moments[1], [defuse - 128, defuse + 128]);
+        assert_eq!(h.len(), 1);
+        assert_eq!(h[0].anchor_tick, first);
+        assert!(h[0].tags.contains(&"2k".into()));
+        assert_eq!(h[0].key_moments.len(), 3);
+        assert!(h[0].end_tick >= defuse);
+        assert_eq!(h[0].key_moments[2], [defuse - 128, defuse + 128]);
     }
 }

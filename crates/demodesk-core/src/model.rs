@@ -216,8 +216,6 @@ pub struct Highlight {
 pub struct DetectOptions {
     /// Restrict to these players (steamids). Empty = everyone.
     pub players: Vec<SteamId>,
-    /// Kills further apart than this are split into separate moments
-    pub cluster_gap_seconds: f64,
     pub lead_in_seconds: f64,
     pub lead_out_seconds: f64,
     pub min_score: f64,
@@ -228,7 +226,6 @@ impl Default for DetectOptions {
     fn default() -> Self {
         Self {
             players: vec![],
-            cluster_gap_seconds: 20.0,
             lead_in_seconds: 5.0,
             lead_out_seconds: 3.0,
             min_score: 3.0,

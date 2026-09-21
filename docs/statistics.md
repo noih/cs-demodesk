@@ -19,6 +19,10 @@ round-roster fallback. Friendly fire is separate and never contributes to ADR.
 
 ## Kills, assists and participation
 
+- Highlight 2K/3K/4K/ACE uses the same start-to-official-end round window as
+  player kill statistics, including kills after the winner is decided,
+  regardless of living teammates or time between kills. Only rapid-kill bonus
+  points depend on timing; clutch points separately depend on being last alive.
 - Openings use the first enemy kill by tick in each round, with stable event order
   for ties. World deaths, suicides, team kills and freeze events do not consume it.
 - Validate an assister against the victim independently of the killer. An enemy
