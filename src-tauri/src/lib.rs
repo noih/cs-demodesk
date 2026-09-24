@@ -327,6 +327,14 @@ async fn check_tools(
 }
 
 #[tauri::command]
+async fn check_tool_update(
+    engine: State<'_, Eng>,
+    tool: SetupTool,
+) -> CmdResult<demodesk_core::render::setup::ToolUpdate> {
+    blocking(&engine, move |e| e.check_tool_update(tool).map_err(err)).await
+}
+
+#[tauri::command]
 async fn tool_diagnostics(
     engine: State<'_, Eng>,
     directory: State<'_, Directory>,
@@ -662,6 +670,7 @@ pub fn run() {
             cancel_setup,
             check_tools,
             tool_diagnostics,
+            check_tool_update,
             list_demos,
             register_demo,
             parse_demo,

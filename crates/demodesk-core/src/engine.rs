@@ -1439,6 +1439,12 @@ impl Engine {
             self.tool_checks.lock().unwrap().insert(tool, check);
         }
     }
+    pub fn check_tool_update(&self, tool: SetupTool) -> Result<crate::render::setup::ToolUpdate> {
+        let exe = crate::render::diagnostics::executable(&self.tool_paths(), tool)
+            .cloned()
+            .ok_or_else(|| anyhow!("Tool executable not found"))?;
+        crate::render::setup::check_update(tool, &exe)
+    }
     pub fn tool_diagnostics(&self) -> serde_json::Value {
         use crate::scoring::queue::Status;
         use serde_json::json;

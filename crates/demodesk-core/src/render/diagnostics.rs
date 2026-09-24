@@ -115,11 +115,7 @@ pub fn check(paths: &ToolPaths, tool: SetupTool) -> ToolCheck {
         result.error = Some("Tool executable not found".into());
         return result;
     };
-    result.installed_release = path
-        .parent()
-        .and_then(|dir| std::fs::read(dir.join("install-info.json")).ok())
-        .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
-        .and_then(|info| info["tag"].as_str().map(str::to_owned));
+    result.installed_release = super::setup::installed_release_tag(path);
     if let Some((file, _)) = result
         .fingerprint
         .0

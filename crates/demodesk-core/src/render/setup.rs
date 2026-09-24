@@ -4,7 +4,7 @@
 //!   vrf/      Source2Viewer-CLI (github.com/ValveResourceFormat), reads radar images out of the game's VPK
 
 use anyhow::{anyhow, Context, Result};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -484,6 +484,160 @@ pub fn install_vrf(directory: &Path, force: bool, log: Log) -> Result<PathBuf> {
     Ok(exe)
 }
 
+/// Release tag recorded by the download button; absent for manual installs.
+pub fn installed_release_tag(exe: &Path) -> Option<String> {
+    exe.ancestors()
+        .skip(1)
+        .take(4)
+        .find_map(|dir| fs::read(dir.join("install-info.json")).ok())
+        .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
+        .and_then(|info| info["tag"].as_str().map(str::to_owned))
+}
+
+/// HLAE is a GUI program with no version flag (unknown arguments open its window),
+/// so its version comes from the executable's resource; trailing ".0" trimmed to three parts.
+#[cfg(windows)]
+fn file_version(exe: &Path) -> Option<String> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Storage::FileSystem::{
+        GetFileVersionInfoSizeW, GetFileVersionInfoW, VerQueryValueW, VS_FIXEDFILEINFO,
+    };
+    let path: Vec<u16> = exe.as_os_str().encode_wide().chain([0]).collect();
+    let root: Vec<u16> = "\\".encode_utf16().chain([0]).collect();
+    let info = unsafe {
+        let mut handle = 0;
+        let size = GetFileVersionInfoSizeW(path.as_ptr(), &mut handle);
+        if size == 0 {
+            return None;
+        }
+        let mut data = vec![0u8; size as usize];
+        if GetFileVersionInfoW(path.as_ptr(), 0, size, data.as_mut_ptr().cast()) == 0 {
+            return None;
+        }
+        let mut fixed: *mut core::ffi::c_void = std::ptr::null_mut();
+        let mut len = 0u32;
+        if VerQueryValueW(data.as_ptr().cast(), root.as_ptr(), &mut fixed, &mut len) == 0
+            || (len as usize) < std::mem::size_of::<VS_FIXEDFILEINFO>()
+        {
+            return None;
+        }
+        std::ptr::read_unaligned(fixed as *const VS_FIXEDFILEINFO)
+    };
+    let mut version = format!(
+        "{}.{}.{}.{}",
+        info.dwFileVersionMS >> 16,
+        info.dwFileVersionMS & 0xffff,
+        info.dwFileVersionLS >> 16,
+        info.dwFileVersionLS & 0xffff
+    );
+    while version.ends_with(".0") && version.matches('.').count() > 2 {
+        version.truncate(version.len() - 2);
+    }
+    Some(version)
+}
+#[cfg(not(windows))]
+fn file_version(_: &Path) -> Option<String> {
+    None
+}
+
+/// "ffmpeg version N-126574-g912208af28-20260915 Copyright ..." -> the build id.
+fn ffmpeg_banner_version(stdout: &str) -> Option<String> {
+    let mut words = stdout.lines().next()?.split_whitespace();
+    (words.next()? == "ffmpeg" && words.next()? == "version")
+        .then(|| words.next())
+        .flatten()
+        .map(str::to_owned)
+}
+
+/// "Version: 20.0.6980+a06886f7d06049052d32a7381ec05523064a2ca0" -> "20.0.6980"
+fn vrf_banner_version(stdout: &str) -> Option<String> {
+    stdout
+        .lines()
+        .find_map(|line| line.strip_prefix("Version:"))
+        .map(|version| version.trim().split('+').next().unwrap_or("").to_owned())
+        .filter(|version| !version.is_empty())
+}
+
+fn probe_stdout(exe: &Path, flag: &str) -> Option<String> {
+    let (status, stdout, _) = super::process::probe_output(
+        std::process::Command::new(exe).arg(flag),
+        Duration::from_secs(10),
+    )
+    .ok()?;
+    status.is_some_and(|s| s.success()).then_some(stdout)
+}
+
+fn installed_version(tool: super::SetupTool, exe: &Path) -> Option<String> {
+    match tool {
+        super::SetupTool::Hlae => file_version(exe),
+        super::SetupTool::Ffmpeg => ffmpeg_banner_version(&probe_stdout(exe, "-version")?),
+        super::SetupTool::Vrf => vrf_banner_version(&probe_stdout(exe, "--version")?),
+    }
+}
+
+/// Installed and online versions side by side; whether to update is the user's call.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolUpdate {
+    pub installed: Option<String>,
+    pub latest: String,
+}
+
+/// GitHub's website is not rate limited like its API (60 requests per hour per address):
+/// releases/latest redirects to the latest tag, and the Atom feed names the rolling BtbN build.
+fn latest_version(tool: super::SetupTool) -> Result<String> {
+    let repo = match tool {
+        super::SetupTool::Hlae => "advancedfx/advancedfx",
+        super::SetupTool::Ffmpeg => "BtbN/FFmpeg-Builds",
+        super::SetupTool::Vrf => "ValveResourceFormat/ValveResourceFormat",
+    };
+    if tool == super::SetupTool::Ffmpeg {
+        let url = format!("https://github.com/{repo}/releases.atom");
+        let feed = agent()
+            .get(&url)
+            .config()
+            .timeout_global(Some(Duration::from_secs(10)))
+            .build()
+            .call()
+            .with_context(|| format!("GET {url}"))?
+            .body_mut()
+            .read_to_string()?;
+        return rolling_release_title(&feed)
+            .ok_or_else(|| anyhow!("{url}: no release named for tag \"latest\""));
+    }
+    let url = format!("https://github.com/{repo}/releases/latest");
+    let response = agent()
+        .get(&url)
+        .config()
+        .timeout_global(Some(Duration::from_secs(10)))
+        .max_redirects(0)
+        .http_status_as_error(false)
+        .build()
+        .call()
+        .with_context(|| format!("GET {url}"))?;
+    response
+        .headers()
+        .get("Location")
+        .and_then(|value| value.to_str().ok())
+        .and_then(|location| location.rsplit_once("/releases/tag/"))
+        .map(|(_, tag)| tag.to_owned())
+        .ok_or_else(|| anyhow!("{url}: http status {} without a release tag", response.status()))
+}
+
+/// Title of the feed entry linking to releases/tag/latest.
+fn rolling_release_title(feed: &str) -> Option<String> {
+    let entry = &feed[feed.find("/releases/tag/latest\"")?..];
+    let title = &entry[entry.find("<title>")? + "<title>".len()..];
+    Some(title[..title.find("</title>")?].trim().to_owned())
+}
+
+pub fn check_update(tool: super::SetupTool, exe: &Path) -> Result<ToolUpdate> {
+    Ok(ToolUpdate {
+        latest: latest_version(tool)?,
+        installed: installed_version(tool, exe),
+    })
+}
+
 /// Tells HLAE where ffmpeg lives: <hlaeDir>/ffmpeg/ffmpeg.ini with [Ffmpeg] Path=…
 pub fn register_ffmpeg_with_hlae(hlae_exe: &Path, ffmpeg_exe: &Path) -> Result<()> {
     let ini_dir = hlae_exe.parent().unwrap().join("ffmpeg");
@@ -553,6 +707,59 @@ mod tests {
                     browser_download_url: format!("https://example.invalid/{name}"),
                 })
                 .collect(),
+        }
+    }
+
+    #[test]
+    fn tool_version_banners_are_parsed() {
+        let banner =
+            "ffmpeg version N-126574-g912208af28-20260915 Copyright (c) 2000-2026\nbuilt with gcc";
+        assert_eq!(
+            ffmpeg_banner_version(banner).as_deref(),
+            Some("N-126574-g912208af28-20260915")
+        );
+        assert!(ffmpeg_banner_version("garbage").is_none());
+        assert_eq!(
+            vrf_banner_version("Version: 20.0.6980+a06886f7d0604905\nOS: Microsoft Windows").as_deref(),
+            Some("20.0.6980")
+        );
+        assert!(vrf_banner_version("OS: Microsoft Windows").is_none());
+        let feed = r#"<feed><title>Release notes</title><entry><id>1</id><link href="https://github.com/BtbN/FFmpeg-Builds/releases/tag/latest"/><title>Latest Auto-Build (2026-09-23 14:55)</title></entry><entry><link href="https://github.com/BtbN/FFmpeg-Builds/releases/tag/autobuild-2026-09-23-14-55"/><title>Auto-Build 2026-09-23 14:55</title></entry></feed>"#;
+        assert_eq!(
+            rolling_release_title(feed).as_deref(),
+            Some("Latest Auto-Build (2026-09-23 14:55)")
+        );
+        assert!(rolling_release_title("<feed></feed>").is_none());
+
+        let dir = tempfile::tempdir().unwrap();
+        let bin = dir.path().join("ffmpeg-N-1-win64-gpl/bin");
+        fs::create_dir_all(&bin).unwrap();
+        assert!(installed_release_tag(&bin.join("ffmpeg.exe")).is_none());
+        fs::write(dir.path().join("install-info.json"), r#"{"tag":"latest","url":"x"}"#).unwrap();
+        assert_eq!(
+            installed_release_tag(&bin.join("ffmpeg.exe")).as_deref(),
+            Some("latest")
+        );
+    }
+
+    #[test]
+    #[ignore = "requires DEMODESK_TEST_TOOLS_DIR pointing to installed tools and network access"]
+    fn installed_tool_update_checks() {
+        let root = PathBuf::from(
+            std::env::var_os("DEMODESK_TEST_TOOLS_DIR").expect("set DEMODESK_TEST_TOOLS_DIR"),
+        );
+        let paths = super::super::paths::resolve_tool_paths(&root, &Default::default());
+        for tool in [
+            super::super::SetupTool::Hlae,
+            super::super::SetupTool::Ffmpeg,
+            super::super::SetupTool::Vrf,
+        ] {
+            let Some(exe) = super::super::diagnostics::executable(&paths, tool) else {
+                continue;
+            };
+            let update = check_update(tool, exe).unwrap();
+            println!("{tool:?}: {update:?}");
+            assert!(update.installed.is_some(), "{tool:?} version not detected");
         }
     }
 

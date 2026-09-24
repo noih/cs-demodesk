@@ -5,8 +5,9 @@ import { driver } from 'driver.js';
 import 'driver.js/dist/driver.css';
 import { open } from '@tauri-apps/plugin-dialog';
 import { useTranslation } from 'react-i18next';
-import { api, errorText, mb, type Settings, type ToolPaths, type SettingsResponse, type StorageBytes } from '../api.ts';
+import { api, errorText, mb, type Settings, type ToolPaths, type ToolUpdate, type SettingsResponse, type StorageBytes } from '../api.ts';
 import { LogView } from './LogView.tsx';
+import { Spinner } from './Spinner.tsx';
 import i18n, { applyLanguage, translateProblem, detectLanguage, LANGUAGE_NAMES, LANGUAGES } from '../i18n/index.ts';
 
 // Preserve legacy executable settings while presenting folder selection in the UI.
@@ -36,8 +37,8 @@ function toolsInstalled(paths: ToolPaths): boolean {
 type PickOptions = { directory?: boolean; filters?: Array<{ name: string; extensions: string[] }> };
 
 /** Text field + browse button; empty means "use the auto-detected value" (shown as placeholder). */
-function PathField({ label, value, placeholder, hint, description, action, sourceAction, checked, status, source, detectedPath, onChange, pick }: {
-  label: string; value: string; placeholder?: string; hint?: string; checked?: boolean; detectedPath?: string | null;
+function PathField({ label, value, placeholder, hint, note, description, action, sourceAction, checked, status, source, detectedPath, onChange, pick }: {
+  label: string; value: string; placeholder?: string; hint?: string; note?: ReactNode; checked?: boolean; detectedPath?: string | null;
   status?: string; description?: string; action?: ReactNode; sourceAction?: ReactNode; source?: { repo: string; url: string; site?: 'official' | 'steam' }; onChange: (v: string) => void; pick: PickOptions;
 }) {
   const { t } = useTranslation();
@@ -97,6 +98,7 @@ function PathField({ label, value, placeholder, hint, description, action, sourc
           {hint}
         </Text>
       )}
+      {note}
     </Box>
 
   );
@@ -190,6 +192,8 @@ export function SettingsView({ onChanged, toolsRequest = 0, toolsTarget = 'rende
   const downloadSelections = useRef<Partial<Record<'hlae' | 'ffmpeg' | 'vrf', string | null>>>({});
   const [message, setMessage] = useState<{ ok: boolean; text: string }>();
   const [logTool, setLogTool] = useState<'hlae' | 'ffmpeg' | 'vrf'>();
+  const [updates, setUpdates] = useState<Partial<Record<'hlae' | 'ffmpeg' | 'vrf', ToolUpdate | { error: string }>>>({});
+  const [checkingUpdates, setCheckingUpdates] = useState(false);
 
   const load = useCallback(async () => {
     const r = await api.settings();
@@ -210,6 +214,7 @@ export function SettingsView({ onChanged, toolsRequest = 0, toolsTarget = 'rende
         if (disposed) return;
         if (ev.type === 'setup-progress') setData(current => current && ({ ...current, setup: { ...current.setup, [ev.tool]: { log: [], ...current.setup[ev.tool], running: true, progress: ev.progress } } }));
         if (ev.type === 'setup-finished') {
+          setUpdates(current => ({ ...current, [ev.tool]: undefined }));
           void load().then(r => {
             if (!ev.ok && !ev.installed) return;
             const field = ({ hlae: 'hlaeExe', ffmpeg: 'ffmpegExe', vrf: 'vrfExe' } as const)[ev.tool];
@@ -270,6 +275,24 @@ export function SettingsView({ onChanged, toolsRequest = 0, toolsTarget = 'rende
     } finally {
       setChecking(false);
     }
+  };
+  /** Only on demand: lists the installed and online versions; updating is the user's decision. */
+  const checkUpdates = async () => {
+    const tools = (['hlae', 'ffmpeg', 'vrf'] as const).filter(tool => ready[tool]);
+    setCheckingUpdates(true);
+    setUpdates({});
+    const results = await Promise.all(tools.map(tool => api.checkToolUpdate(tool).catch(error => ({ error: errorText(error) }))));
+    setUpdates(Object.fromEntries(tools.map((tool, index) => [tool, results[index]])));
+    setCheckingUpdates(false);
+  };
+  const updateNote = (tool: 'hlae' | 'ffmpeg' | 'vrf') => {
+    const result = updates[tool];
+    if (!result) return checkingUpdates && ready[tool] ? <Flex justify="center" align="center" mt="2" style={{ minHeight: 'calc(2 * var(--line-height-1))' }}><Spinner size="1" /></Flex> : undefined;
+    if ('error' in result) return <Text as="div" size="1" color="red" mt="1">{t('settings.updateCheckFailed', { error: result.error })}</Text>;
+    return <Text as="div" size="1" color="gray" mt="1">
+      <div>{t('settings.installedVersion', { version: result.installed ?? t('settings.versionUnknown') })}</div>
+      <div>{t('settings.onlineVersion', { version: result.latest })}</div>
+    </Text>;
   };
   const confirmDirectoryChange = async () => {
     if (!pendingSave || saving) return;
@@ -523,12 +546,13 @@ export function SettingsView({ onChanged, toolsRequest = 0, toolsTarget = 'rende
             )}
             <Flex direction="column" gap="3">
               <Flex direction="column" gap="3">
-                <PathField description={t('settings.hlaePurpose')} hint={t('settings.toolDirectoryHint')} action={toolButton('hlae', 'HLAE')} source={SOURCES.hlae} {...toolReadiness('hlae')} label="HLAE" value={toolDirectory(form.hlaeExe)} detectedPath={(form.hlaeExe ?? '') === (data.settings.hlaeExe ?? '') ? toolDirectory(d.paths.hlaeExe) : null} placeholder={`${data.dataDir}/tools`} onChange={(v) => set({ hlaeExe: v || null })} pick={{ directory: true }} />
-                <PathField description={t('settings.ffmpegPurpose')} hint={t('settings.toolDirectoryHint')} action={toolButton('ffmpeg', 'FFmpeg')} source={SOURCES.ffmpeg} {...toolReadiness('ffmpeg')} label="FFmpeg" value={toolDirectory(form.ffmpegExe)} detectedPath={(form.ffmpegExe ?? '') === (data.settings.ffmpegExe ?? '') ? toolDirectory(d.paths.ffmpegExe) : null} placeholder={`${data.dataDir}/tools`} onChange={(v) => set({ ffmpegExe: v || null })} pick={{ directory: true }} />
+                <PathField description={t('settings.hlaePurpose')} note={updateNote('hlae')} action={toolButton('hlae', 'HLAE')} source={SOURCES.hlae} {...toolReadiness('hlae')} label="HLAE" value={toolDirectory(form.hlaeExe)} detectedPath={(form.hlaeExe ?? '') === (data.settings.hlaeExe ?? '') ? toolDirectory(d.paths.hlaeExe) : null} placeholder={`${data.dataDir}/tools`} onChange={(v) => set({ hlaeExe: v || null })} pick={{ directory: true }} />
+                <PathField description={t('settings.ffmpegPurpose')} note={updateNote('ffmpeg')} action={toolButton('ffmpeg', 'FFmpeg')} source={SOURCES.ffmpeg} {...toolReadiness('ffmpeg')} label="FFmpeg" value={toolDirectory(form.ffmpegExe)} detectedPath={(form.ffmpegExe ?? '') === (data.settings.ffmpegExe ?? '') ? toolDirectory(d.paths.ffmpegExe) : null} placeholder={`${data.dataDir}/tools`} onChange={(v) => set({ ffmpegExe: v || null })} pick={{ directory: true }} />
               </Flex>
-              <PathField description={t('settings.vrfPurpose')} hint={t('settings.toolDirectoryHint')} action={toolButton('vrf', 'Source 2 Viewer CLI')} source={SOURCES.vrf} {...toolReadiness('vrf')} label="Source 2 Viewer CLI" value={toolDirectory(form.vrfExe)} detectedPath={(form.vrfExe ?? '') === (data.settings.vrfExe ?? '') ? toolDirectory(d.paths.vrfExe) : null} placeholder={`${data.dataDir}/tools`} onChange={(v) => set({ vrfExe: v || null })} pick={{ directory: true }} />
+              <PathField description={t('settings.vrfPurpose')} note={updateNote('vrf')} action={toolButton('vrf', 'Source 2 Viewer CLI')} source={SOURCES.vrf} {...toolReadiness('vrf')} label="Source 2 Viewer CLI" value={toolDirectory(form.vrfExe)} detectedPath={(form.vrfExe ?? '') === (data.settings.vrfExe ?? '') ? toolDirectory(d.paths.vrfExe) : null} placeholder={`${data.dataDir}/tools`} onChange={(v) => set({ vrfExe: v || null })} pick={{ directory: true }} />
               <Flex gap="2" wrap="wrap" align="center" justify="center">
                 <Button size="2" variant="outline" color="gray" disabled={checking} onClick={() => void check()}>{checking ? t('settings.verifying') : t('settings.recheck')}</Button>
+                <Button size="2" variant="outline" color="gray" disabled={checkingUpdates} onClick={() => void checkUpdates()}>{checkingUpdates ? <Spinner size="1" /> : t('settings.checkUpdates')}</Button>
                 <Button size="2" variant="outline" color="gray" onClick={() => void api.toolDiagnostics().then(setDiagnostics).catch(error => setMessage({ok: false, text: errorText(error)}))}>{t('settings.diagnostics')}</Button>
               </Flex>
               {Object.values(data.toolChecks ?? {}).some(check => !check.ok && check.path) && <Text size="1" color="red">{t('settings.startupFailedHint')}</Text>}

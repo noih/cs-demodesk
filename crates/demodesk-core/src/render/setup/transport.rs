@@ -93,8 +93,10 @@ mod tests {
                 socket
                     .set_read_timeout(Some(Duration::from_secs(5)))
                     .unwrap();
+                // Only the request head matters; one read is enough to unblock the client.
                 let mut request = [0; 4096];
-                socket.read(&mut request).unwrap();
+                let received = socket.read(&mut request).unwrap();
+                assert!(received > 0, "client sent an empty request");
                 socket
                     .write_all(
                         b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\na",

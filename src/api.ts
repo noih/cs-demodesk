@@ -342,6 +342,7 @@ export interface ToolCheck {
   stderr: string;
   error: string | null;
 }
+export interface ToolUpdate { installed: string | null; latest: string }
 export interface SettingsResponse {
   toolChecks: Partial<Record<'hlae' | 'ffmpeg' | 'vrf', ToolCheck>>;
   dataDirOverride: string | null;
@@ -438,6 +439,7 @@ export const api = {
   cancelSetup: (tool: 'hlae' | 'ffmpeg' | 'vrf') => invoke<void>('cancel_setup', { tool }),
   checkTools: () => invoke<SettingsResponse>('check_tools'),
   toolDiagnostics: () => invoke<string>('tool_diagnostics'),
+  checkToolUpdate: (tool: 'hlae' | 'ffmpeg' | 'vrf') => invoke<ToolUpdate>('check_tool_update', { tool }),
   demos: () => invoke<DemoMeta[]>('list_demos'),
   registerDemo: (path: string) => invoke<DemoMeta>('register_demo', { path }),
   parse: (id: string) => invoke<void>('parse_demo', { id }),
