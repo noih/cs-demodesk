@@ -45,7 +45,7 @@ function Measurements({values}: {values: AnalysisMeasurement[]}) {
   const rate = values.find(m => m.name === 'smokeHitRate')?.value;
   const shots = values.find(m => m.name === 'smokeShots')?.value ?? 0;
   const hits = values.find(m => m.name === 'estimatedSmokeHits')?.value ?? 0;
-  return <>{shots > 0 && rate !== undefined && <Text as="p" size="2" data-smoke-estimate>
+  return <>{shots > 0 && rate !== undefined && rate > 0 && <Text as="p" size="2" data-smoke-estimate>
     {t('scoring.metrics.smokeHitRate')}: {Number(rate.toFixed(1))}% · {hits}／{shots} {t('scoring.units.shots')}
   </Text>}{values.filter(m => !['unclassifiedShots','smokeHitRate','smokeShots','estimatedSmokeHits'].includes(m.name) && !(m.name === 'smokeHits' && m.value === 0)).map(m => <Text as="p" size="2" key={`${m.name}:${m.value}:${t(`scoring.units.${m.unit}`, {defaultValue:m.unit})}:${m.threshold}`}>
     {t(`scoring.metrics.${m.name}`, {defaultValue:m.name})}: {Number.isFinite(m.value) ? Number(m.value.toFixed(4)) : '—'} {t(`scoring.units.${m.unit}`, {defaultValue:m.unit})}
@@ -60,10 +60,10 @@ function PlayerAnalysis({playerId,name,records,playerNames,status,onSetup,onRend
   const {t} = useTranslation();
   const latest = records?.[0];
   const record = latest;
-  const smoke = record?.checks.find(check => check.definition.id === 'smoke-hit-rate');
-  const smokeRate = smoke?.summary.find(m => m.name === 'smokeHitRate')?.value;
+  const smoke = record?.checks.find(check => check.definition.id === 'smoke-hit-rate' && occurrenceCount(check) !== null);
+  const smokeRate = smoke?.summary.find(m => m.name === 'smokeHitRate' && m.value > 0)?.value;
   const observed = record?.checks.filter(check => (occurrenceCount(check) ?? 0) > 0) ?? [];
-  const summaries = record?.checks.filter(check => check.summary.length > 0 && check.state !== 'unavailable' && check.state !== 'failed') ?? [];
+  const summaries = record?.checks.filter(check => check.summary.length > 0 && check.state !== 'unavailable' && check.state !== 'failed' && (check.definition.id !== 'smoke-hit-rate' || smokeRate !== undefined || (occurrenceCount(check) ?? 0) > 0)) ?? [];
   return <Table.Row data-player-id={playerId}>
     <Table.RowHeaderCell style={{whiteSpace:'normal',overflowWrap:'anywhere'}}>{name}</Table.RowHeaderCell>
     <Table.Cell>

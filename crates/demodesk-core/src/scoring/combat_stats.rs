@@ -54,7 +54,7 @@ fn check(id: &str, category: &str) -> Check {
         definition: Definition {
             id: id.into(),
             version: if id == "smoke-hit-rate" {
-                "3-estimated-smoke-samples"
+                "4-lifetime-weighted-smoke-samples"
             } else {
                 "2-counts-weapon-samples"
             }

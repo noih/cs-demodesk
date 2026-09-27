@@ -1,5 +1,52 @@
 # Development diagnostics
 
+Analysis design and measured limits: [Analysis compatibility plan](analysis-compatibility-plan.md).
+
+## Offline animation failure diagnostics
+
+The `analysis_native_check` example can replay an existing compact match-state file
+without starting CS2. Add `--diagnose REPORT.json` to record up to three failures
+per reason with packet ordinal, demo/network/animation ticks, entity index and
+serial, recipe version, graph handle, cache read/write IDs, and compact field IDs.
+The report also records the compact contract, recorded source build/patch and
+fingerprint, current client hash, game content fingerprint, asset byte count,
+aggregate coverage, and preceding cache writes for sampled cache reads.
+It records no player name or Steam ID. The report is capped at 2 MiB; an oversized
+report fails instead of silently truncating. Keep it with the private compact file
+in an ignored `out/` directory.
+
+```powershell
+cargo run -p demodesk-core --example analysis_native_check -- STATE.gz GAME_ROOT VRF_EXE CACHE_DIR --diagnose out/diagnostic-latest.json
+```
+
+Use the same command without `--diagnose` for ordinary aggregate coverage. The
+reason codes are `cached_pose_missing`, `pose_tick_mismatch`,
+`unsupported_animation`, `resource_or_dictionary_missing`,
+`pose_input_missing_or_invalid`, and `other_reconstruction_error`. The original
+error text remains in `unavailable`; a reason code identifies a class of failure,
+not proof of its cause. The packet ordinal and field IDs refer to the supplied
+compact stream (zero-based field IDs, one-based packet ordinal).
+
+Run the analysis compatibility gate with the same recorded state and an optional
+full-match assessment export. It reports `unverified` until a reviewed baseline
+is explicitly created; missing input reports `not-run`.
+
+```powershell
+powershell.exe -NoProfile -File scripts/check-analysis-compatibility.ps1 -State STATE.gz -Game GAME_ROOT -Vrf VRF_EXE -Cache CACHE_DIR -Report out/analysis-compatibility/latest.json
+node scripts/check-analysis-compatibility.mjs out/analysis-compatibility/latest.json --assessments ASSESSMENTS.json --accept out/analysis-compatibility/baseline.json
+powershell.exe -NoProfile -File scripts/check-analysis-compatibility.ps1 -State STATE.gz -Game GAME_ROOT -Vrf VRF_EXE -Cache CACHE_DIR -Assessments ASSESSMENTS.json -Baseline out/analysis-compatibility/baseline.json
+```
+
+For an independently captured attachment log, compare against a native range
+export and the exact model's attachment definitions. The clock shift is measured
+from eye/view alignment before this command; it is not chosen to improve bone
+error. Other player models are reported separately and are not compared with
+definitions for this model.
+
+```powershell
+node scripts/compare-native-attachments.mjs CONSOLE.log NATIVE.json MODEL.json CLOCK_SHIFT MAX_ERROR out/analysis-compatibility/attachment-result.json
+```
+
 ## CS2 update compatibility
 
 `check-cs2-compatibility.ps1` runs on built-in Windows PowerShell 5.1 with .NET.
@@ -114,3 +161,96 @@ once plus at most 12 class samples. CS2 `console.log` is reset before recording;
 it is a single-run log but has no byte cap while the game is running. Setup logs
 are cleared at the next setup operation. The diagnostic retention above applies
 to this developer tool, not to deleting existing render jobs or their videos.
+
+## Native animation compatibility (2026-09-27)
+
+Recipe versions 2 and 3 share the supported network-tick/task prefix. The decoder
+still checks dictionaries, indices, dependencies and payload boundaries, preserves
+opaque trailing bytes, and rejects other versions. Accepting a recipe version does
+not authorize an unverified client implementation.
+
+The current client SHA-256 is
+`9b4f46dbd6a433163b39d7ea0123c321b1ad6d95ceedd40ae121312464833549`.
+AimCS, SnapWeapon and FootIK were compared with the previously traced client:
+FootIK deserialize/execute are at RVAs `0x13abec0`/`0x13ac140`, AimCS at
+`0x70be70`/`0x70c800`, and SnapWeapon execute at `0x70cbe0`. The FootIK and
+SnapWeapon instruction sequences match after address relocation; AimCS helper
+changes also required an independent game-output comparison.
+
+A fresh offline replay using HLAE 2.192.6 supplied 128 frames for two SAS models,
+with ten attachments per player. The model bytes match the existing attachment
+definitions. Eye/view alignment uniquely selected packet tick = render tick - 3;
+this measured offset is diagnostic only and is not hardcoded into analysis.
+All 2,560 attachment positions met the existing tolerances: maximum head/torso/leg
+error 0.000606 game units (limit 0.001), maximum hand error 0.002210 (limit 0.01).
+That earlier recipe-scoped implementation reconstructed 1,054,290 of 1,057,475
+pawn frames. After tracing preceding cache writes and preserving pose state within
+one continuous pawn lifetime, 1,057,247 frames reconstruct; 40 still lack a
+verified cache source and 188 have mismatched timestamps. A separate full-range
+attachment comparison for the same model measured 2,560 pairs with maximum error
+0.002210 game units. Other models were excluded from this model-specific comparison.
+
+Recheck with `npm run test:core -- --lib` and the existing `analysis_native_check`
+example. Its optional `FIRST_TICK LAST_TICK OUTPUT.json` arguments export bounded
+world-space hitbox bone transforms for comparison with
+`scripts/capture-analysis-attachments.mjs`; model IDs are exact decimal strings.
+Keep real captures and exports in ignored directories. This run's local evidence
+is in `out/animation-path-fix/` (`binary-comparison.json`, `native-v3.log`,
+`oracle/comparison.json`). The scoring version `18-animation-recipe-v3` invalidates
+previous partial assessments for reuse while preserving their historical records.
+
+The desktop scoring path completed for all ten players, with all three aim rules
+receiving samples and 216 TTD samples. Cache reuse and forced reassessment returned
+consistent results. The debug-profile acceptance run did fail its existing timing
+gate: preparation took 35.59 seconds and analysis 43.73 seconds (30 seconds each
+allowed); this is functional verification, not a performance acceptance pass.
+
+### Smoke sample follow-up
+
+Two independent omissions prevented directional smoke samples: native preparation
+did not request `scripts/weapons.vdata`, and the replicated spread-policy reader
+accepted patch 14181 only. Native preparation now includes the weapon dependency.
+Patch 14185 uses the same three spread defaults, checked in an isolated game
+process (build 10924, revision 11039926): shotgun patterns enabled, only-up disabled,
+maximum inaccuracy disabled. The console capture is kept locally at
+`out/animation-path-fix/smoke-policy/console.log`. Recorded overrides and signon
+ordering still apply; unknown patches remain rejected. This spread verification
+does not authorize the separate rewind defaults for patch 14185.
+
+Compact producer version 0.25.0 and scoring version `19-smoke-weapon-policy`
+invalidate reusable results produced without those inputs. The regression test
+`current_patch_preserves_recorded_spread_policy` failed before the patch support
+was added; `analysis_native_check` also requires the loaded weapon dependency.
+On the reported match, rebuilding the compact source restored 182 directional
+candidates and 171 eligible smoke shots after the normal obstruction checks.
+Eight players have an estimated hit rate; two have no eligible denominator, so
+their confirmed smoke-hit events remain evidence without a fabricated percentage.
+TTD still has 216 samples. Core validation: 295 passed, 6 ignored.
+The desktop-path rerun also passed cache reuse, forced-result equality and replay
+preservation checks. Its unchanged timing gate still fails: first preparation
+39.87 seconds, analysis 43.17 seconds; warm preparation 21.39 seconds, analysis
+43.44 seconds.
+
+### Growth and fade coverage
+
+The two remaining players had three and one confirmed smoke-hit events respectively,
+all excluded by the estimator's blanket 1.5–17 second age window. Directional
+sampling now weights reconstructed cell density using the existing native lifetime
+curve's lower bound over the recorded fire interval. The occupied-cell threshold
+is unchanged. Growing/fading volumes no longer invalidate every shot merely by
+age, while missing journal data, packet gaps, HE disturbance and obstruction
+checks remain in force. This is still an estimated directional hit rate, not
+rendered opacity or an exact server classification.
+
+`directional_samples_include_dense_growth_and_fade` reproduced the exclusion
+before the change and passes afterwards. The existing interval-versus-point
+native-query test also covers the shared lifetime bounds. Scoring version
+`20-smoke-lifetime` and smoke rule version `4-lifetime-weighted-smoke-samples`
+prevent reuse of the earlier restricted denominator.
+The reported match now has 226 eligible smoke shots across all ten players; the
+two previously empty denominators contain three and one shots. Confirmed hits
+outside those eligible samples still do not inflate the numerator. Core validation:
+296 passed, 6 ignored.
+Desktop-path cache reuse, forced-result equality and replay-preservation checks
+passed again. Preparation took 21.37 seconds; the separate 30-second analysis gate
+still failed at 45.99 seconds (43.76 seconds on the warm run).

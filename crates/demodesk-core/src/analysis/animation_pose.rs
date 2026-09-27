@@ -6,9 +6,7 @@ use serde::Deserialize;
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
 
-/// The custom-task write sets were traced in this exact installed client, not inferred from task names.
-pub const CS2_WRITE_SET_CLIENT_SHA256: &str =
-    "a0c195f0b6ec00915ef08c548200a010ebbe7982d3a4bc468cad939b67c8c4e3";
+pub use super::compatibility::{CS2_WRITE_SET_CLIENT_SHA256, CS2_WRITE_SET_CLIENT_SHA256_V3};
 
 #[derive(Debug)]
 pub struct Skeleton {
@@ -31,7 +29,7 @@ pub struct Pose {
 /// events are not decoded from the trailer, so an ID alone cannot authorize reuse
 /// from a previous packet, player, or animation context.
 #[derive(Default)]
-struct State {
+pub(crate) struct State {
     cached: BTreeMap<u8, Pose>,
 }
 
@@ -152,12 +150,12 @@ impl Skeleton {
         })
     }
 
-    /// Call only after hashing the actual source-compatible client; a matching skeleton name alone is insufficient.
-    pub fn validate_cs2_write_set(&mut self, client_sha256: &str) -> Result<()> {
-        ensure!(
-            client_sha256 == CS2_WRITE_SET_CLIENT_SHA256,
-            "Unsupported CS2 custom-task implementation"
-        );
+    /// Unknown clients leave custom tasks disabled; generic recipes remain usable.
+    pub fn validate_cs2_write_set(&mut self, client_sha256: &str) -> Result<bool> {
+        self.cs2_write_set_validated = false;
+        if !super::compatibility::custom_animation_tasks(client_sha256) {
+            return Ok(false);
+        }
         ensure!(
             self.resource_name == "animation/skeletons/characters/worldmodel.vnmskel",
             "Unsupported custom-task skeleton"
@@ -196,7 +194,7 @@ impl Skeleton {
             self.index(bone)?;
         }
         self.cs2_write_set_validated = true;
-        Ok(())
+        Ok(true)
     }
 
     pub fn evaluate(
@@ -205,6 +203,23 @@ impl Skeleton {
         clips: &BTreeMap<String, Clip>,
         resource_paths: &[String],
         mask_names: &[String],
+    ) -> Result<Pose> {
+        self.evaluate_with_state(
+            recipe,
+            clips,
+            resource_paths,
+            mask_names,
+            &mut State::default(),
+        )
+    }
+
+    pub(crate) fn evaluate_with_state(
+        &self,
+        recipe: &Recipe,
+        clips: &BTreeMap<String, Clip>,
+        resource_paths: &[String],
+        mask_names: &[String],
+        state: &mut State,
     ) -> Result<Pose> {
         ensure!(
             !recipe.tasks.is_empty() && recipe.tasks.len() == recipe.parameters.len(),
@@ -226,7 +241,6 @@ impl Skeleton {
                 }
             }
         }
-        let mut state = State::default();
         let mut results: Vec<Pose> = Vec::with_capacity(recipe.tasks.len());
         for (index, (task, parameters)) in recipe.tasks.iter().zip(&recipe.parameters).enumerate() {
             ensure!(
@@ -355,21 +369,16 @@ impl Skeleton {
                     );
                     let weight = f32::from(*normalized_weight) / 255.;
                     let mask = self.mask(masks, mask_names)?;
-                    let local = source
-                        .local
-                        .iter()
-                        .zip(&target.local)
-                        .zip(mask)
-                        .map(|((&a, &b), m)| {
-                            // An ordinary full-weight blend copies target before applying its mask; overlay remains masked.
-                            let w = if kind == "CNmBlendTask" && weight == 1. {
-                                1.
-                            } else {
-                                weight * m
-                            };
-                            blend(a, b, w, additive)
-                        })
-                        .collect::<Result<Vec<_>>>()?;
+                    let mut local = Vec::with_capacity(source.local.len());
+                    for ((&a, &b), m) in source.local.iter().zip(&target.local).zip(mask) {
+                        // An ordinary full-weight blend copies target before applying its mask; overlay remains masked.
+                        let w = if kind == "CNmBlendTask" && weight == 1. {
+                            1.
+                        } else {
+                            weight * m
+                        };
+                        local.push(blend(a, b, w, additive)?);
+                    }
                     (local, source.is_additive && target.is_additive)
                 }
                 (
@@ -1314,6 +1323,11 @@ mod tests {
         assert!(skeleton.evaluate(&recipe, &clips, &[], &[]).is_err());
         skeleton.validate_cs2_write_set(CS2_WRITE_SET_CLIENT_SHA256)?;
         let pose = skeleton.evaluate(&recipe, &clips, &[], &[])?;
+        assert!(skeleton.validate_cs2_write_set(CS2_WRITE_SET_CLIENT_SHA256_V3)?);
+        assert_eq!(
+            skeleton.evaluate(&recipe, &clips, &[], &[])?.model,
+            pose.model
+        );
         assert_eq!(pose.model, skeleton.model(&pose.local)?);
         let head = skeleton.index("head_0")?;
         let world: Transform = serde_json::from_value(fixture["world"].clone())?;
@@ -1396,6 +1410,30 @@ mod tests {
             .unwrap_err()
             .to_string()
             .contains("unavailable"));
+        let mut state = State::default();
+        let mut write = recipe.clone();
+        write.tasks = vec![
+            Task {
+                kind: "CNmReferencePoseTask".into(),
+                dependencies: vec![],
+            },
+            Task {
+                kind: "CNmCachedPoseWriteTask".into(),
+                dependencies: vec![0],
+            },
+        ];
+        write.parameters = vec![
+            Parameters::ReferencePose,
+            Parameters::CachedPoseWrite { cache_id: 7 },
+        ];
+        skeleton
+            .evaluate_with_state(&write, &clips, &[], &[], &mut state)
+            .unwrap();
+        assert!(skeleton
+            .evaluate_with_state(&recipe, &clips, &[], &[], &mut state)
+            .unwrap()
+            .local[1]
+            .is_some());
     }
 
     #[test]
@@ -1434,12 +1472,52 @@ mod tests {
     }
 
     #[test]
+    fn updated_client_keeps_generic_poses_but_rejects_unverified_custom_tasks() {
+        use super::super::animation_recipe::Task;
+        let mut skeleton = Skeleton::from_value(serde_json::json!({
+            "m_ID":"test", "m_boneIDs":["root"], "m_parentIndices":[-1],
+            "m_parentSpaceReferencePose":[[0.,0.,0.,1.,0.,0.,0.,1.]]
+        }))
+        .unwrap();
+        assert!(!skeleton.validate_cs2_write_set("updated-client").unwrap());
+        assert!(!skeleton.cs2_write_set_validated);
+        let mut recipe = Recipe {
+            tasks: vec![Task {
+                kind: "CNmReferencePoseTask".into(),
+                dependencies: vec![],
+            }],
+            parameters: vec![Parameters::ReferencePose],
+            network_tick: 0,
+            topology_bits_consumed: 0,
+            bits_consumed: 0,
+            raw_dynamic: vec![],
+            raw_topology: vec![],
+        };
+        let pose = skeleton
+            .evaluate(&recipe, &BTreeMap::new(), &[], &[])
+            .unwrap();
+        assert!(pose.model[0].is_some());
+        recipe.tasks.push(Task {
+            kind: "CNmSnapWeaponTask".into(),
+            dependencies: vec![0],
+        });
+        recipe.parameters.push(Parameters::SnapWeapon { flags2: 0 });
+        let error = skeleton
+            .evaluate(&recipe, &BTreeMap::new(), &[], &[])
+            .unwrap_err();
+        assert!(error.to_string().contains("Unverified SnapWeapon"));
+    }
+
+    #[test]
     fn invalid_skeletons_and_custom_write_sets_fail() {
         let source = serde_json::json!({"m_ID":"test","m_boneIDs":["root","child"],"m_parentIndices":[-1,0],
             "m_parentSpaceReferencePose":[[0.,0.,0.,1.,0.,0.,0.,1.],[1.,0.,0.,1.,0.,0.,0.,1.]]});
         let mut skeleton = Skeleton::from_value(source.clone()).unwrap();
         assert!(skeleton
             .validate_cs2_write_set(CS2_WRITE_SET_CLIENT_SHA256)
+            .is_err());
+        assert!(skeleton
+            .validate_cs2_write_set(CS2_WRITE_SET_CLIENT_SHA256_V3)
             .is_err());
         assert!(skeleton.model(&[None, Some(Transform::IDENTITY)]).unwrap()[1].is_none());
         let mut invalid = source;

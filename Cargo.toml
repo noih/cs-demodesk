@@ -16,6 +16,8 @@ opt-level = 2
 # Native whole-match animation and scoring also run inside the workspace core.
 [profile.dev.package.demodesk-core]
 opt-level = 3
+# Reused LLVM-local symbols in incremental core objects can fail the MSVC DLL link.
+incremental = false
 
 [profile.release]
 opt-level = 3

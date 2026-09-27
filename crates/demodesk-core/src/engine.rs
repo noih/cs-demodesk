@@ -391,11 +391,17 @@ impl Engine {
         for player in &players {
             histories.entry(player.clone()).or_default();
         }
+        let tools = self.tool_paths();
+        let game = tools.cs2_dir.ok_or_else(|| anyhow!("CS2 folder not set"))?;
+        let game_content_fingerprint =
+            crate::analysis::native_body::game_content_fingerprint(&game)?;
         if !force
             && histories.values().all(|records| {
                 records.iter().any(|r| {
                     r.demo_fingerprint == fingerprint
                         && r.ruleset_version == scoring::RULESET_VERSION
+                        && r.input_provenance["native"]["gameContentFingerprint"].as_str()
+                            == Some(game_content_fingerprint.as_str())
                 })
             })
         {
@@ -405,6 +411,8 @@ impl Engine {
                 .find(|r| {
                     r.demo_fingerprint == fingerprint
                         && r.ruleset_version == scoring::RULESET_VERSION
+                        && r.input_provenance["native"]["gameContentFingerprint"].as_str()
+                            == Some(game_content_fingerprint.as_str())
                 })
                 .expect("all players have matching history")
                 .input_provenance;
@@ -444,8 +452,6 @@ impl Engine {
             shared_bytes += n as u64;
         }
         shared_file.rewind()?;
-        let tools = self.tool_paths();
-        let game = tools.cs2_dir.ok_or_else(|| anyhow!("CS2 folder not set"))?;
         let vrf = tools
             .vrf_exe
             .ok_or_else(|| anyhow!("Source 2 Viewer CLI not installed"))?;
@@ -491,9 +497,11 @@ impl Engine {
             "diagnosticBytes":0,
             "statistics":{"mode":"per-rule-occurrences","deduplication":"same-rule-round-target-overlap","crossRuleCounts":"independent"},
             "native":{
-                "producer":"native-animgraph2-3", "coverage":body_coverage,
+                "producer":"native-animgraph2-5", "coverage":body_coverage,
+                "gameContentFingerprint":game_content_fingerprint,
                 "resourceContentId":native.assets.resource_content_id,
                 "sharedAssetBytes":native.assets.total_bytes,"clientSha256":native.client_sha256,
+                "customTasksVerified":native.custom_tasks_verified,
                 "assetPrecision":"VRF DATA/MDAT text; tested maximum raw clip component error 8.35e-7; network state lossless",
                 "qualification":"partial task reconstruction; historical asset compatibility and independent rule calibration unqualified",
                 "unknownObstruction":true

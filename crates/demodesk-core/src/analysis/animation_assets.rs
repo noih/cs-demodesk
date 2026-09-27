@@ -20,7 +20,7 @@ pub const WEAPONS: &str = "scripts/weapons.vdata";
 pub const SURFACES: &str = "surfaceproperties/surfaceproperties.vsurf";
 pub const SURFACE_GAME: &str = "scripts/surfaceproperties_game.txt";
 const SKELETON: &str = "animation/skeletons/characters/worldmodel.vnmskel";
-const FORMAT: u32 = 6;
+const FORMAT: u32 = 7;
 
 pub struct Assets {
     pub weapons: Option<serde_json::Value>,
@@ -56,11 +56,11 @@ fn validate_path(path: &str) -> Result<()> {
             && path.is_ascii()
             && path
                 .bytes()
-                .all(|b| b.is_ascii_alphanumeric() || b"/._-".contains(&b))
+                .all(|b| b.is_ascii_alphanumeric() || b"/._-+".contains(&b))
             && path
                 .split('/')
                 .all(|part| !part.is_empty() && part != "." && part != ".."),
-        "invalid animation resource path"
+        "invalid animation resource path: {path:?}"
     );
     Ok(())
 }
@@ -199,6 +199,31 @@ fn collect_files(
             out.insert(relative, hash_file(&entry.path())?);
             ensure!(out.len() <= 100_000, "too many animation assets");
         }
+    }
+    Ok(())
+}
+
+// Directory selectors can extract new, unrelated resources after a game update.
+// Only recorded dependencies may reach the decoder and the published cache.
+fn retain_requested(extracted: &Path, raw: &Path, requested: &[String]) -> Result<()> {
+    let canonical = extracted.canonicalize()?;
+    for resource in requested {
+        validate_path(resource)?;
+        let name = stored_name(resource);
+        let source = extracted.join(&name);
+        ensure!(
+            source.is_file(),
+            "recorded animation asset is unavailable: {resource}"
+        );
+        ensure!(
+            !fs::symlink_metadata(&source)?.file_type().is_symlink()
+                && source.canonicalize()?.starts_with(&canonical),
+            "extracted animation asset escapes extraction directory: {resource}"
+        );
+        let destination = raw.join(name);
+        fs::create_dir_all(destination.parent().context("asset output has no parent")?)?;
+        fs::rename(source, destination)
+            .with_context(|| format!("retaining recorded animation asset {resource}"))?;
     }
     Ok(())
 }
@@ -551,6 +576,9 @@ fn prepare_resources(
         .tempdir_in(&parent)?;
     let raw = staging.path().join("raw");
     fs::create_dir(&raw)?;
+    let extracted = tempfile::Builder::new()
+        .prefix(".extracted-")
+        .tempdir_in(staging.path())?;
     run(
         vrf,
         Command::new(vrf)
@@ -561,14 +589,12 @@ fn prepare_resources(
             .arg("-e")
             .arg("vnmclip_c,vnmskel_c,vmdl_c,vdata_c,vsurf_c,txt,vtex_c")
             .arg("-o")
-            .arg(&raw),
+            .arg(extracted.path()),
     )?;
-    for resource in &requested {
-        ensure!(
-            raw.join(stored_name(resource)).is_file(),
-            "recorded animation asset is unavailable: {resource}"
-        );
-    }
+    retain_requested(extracted.path(), &raw, &requested)?;
+    extracted
+        .close()
+        .context("removing unrequested animation assets")?;
     let output = run(
         vrf,
         Command::new(vrf)
@@ -806,6 +832,33 @@ fn publish_files(staging: &Path, cache: &Path, manifest: &Manifest) -> Result<()
 mod tests {
     use super::*;
     #[test]
+    fn extracted_neighbors_never_reach_decoder_or_cache() {
+        let root = tempfile::tempdir().unwrap();
+        let extracted = root.path().join("extracted");
+        let raw = root.path().join("raw");
+        fs::create_dir_all(extracted.join("animation")).unwrap();
+        let resource = "animation/clip.vnmclip+non_additive.vnmclip";
+        fs::write(extracted.join(stored_name(resource)), b"requested").unwrap();
+        fs::write(
+            extracted.join("animation/new@variant.vnmclip_c"),
+            b"unsupported data",
+        )
+        .unwrap();
+        retain_requested(&extracted, &raw, &[resource.into()]).unwrap();
+        let mut files = BTreeMap::new();
+        collect_files(&raw, &raw, &mut files).unwrap();
+        assert_eq!(files.keys().collect::<Vec<_>>(), [&stored_name(resource)]);
+        assert_eq!(
+            fs::read(raw.join(stored_name(resource))).unwrap(),
+            b"requested"
+        );
+        let missing = "animation/missing.vnmclip";
+        let error = retain_requested(&extracted, &raw, &[missing.into()]).unwrap_err();
+        assert!(error.to_string().contains(missing));
+        assert!(retain_requested(&extracted, &raw, &["../escape.vnmclip".into()]).is_err());
+    }
+
+    #[test]
     fn mesh_blocks_preserve_all_models_and_empty_weapon_geometry() {
         let output = "[1/2] /tmp/player.vmdl_c\nmetadata\n--- Data for block \"MDAT\" ---\n<!-- kv3 text -->\n{\nmesh=1\n}\n--- Data for block \"MDAT\" ---\n<!-- kv3 text -->\n{\nmesh=2\n}\n[2/2] /tmp/weapon.vmdl_c\nmetadata only\n";
         let sections = resource_sections(output).unwrap();
@@ -894,6 +947,14 @@ mod tests {
 
     #[test]
     fn paths_selectors_and_batch_boundaries_are_checked() {
+        let variant = "animation/anims/world/shared/breathing.vnmclip+non_additive.vnmclip";
+        validate_path(variant).unwrap();
+        assert_eq!(
+            resource_id(variant).unwrap(),
+            resource_id(&variant.to_ascii_uppercase()).unwrap()
+        );
+        let selected = selectors(&[variant.into(), SKELETON.into()]).unwrap();
+        assert!(selected.split(',').any(|path| path == stored_name(variant)));
         for bad in [
             "../x", "/x", "C:/x", "a\\b", "a,b", "a//b", "a/./b", "a\nb", "a:*",
         ] {

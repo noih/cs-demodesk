@@ -19,6 +19,7 @@ pub struct Prepared {
     pub coverage: compact::Summary,
     pub skeleton: super::animation_pose::Skeleton,
     pub client_sha256: String,
+    pub custom_tasks_verified: bool,
     pub point_names: Vec<String>,
     hitbox_points: super::model_hitboxes::Points,
 }
@@ -63,6 +64,28 @@ fn dictionary(data: &[u8]) -> Result<(Vec<String>, Vec<String>)> {
 }
 pub fn prepare(path: &Path, root: &Path, game: &Path, vrf: &Path) -> Result<Prepared> {
     prepare_reader(File::open(path)?, root, game, vrf)
+}
+
+/// Content that determines whether an assessment made against this installation can be reused.
+/// The VPK directory identifies packaged resources; the client identifies custom task code.
+pub fn game_content_fingerprint(game: &Path) -> Result<String> {
+    use sha2::Digest;
+    let mut hash = sha2::Sha256::new();
+    let mut buffer = [0u8; 65536];
+    for name in ["game/csgo/bin/win64/client.dll", "game/csgo/pak01_dir.vpk"] {
+        let mut file = File::open(game.join(name))?;
+        hash.update((name.len() as u32).to_le_bytes());
+        hash.update(name.as_bytes());
+        hash.update(file.metadata()?.len().to_le_bytes());
+        loop {
+            let count = file.read(&mut buffer)?;
+            if count == 0 {
+                break;
+            }
+            hash.update(&buffer[..count]);
+        }
+    }
+    Ok(format!("sha256:{:x}", hash.finalize()))
 }
 
 pub fn prepare_reader(input: impl Read, root: &Path, game: &Path, vrf: &Path) -> Result<Prepared> {
@@ -154,6 +177,7 @@ pub fn prepare_reader(input: impl Read, root: &Path, game: &Path, vrf: &Path) ->
         !resources.is_empty(),
         "missing recorded animation dependencies"
     );
+    resources.insert(animation_assets::WEAPONS.into());
     let assets = animation_assets::prepare_with_model_hitboxes(
         root,
         game,
@@ -166,7 +190,7 @@ pub fn prepare_reader(input: impl Read, root: &Path, game: &Path, vrf: &Path) ->
     let client = std::fs::read(game.join("game/csgo/bin/win64/client.dll"))?;
     let client_sha256 = format!("{:x}", sha2::Sha256::digest(client));
     let mut skeleton = super::animation_pose::Skeleton::from_value(assets.skeleton.clone())?;
-    skeleton.validate_cs2_write_set(&client_sha256)?;
+    let custom_tasks_verified = skeleton.validate_cs2_write_set(&client_sha256)?;
     let mut point_names = skeleton.names.clone();
     let hitbox_points = super::model_hitboxes::Points::new(
         &assets.model_hitboxes,
@@ -182,6 +206,7 @@ pub fn prepare_reader(input: impl Read, root: &Path, game: &Path, vrf: &Path) ->
         coverage,
         skeleton,
         client_sha256,
+        custom_tasks_verified,
     })
 }
 
@@ -515,15 +540,70 @@ pub struct PlayerFrame {
 pub struct Coverage {
     /// Packets decoded and applied, but excluded from live-round measurement.
     pub skipped_nonlive_packets: u64,
+    /// All present, living pawn instances on distinct demo ticks, before round filtering.
+    pub all_alive_pawn_frames: u64,
     pub pawn_frames: u64,
     pub measured_frames: u64,
     pub measured_points: u64,
     pub body_attached_points: u64,
     pub hitbox_center_points: u64,
+    pub hitbox_frames: u64,
     pub hitbox_unavailable: BTreeMap<String, u64>,
     pub recipe_frames_with_unparsed_trailer: u64,
     pub unparsed_trailer_bits: u64,
     pub unavailable: BTreeMap<String, u64>,
+    /// Stable diagnostic categories; the original error text remains in `unavailable`.
+    pub unavailable_reasons: BTreeMap<String, u64>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub diagnostic_samples: Vec<DiagnosticSample>,
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DiagnosticSample {
+    pub reason: &'static str,
+    pub detail: String,
+    pub packet: u64,
+    pub demo_tick: i32,
+    pub network_tick: u32,
+    pub animation_tick: Option<u32>,
+    pub entity: i32,
+    pub serial: u32,
+    pub recipe_version: Option<u32>,
+    pub graph_resource: Option<u64>,
+    pub task: Option<String>,
+    pub cache_reads: Vec<u8>,
+    pub cache_writes: Vec<u8>,
+    pub previous_cache_writes: Vec<PreviousCacheWrite>,
+    pub compact_fields: Vec<u32>,
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PreviousCacheWrite {
+    pub cache_id: u8,
+    pub demo_tick: i32,
+    pub network_tick: u32,
+}
+
+fn unavailable_reason(message: &str) -> &'static str {
+    if message == "Cached pose unavailable within recorded recipe" {
+        "cached_pose_missing"
+    } else if message == "pose timestamp differs from packet" {
+        "pose_tick_mismatch"
+    } else if message.starts_with("unsupported animation task")
+        || message.starts_with("unsupported animation recipe")
+        || message.starts_with("Unsupported pose task")
+        || message.starts_with("Unsupported custom-task")
+    {
+        "unsupported_animation"
+    } else if message.contains("resource") || message.contains("dictionary") {
+        "resource_or_dictionary_missing"
+    } else if message.contains("pose") || message.contains("topology") {
+        "pose_input_missing_or_invalid"
+    } else {
+        "other_reconstruction_error"
+    }
 }
 
 fn bone_name_context(
@@ -629,6 +709,23 @@ pub fn visit(
     consume: impl FnMut(i32, &[PlayerFrame]) -> Result<()>,
 ) -> Result<Coverage> {
     visit_when(path, prepared, skeleton, |_| true, consume)
+}
+
+/// Opt-in developer diagnostics. Normal scoring keeps only aggregate counts.
+pub fn visit_diagnostic(
+    path: &Path,
+    prepared: &Prepared,
+    skeleton: &super::animation_pose::Skeleton,
+    mut consume: impl FnMut(i32, &[PlayerFrame]) -> Result<()>,
+) -> Result<Coverage> {
+    visit_scene_reader_inner(
+        File::open(path)?,
+        prepared,
+        skeleton,
+        |_| true,
+        |tick, players, _| consume(tick, players),
+        true,
+    )
 }
 
 #[derive(Default)]
@@ -766,10 +863,31 @@ pub fn visit_scene_reader(
     mut should_measure: impl FnMut(i32) -> bool,
     mut consume: impl FnMut(i32, &[PlayerFrame], &SceneOcclusion) -> Result<()>,
 ) -> Result<Coverage> {
+    visit_scene_reader_inner(
+        input,
+        prepared,
+        skeleton,
+        &mut should_measure,
+        &mut consume,
+        false,
+    )
+}
+
+fn visit_scene_reader_inner(
+    input: impl Read,
+    prepared: &Prepared,
+    skeleton: &super::animation_pose::Skeleton,
+    mut should_measure: impl FnMut(i32) -> bool,
+    mut consume: impl FnMut(i32, &[PlayerFrame], &SceneOcclusion) -> Result<()>,
+    diagnostics: bool,
+) -> Result<Coverage> {
     let mut entities: BTreeMap<(i32, u32), Entity> = BTreeMap::new();
     let mut context = RecordedContext::default();
     let mut bone_contexts: HashMap<(i32, u32), std::result::Result<Vec<String>, String>> =
         HashMap::new();
+    let mut pose_states: HashMap<(i32, u32), (u32, u64, super::animation_pose::State)> =
+        HashMap::new();
+    let mut cache_writes: HashMap<(i32, u32, u8), (i32, u32)> = HashMap::new();
     let mut asset_context = vec![];
     let mut task_names: Vec<String> = vec![];
     let mut graphs: Vec<(u64, usize)> = vec![];
@@ -779,12 +897,14 @@ pub fn visit_scene_reader(
         .map(|name| is_body_attached_point(name))
         .collect();
     let mut coverage = Coverage::default();
+    let mut packet = 0u64;
     let mut last_tick = None;
     let mut scene = SceneOcclusion::default();
     let mut scene_dirty = true;
     compact::visit(
         reader(input),
         |frame| {
+            packet += 1;
             scene.cpu_smoke.begin_packet(&frame);
             let mut context_changed = false;
             for id in frame.changed {
@@ -840,6 +960,14 @@ pub fn visit_scene_reader(
                 }
                 if field.name.ends_with(".m_hModel") || field.name == "$present" {
                     bone_contexts.clear();
+                    if diagnostics && field.class == "CCSPlayerPawn" {
+                        cache_writes.retain(|&(id, serial, _), _| {
+                            (id, serial) != (field.entity, field.serial)
+                        });
+                    }
+                    if field.class == "CCSPlayerPawn" {
+                        pose_states.remove(&(field.entity, field.serial));
+                    }
                 }
                 let key = (field.entity, field.serial);
                 if field.name == "$present" && !frame.values.contains_key(id) {
@@ -849,6 +977,10 @@ pub fn visit_scene_reader(
                 }
                 if field.name.contains(".m_vecSecondarySkeletons/") {
                     bone_contexts.remove(&key);
+                    pose_states.remove(&key);
+                    if diagnostics {
+                        cache_writes.retain(|&(id, serial, _), _| (id, serial) != key);
+                    }
                 }
                 let entity = entities.entry(key).or_default();
                 entity.class.clone_from(&field.class);
@@ -856,6 +988,10 @@ pub fn visit_scene_reader(
             }
             if context_changed {
                 bone_contexts.clear();
+                pose_states.clear();
+                if diagnostics {
+                    cache_writes.clear();
+                }
                 asset_context = context.assets()?;
                 task_names = context.tasks()?.into_iter().map(str::to_owned).collect();
                 graphs = asset_context
@@ -873,6 +1009,17 @@ pub fn visit_scene_reader(
             // Entity values and animation dictionaries above must advance during freeze too.
             if !should_measure(frame.tick) {
                 coverage.skipped_nonlive_packets += 1;
+                coverage.all_alive_pawn_frames += entities
+                    .values()
+                    .filter(|pawn| {
+                        pawn.class == "CCSPlayerPawn"
+                            && pawn.get("$present").is_some()
+                            && pawn.number("CCSPlayerPawn.m_lifeState") == Some(0.)
+                            && pawn
+                                .number("CCSPlayerPawn.m_iHealth")
+                                .is_some_and(|health| health > 0.)
+                    })
+                    .count() as u64;
                 consume(frame.tick, &[], &SceneOcclusion::default())?;
                 scene.cpu_smoke.update(&frame, |_, _| Ok(()))?;
                 return Ok(());
@@ -891,8 +1038,10 @@ pub fn visit_scene_reader(
                         .number("CCSPlayerPawn.m_iHealth")
                         .is_some_and(|h| h > 0.);
                 if !alive {
+                    pose_states.remove(&(entity_id, serial));
                     continue;
                 }
+                coverage.all_alive_pawn_frames += 1;
                 let controller = pawn
                     .number("CCSPlayerPawn.m_hOriginalController")
                     .map(|n| n as u32);
@@ -936,12 +1085,23 @@ pub fn visit_scene_reader(
                 let mut capsules = vec![];
                 let mut hitbox_transforms = vec![];
                 let mut hitbox_set = None;
+                let mut diagnostic_graph = None;
+                let mut diagnostic_version = None;
+                let mut diagnostic_slot = None;
+                let mut diagnostic_animation_tick = None;
+                let mut diagnostic_task = None;
+                let mut diagnostic_reads = vec![];
+                let mut diagnostic_writes = vec![];
+                let mut diagnostic_previous_writes = vec![];
                 let result = (|| -> Result<Vec<Option<[f64; 3]>>> {
                     let graph_handle = pawn
                         .get("CCSPlayerPawn.CBodyComponentBaseAnimGraph.m_hGraphDefinitionAG2")
                         .filter(|v| v.len() == 9 && v[0] == 4)
                         .context("missing graph resource handle")?;
                     let graph_id = u64::from_le_bytes(graph_handle[1..].try_into()?);
+                    if diagnostics {
+                        diagnostic_graph = Some(graph_id);
+                    }
                     ensure!(
                         pawn.body_number("m_primaryGraphId") == Some((graph_id as u32) as f64),
                         "primary graph identity mismatch"
@@ -961,9 +1121,15 @@ pub fn visit_scene_reader(
                     let version = pawn
                         .pose_number("m_nSerializePoseRecipeVersionAG2")
                         .context("missing pose version")?;
+                    if diagnostics {
+                        diagnostic_version = Some(version);
+                    }
                     let slot = pawn
                         .pose_number("m_nSerializePoseRecipeAG2ActiveSlot")
                         .context("missing pose slot")?;
+                    if diagnostics {
+                        diagnostic_slot = Some(slot);
+                    }
                     let topology = pawn
                         .topologies
                         .get(&slot)
@@ -1012,6 +1178,30 @@ pub fn visit_scene_reader(
                             error
                         }
                     })?;
+                    if diagnostics {
+                        diagnostic_animation_tick = Some(recipe.network_tick);
+                        for (task, parameters) in recipe.tasks.iter().zip(&recipe.parameters) {
+                            match parameters {
+                                animation_recipe::Parameters::CachedPoseRead { cache_id } => {
+                                    diagnostic_reads.push(*cache_id);
+                                    diagnostic_task = Some(task.kind.clone());
+                                    if let Some(&(demo_tick, network_tick)) =
+                                        cache_writes.get(&(entity_id, serial, *cache_id))
+                                    {
+                                        diagnostic_previous_writes.push(PreviousCacheWrite {
+                                            cache_id: *cache_id,
+                                            demo_tick,
+                                            network_tick,
+                                        });
+                                    }
+                                }
+                                animation_recipe::Parameters::CachedPoseWrite { cache_id } => {
+                                    diagnostic_writes.push(*cache_id);
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
                     ensure!(
                         recipe.network_tick == frame.net_tick,
                         "pose timestamp differs from packet"
@@ -1020,9 +1210,30 @@ pub fn visit_scene_reader(
                         coverage.recipe_frames_with_unparsed_trailer += 1;
                         coverage.unparsed_trailer_bits += recipe.remaining_bits() as u64;
                     }
-                    let pose =
-                        skeleton.evaluate(&recipe, &prepared.assets.clips, resources, masks)?;
+                    let mut state = pose_states
+                        .remove(&(entity_id, serial))
+                        .filter(|(tick, graph, _)| {
+                            tick.checked_add(1) == Some(frame.net_tick) && *graph == graph_id
+                        })
+                        .map(|(_, _, state)| state)
+                        .unwrap_or_default();
+                    let pose = skeleton.evaluate_with_state(
+                        &recipe,
+                        &prepared.assets.clips,
+                        resources,
+                        masks,
+                        &mut state,
+                    )?;
                     ensure!(!pose.is_additive, "final pose is additive");
+                    pose_states.insert((entity_id, serial), (frame.net_tick, graph_id, state));
+                    if diagnostics {
+                        for &cache_id in &diagnostic_writes {
+                            cache_writes.insert(
+                                (entity_id, serial, cache_id),
+                                (frame.tick, frame.net_tick),
+                            );
+                        }
+                    }
                     let root = pawn
                         .transform()
                         .context("unsupported pawn root transform")?;
@@ -1070,6 +1281,7 @@ pub fn visit_scene_reader(
                     match hitboxes {
                         Ok((measured, missing)) => {
                             coverage.hitbox_center_points += measured;
+                            coverage.hitbox_frames += u64::from(measured > 0);
                             if missing > 0 {
                                 *coverage
                                     .hitbox_unavailable
@@ -1102,7 +1314,67 @@ pub fn visit_scene_reader(
                         points
                     }
                     Err(error) => {
-                        *coverage.unavailable.entry(error.to_string()).or_default() += 1;
+                        pose_states.remove(&(entity_id, serial));
+                        let detail = error.to_string();
+                        let reason = unavailable_reason(&detail);
+                        *coverage.unavailable.entry(detail.clone()).or_default() += 1;
+                        *coverage
+                            .unavailable_reasons
+                            .entry(reason.into())
+                            .or_default() += 1;
+                        if diagnostics
+                            && coverage
+                                .diagnostic_samples
+                                .iter()
+                                .filter(|sample| sample.reason == reason)
+                                .count()
+                                < 3
+                            && !coverage.diagnostic_samples.iter().any(|sample| {
+                                sample.reason == reason
+                                    && sample.entity == entity_id
+                                    && sample.serial == serial
+                                    && sample.cache_reads == diagnostic_reads
+                            })
+                        {
+                            let fields = [
+                                pawn.pose_version.as_deref(),
+                                pawn.pose_slot.as_deref(),
+                                diagnostic_slot
+                                    .and_then(|slot| pawn.topologies.get(&slot))
+                                    .map(String::as_str),
+                                pawn.dynamic.as_deref(),
+                                Some("CCSPlayerPawn.CBodyComponentBaseAnimGraph.m_hGraphDefinitionAG2"),
+                            ];
+                            let compact_fields = fields
+                                .into_iter()
+                                .flatten()
+                                .filter_map(|name| {
+                                    frame.fields.iter().position(|field| {
+                                        field.entity == entity_id
+                                            && field.serial == serial
+                                            && field.name == name
+                                    })
+                                })
+                                .filter_map(|index| u32::try_from(index).ok())
+                                .collect();
+                            coverage.diagnostic_samples.push(DiagnosticSample {
+                                reason,
+                                detail: detail.chars().take(200).collect(),
+                                packet,
+                                demo_tick: frame.tick,
+                                network_tick: frame.net_tick,
+                                animation_tick: diagnostic_animation_tick,
+                                entity: entity_id,
+                                serial,
+                                recipe_version: diagnostic_version,
+                                graph_resource: diagnostic_graph,
+                                task: diagnostic_task,
+                                cache_reads: diagnostic_reads,
+                                cache_writes: diagnostic_writes,
+                                previous_cache_writes: diagnostic_previous_writes,
+                                compact_fields,
+                            });
+                        }
                         vec![]
                     }
                 };
@@ -1140,6 +1412,45 @@ pub fn visit_scene_reader(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn game_content_fingerprint_changes_with_client_or_vpk_index() {
+        let game = tempfile::tempdir().unwrap();
+        let client = game.path().join("game/csgo/bin/win64/client.dll");
+        let vpk = game.path().join("game/csgo/pak01_dir.vpk");
+        std::fs::create_dir_all(client.parent().unwrap()).unwrap();
+        std::fs::write(&client, b"client a").unwrap();
+        std::fs::write(&vpk, b"index a").unwrap();
+        let first = super::game_content_fingerprint(game.path()).unwrap();
+        assert_eq!(first, super::game_content_fingerprint(game.path()).unwrap());
+        std::fs::write(&client, b"client b").unwrap();
+        let second = super::game_content_fingerprint(game.path()).unwrap();
+        assert_ne!(first, second);
+        std::fs::write(&vpk, b"index b").unwrap();
+        assert_ne!(
+            second,
+            super::game_content_fingerprint(game.path()).unwrap()
+        );
+    }
+    #[test]
+    fn reconstruction_failures_have_stable_categories() {
+        use super::unavailable_reason;
+        assert_eq!(
+            unavailable_reason("Cached pose unavailable within recorded recipe"),
+            "cached_pose_missing"
+        );
+        assert_eq!(
+            unavailable_reason("pose timestamp differs from packet"),
+            "pose_tick_mismatch"
+        );
+        assert_eq!(
+            unavailable_reason("unsupported animation task type FutureTask"),
+            "unsupported_animation"
+        );
+        assert_eq!(
+            unavailable_reason("missing graph resource handle"),
+            "resource_or_dictionary_missing"
+        );
+    }
     #[test]
     fn rewind_tick_uses_raw_simulation_time_and_respects_removal() {
         let mut entity = Entity::default();

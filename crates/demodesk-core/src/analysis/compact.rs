@@ -28,7 +28,7 @@ pub fn contract() -> Contract {
     Contract {
         module: "match-state".into(),
         schema_version: 7,
-        implementation_version: "0.24.0".into(),
+        implementation_version: "0.25.0".into(),
     }
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -957,7 +957,7 @@ pub fn prepare(
         std::io::BufWriter::new(&mut temp),
         flate2::Compression::default(),
     );
-    parser.write_match_state(bytes, &mut encoder)?;
+    parser.write_match_state(bytes, std::io::BufWriter::new(&mut encoder))?;
     encoder.finish()?.flush()?;
     temp.rewind()?;
     Ok(temp)

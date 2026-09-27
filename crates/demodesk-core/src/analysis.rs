@@ -9,6 +9,7 @@ pub mod ballistics;
 pub mod body_journal;
 pub mod collision;
 pub mod compact;
+pub mod compatibility;
 pub mod event_context;
 pub mod journal;
 pub mod kv3_text;

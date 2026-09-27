@@ -101,6 +101,17 @@ impl Density {
     /// Directional estimate only: sample occupied 20-HU cells every 10 HU.
     /// ponytail: thin edge crossings can be missed; exact voxel traversal is unnecessary for this estimate.
     pub fn estimated_entry(&self, start: [f32; 3], end: [f32; 3]) -> Option<[f32; 3]> {
+        self.estimated_entry_weighted(start, end, 1.)
+    }
+    pub(super) fn estimated_entry_weighted(
+        &self,
+        start: [f32; 3],
+        end: [f32; 3],
+        weight: f32,
+    ) -> Option<[f32; 3]> {
+        if !weight.is_finite() || !(0. ..=1.).contains(&weight) {
+            return None;
+        }
         if self.sequence.is_none() || !start.iter().chain(&end).all(|v| v.is_finite()) {
             return None;
         }
@@ -122,7 +133,7 @@ impl Density {
                 continue;
             }
             let id = index(cell);
-            if !self.blocked[id] && self.current[id][0] >= 10. {
+            if !self.blocked[id] && self.current[id][0] * weight >= 10. {
                 return Some(point);
             }
         }
@@ -642,6 +653,9 @@ mod tests {
         assert_eq!(sim.estimated_entry(ray.0, ray.1), None);
         sim.current[index([16, 16, 16])][0] = 50.;
         assert!(sim.estimated_entry(ray.0, ray.1).is_some());
+        assert!(sim.estimated_entry_weighted(ray.0, ray.1, 0.1).is_none());
+        assert!(sim.estimated_entry_weighted(ray.0, ray.1, 0.5).is_some());
+        assert!(sim.estimated_entry_weighted(ray.0, ray.1, f32::NAN).is_none());
         assert_eq!(
             sim.estimated_entry([10., 10., 10.], ray.1),
             Some([10., 10., 10.])

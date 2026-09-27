@@ -258,7 +258,7 @@ fn foot_target(bits: &mut Bits<'_>, context: &Context<'_>) -> Result<IkTarget> {
 }
 
 /// Decode the supported prefix, preserving all remaining bytes.
-/// The network tick prefix and task payload layout are only supported for recipe version 2.
+/// Versions 2 and 3 share this prefix; version-specific trailing data stays opaque.
 pub fn decode(
     version: u32,
     topology: &[u8],
@@ -266,7 +266,7 @@ pub fn decode(
     context: &Context<'_>,
 ) -> Result<Recipe> {
     ensure!(
-        version == 2,
+        matches!(version, 2 | 3),
         "unsupported animation recipe version {version}"
     );
     ensure!(
@@ -467,6 +467,7 @@ mod tests {
             (0xab, 8),
         ]);
         let recipe = decode(2, &topology, &dynamic, &context).unwrap();
+        assert_eq!(decode(3, &topology, &dynamic, &context).unwrap(), recipe);
         assert_eq!(recipe.bits_consumed, 146);
         assert_eq!(
             recipe.parameters[1],
@@ -500,6 +501,7 @@ mod tests {
         let topology = pack(&[(2, 4), (3, 2), (3, 5), (3, 5), (10, 5), (0, 2), (1, 2)]);
         let dynamic = pack(&[(0, 32), (128, 8), (1, 1), (1, 5), (1, 3), (255, 8)]);
         let recipe = decode(2, &topology, &dynamic, &context).unwrap();
+        assert_eq!(decode(3, &topology, &dynamic, &context).unwrap(), recipe);
         assert_eq!(recipe.bits_consumed, 57);
         assert_eq!(
             recipe.parameters[2],
@@ -541,6 +543,7 @@ mod tests {
             bone_names: &[],
         };
         let recipe = decode(2, &topology, &dynamic, &context).unwrap();
+        assert_eq!(decode(3, &topology, &dynamic, &context).unwrap(), recipe);
         assert_eq!(recipe.bits_consumed, 60);
         assert_eq!(
             recipe.parameters[1],
@@ -573,6 +576,7 @@ mod tests {
         };
         let recipe = decode(2, &topology, &dynamic, &context).unwrap();
         assert_eq!(recipe.network_tick, 13451);
+        assert_eq!(decode(3, &topology, &dynamic, &context).unwrap(), recipe);
         assert_eq!(recipe.tasks.len(), 7);
         assert_eq!(recipe.tasks[2].dependencies, [0, 1]);
         assert_eq!(recipe.tasks[4].dependencies, [2, 3]);
@@ -616,6 +620,7 @@ mod tests {
             assert!(decode(2, &topology[..end], &dynamic, &context).is_err());
         }
         assert!(decode(1, &topology, &dynamic, &context).is_err());
+        assert!(decode(4, &topology, &dynamic, &context).is_err());
         let mut names = RECORDED_TASK_NAMES;
         names[1] = "UnknownTask";
         assert!(decode(

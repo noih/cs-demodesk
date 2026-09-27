@@ -401,8 +401,11 @@ impl Timeline {
                     || (v.error.is_none() && (v.did_effect == Some(false) || v.empty_initial()))
             })
     }
-    /// Eligible samples for the directional estimate; growth/fade and packet gaps are excluded.
-    pub fn stable_volumes_at_fire(&self, message_tick: i32) -> Option<Vec<(&Density, [f32; 3])>> {
+    /// Lower lifetime weights over the recorded fire interval; packet gaps remain unknown.
+    pub fn weighted_volumes_at_fire(
+        &self,
+        message_tick: i32,
+    ) -> Option<Vec<(&Density, [f32; 3], f32)>> {
         if !self.before_update || self.clock.paused != Some(false) {
             return None;
         }
@@ -421,10 +424,10 @@ impl Timeline {
                 return None;
             }
             let start = v.effect_tick? as f32 / 64.;
-            if now[0] - start < 1.5 || now[1] - start > 17. {
-                return None;
+            let weight = super::lifetime_bounds(now.map(|t| t - start))[0];
+            if weight > 0. {
+                volumes.push((v.density()?, v.origin?, weight));
             }
-            volumes.push((v.density()?, v.origin?));
         }
         Some(volumes)
     }
@@ -594,6 +597,60 @@ impl Timeline {
 mod tests {
     use super::*;
     #[test]
+    fn directional_samples_include_dense_growth_and_fade() {
+        use crate::smoke::ShotCoverage;
+        let mut density = Density::new([0.; 3]).unwrap();
+        density
+            .step(0, &[0, 1, 1, 16, 16, 16, 0, 0, 0, 0, 0, 0])
+            .unwrap();
+        let mut timeline = Timeline {
+            before_update: true,
+            clock: Clock {
+                paused_ticks: Some(0),
+                paused: Some(false),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        timeline.volumes.insert(
+            (1, 1),
+            Volume {
+                present: true,
+                did_effect: Some(true),
+                effect_tick: Some(64),
+                origin: Some([0.; 3]),
+                density: Some(density),
+                size: Some(0),
+                ..Default::default()
+            },
+        );
+        for tick in [128, 256, 1216] {
+            timeline.packet_net_tick = Some(tick);
+            assert!(
+                !timeline
+                    .candidates(tick as i32, [10.; 3], &[[100., 0., 0.]])
+                    .unwrap()
+                    .is_empty(),
+                "tick {tick}"
+            );
+        }
+        for tick in [65, 1472] {
+            timeline.packet_net_tick = Some(tick);
+            assert!(
+                timeline
+                    .candidates(tick as i32, [10.; 3], &[[100., 0., 0.]])
+                    .unwrap()
+                    .is_empty(),
+                "tick {tick}"
+            );
+        }
+        timeline.packet_net_tick = Some(128);
+        timeline.volumes.get_mut(&(1, 1)).unwrap().size = Some(10);
+        assert!(timeline
+            .candidates(128, [10.; 3], &[[100., 0., 0.]])
+            .is_none());
+    }
+    #[test]
     fn removal_deltas_do_not_recreate_a_deleted_cloud() {
         let fields: Vec<_> = ["$present", "m_bDidSmokeEffect"].into_iter().map(|name| compact::Field {
             entity: 1, serial: 1, class: "CSmokeGrenadeProjectile".into(), name: name.into(),
@@ -606,7 +663,7 @@ mod tests {
         assert_eq!(timeline.volumes().count(),0);
     }
     #[test]
-    fn estimated_samples_require_stable_complete_contiguous_smoke() {
+    fn estimated_samples_require_complete_contiguous_smoke() {
         let mut density = Density::new([0.; 3]).unwrap();
         density.step(0, &[0, 0, 0]).unwrap();
         let mut timeline = Timeline {
@@ -632,17 +689,17 @@ mod tests {
                 ..Default::default()
             },
         );
-        assert_eq!(timeline.stable_volumes_at_fire(200).unwrap().len(), 1);
+        assert_eq!(timeline.weighted_volumes_at_fire(200).unwrap().len(), 1);
         timeline.volumes.get_mut(&(1, 1)).unwrap().size = Some(10);
-        assert!(timeline.stable_volumes_at_fire(200).is_none());
+        assert!(timeline.weighted_volumes_at_fire(200).is_none());
         timeline.volumes.get_mut(&(1, 1)).unwrap().size = Some(0);
         timeline.packet_net_tick = Some(100);
-        assert!(timeline.stable_volumes_at_fire(100).is_none());
+        assert!(timeline.weighted_volumes_at_fire(100).unwrap()[0].2 < 1.);
         timeline.packet_net_tick = Some(1200);
-        assert!(timeline.stable_volumes_at_fire(1200).is_none());
+        assert!(timeline.weighted_volumes_at_fire(1200).unwrap()[0].2 < 1.);
         timeline.packet_net_tick = Some(200);
         timeline.before_update = false;
-        assert!(timeline.stable_volumes_at_fire(200).is_none());
+        assert!(timeline.weighted_volumes_at_fire(200).is_none());
     }
     #[test]
     fn absent_smoke_is_certified_only_in_contiguous_fire_phase() {

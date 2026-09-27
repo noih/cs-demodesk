@@ -795,7 +795,7 @@ try {
   });
   assert.ok(warningAlignment < 1, 'Callout icon and text are vertically centered');
   const toolLayout = await settingsPage.evaluate(el => {
-    const recheck = [...el.querySelectorAll('button')].find(b=>b.textContent.trim()==='Check again');
+    const recheck = [...el.querySelectorAll('button')].find(b=>b.textContent.trim()==='Verify installation');
     const card = recheck.closest('.rt-Card').getBoundingClientRect();
     const button = recheck.parentElement.getBoundingClientRect();
     const warning = recheck.closest('.rt-Card').querySelector('.rt-CalloutRoot').getBoundingClientRect();
@@ -815,7 +815,7 @@ try {
       window.toolPaths = {hlaeExe:'E:/tools/HLAE.exe',hlaeDll:'E:/tools/AfxHookSource2.dll',ffmpegExe:'E:/tools/ffmpeg.exe',vrfExe:'E:/tools/Source2Viewer-CLI.exe'};
       if (missing) delete window.toolPaths[missing];
     }, missing);
-    await settingsPage.getByRole('button', {name:'Check again',exact:true}).click();
+    await settingsPage.getByRole('button', {name:'Verify installation',exact:true}).click();
     await toolWarning.waitFor({state:missing ? 'visible' : 'hidden'});
     await page.locator('.notification-viewport .app-toast').getByRole('button', {name:'Close',exact:true}).click();
     assert.equal(await toolCheckCalls(), checksBeforeManual + 1, 'Check again runs tool verification once');
@@ -823,7 +823,7 @@ try {
   {
   const hlaeField = settingsPage.locator('.tool-field').filter({has:page.getByLabel('HLAE',{exact:true})});
   await page.evaluate(() => { window.holdToolCheck=true; window.toolChecks={hlae:{ok:false,path:'E:/tools/HLAE.exe',exitCode:7,timedOut:false,stderr:'fixture startup failure'}}; });
-  await settingsPage.getByRole('button',{name:'Check again',exact:true}).click();
+  await settingsPage.getByRole('button',{name:'Verify installation',exact:true}).click();
   await hlaeField.getByText('Verifying…',{exact:true}).waitFor();
   assert.equal(await hlaeField.getByText('Ready',{exact:true}).count(),0,'Existing file is not ready while verification runs');
   await page.waitForFunction(()=>typeof window.releaseToolCheck==='function');
@@ -840,7 +840,7 @@ try {
   assert.equal(await toolCheckCalls(), checksBeforeDiagnostics, 'Generating and copying diagnostics reuses cached checks without running verification');
   await diagnosticsDialog.getByRole('button',{name:'Close',exact:true}).click();
   await page.evaluate(()=>{delete window.toolChecks;});
-  await settingsPage.getByRole('button',{name:'Check again',exact:true}).click();
+  await settingsPage.getByRole('button',{name:'Verify installation',exact:true}).click();
   await hlaeField.getByText('Ready',{exact:true}).waitFor();
   await page.locator('.notification-viewport .app-toast').getByRole('button',{name:'Close',exact:true}).click();
   }
@@ -1087,7 +1087,7 @@ try {
   assert.equal(await group.getByRole('button',{name:'Download: HLAE',exact:true}).count(),1);
   assert.equal(await group.getByRole('button',{name:'Download: FFmpeg',exact:true}).count(),1);
   assert.equal(await group.getByRole('button',{name:'Download: Source 2 Viewer CLI',exact:true}).count(),0, 'Export guidance excludes the replay tool');
-  assert.equal(await group.getByRole('button',{name:'Check again',exact:true}).count(),0, 'Export guidance excludes unrelated settings actions');
+  assert.equal(await group.getByRole('button',{name:'Verify installation',exact:true}).count(),0, 'Export guidance excludes unrelated settings actions');
   assert.equal(await page.locator('.driver-popover-title').innerText(), 'Download: HLAE, FFmpeg');
   const groupArrow = await page.locator('.driver-popover-arrow').evaluate(arrow => {
     // Simulate a downward arrow while the popover is positioned on the left.
@@ -1145,7 +1145,7 @@ try {
   await page.evaluate(() => window.emitTestEvent({type:'setup-finished',tool:'hlae',ok:true,error:null}));
   await page.getByRole('button',{name:'Download: HLAE',exact:true}).waitFor();
   await page.evaluate(() => { window.toolPaths = {steamDir:'E:/Steam',cs2Exe:'E:/CS2/game/bin/win64/cs2.exe',hlaeExe:'E:/tools/HLAE.exe',hlaeDll:'E:/tools/AfxHookSource2.dll'}; });
-  await page.getByRole('button', {name:'Check again',exact:true}).click();
+  await page.getByRole('button', {name:'Verify installation',exact:true}).click();
   await page.locator('.tool-field').filter({has:page.getByLabel('HLAE', {exact:true})}).getByText('Ready', {exact:true}).waitFor();
   assert.equal(await page.locator('.driver-popover').count(), 0, 'Tool updates do not restart guidance');
 
@@ -1369,6 +1369,9 @@ try {
   assert.ok(await analysisNotice.evaluate(el => el.getBoundingClientRect().bottom <= el.nextElementSibling.getBoundingClientRect().top), 'Analysis notice sits above the result table');
   assert.equal(await scorePanel.getByRole('columnheader',{name:'Empty behavior',exact:true}).count(),0,'Globally empty rules are omitted');
   assert.equal(await scorePanel.locator('[data-rule-count="view-angle-oscillation"]').count(),0,'Unavailable rule is not an event column');
+  assert.equal(await scorePanel.locator('[data-analysis-unavailable]').count(),0,'Unavailable checks are omitted from observed behaviors');
+  assert.equal(await scoreRow('1').getByText(/Smoke hit rate/).count(),0,'Zero smoke rates are omitted');
+  assert.equal(await scoreRow('2').getByText('Smoke hit rate (estimated) · 28%',{exact:true}).count(),1,'Positive smoke rates remain visible');
   assert.equal(await scorePanel.getByText('No occurrences',{exact:true}).count(),0,'No repetitive empty-result list');
   assert.equal(await scorePanel.getByText(/Counts show observed behavior|Analysis history|Source demo not verified|different demo content/).count(),0,'Main matrix has no redundant explanation or source warnings');
   assert.equal(await page.getByRole('dialog').count(),0,'Details are initially closed');
@@ -1409,7 +1412,8 @@ try {
   await analysisDialog.waitFor({state:'hidden'});
   assert.equal(await detailsButton('2').evaluate(el=>el===document.activeElement),true,'Escape restores trigger focus');
   await detailsButton('1').click();
-  assert.equal(await analysisDialog.locator('[data-smoke-estimate]').innerText(),'Smoke hit rate (estimated): 0% · 0／50 shots','Eligible misses show a valid zero rate');
+  assert.equal(await analysisDialog.locator('[data-smoke-estimate]').count(),0,'Zero smoke estimates are omitted from details');
+  assert.equal(await analysisDialog.locator('[data-summary-id="smoke-hit-rate"]').count(),0,'Empty smoke summaries are omitted');
   assert.ok(await analysisDialog.locator('[data-summary-id]:visible').count()>0,'Summary is visible without expanding');
   await analysisDialog.getByText('Shots: 64',{exact:true}).first().waitFor();
   assert.equal(await analysisDialog.locator('[data-occurrence-id]').count(),0,'Player with no observations still has measured summary');

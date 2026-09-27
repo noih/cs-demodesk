@@ -80,25 +80,27 @@ pub fn crosses_during<'a>(
         now.iter().chain(&start).chain(&end).all(|v| v.is_finite()) && now[0] <= now[1],
         "invalid smoke query interval"
     );
+    let contributions = volumes.into_iter().map(|(volume, start_time)| {
+        let ages = now.map(|t| t - start_time);
+        ensure!(ages.iter().all(|v| v.is_finite()), "non-finite smoke age");
+        let weight = lifetime_bounds(ages);
+        let raw = volume.line_density(start, end)?;
+        // Any single contribution >= 1 already exceeds the native 0.2 threshold.
+        Ok([(weight[0] * raw).min(1.), (weight[1] * raw).min(1.)])
+    });
+    crossing_ranges(contributions)
+}
+
+fn lifetime_bounds(ages: [f32; 2]) -> [f32; 2] {
     fn smooth_bounds(a: f32, b: f32, ages: [f32; 2]) -> [f32; 2] {
         let u = ages.map(|t| ((t - a) / (b - a)).clamp(0., 1.));
         let (lo, hi) = (u[0].min(u[1]), u[0].max(u[1]));
         // Bound the actual rounded operations, not the ideal cubic's monotonicity.
         [(3. - (hi + hi)) * (lo * lo), (3. - (lo + lo)) * (hi * hi)]
     }
-    let contributions = volumes.into_iter().map(|(volume, start_time)| {
-        let ages = now.map(|t| t - start_time);
-        ensure!(ages.iter().all(|v| v.is_finite()), "non-finite smoke age");
-        let grow = smooth_bounds(0.1, 1.5, ages);
-        let fade = smooth_bounds(22., 17., ages);
-        let raw = volume.line_density(start, end)?;
-        // Any single contribution >= 1 already exceeds the native 0.2 threshold.
-        Ok([
-            (grow[0] * fade[0] * raw).min(1.),
-            (grow[1] * fade[1] * raw).min(1.),
-        ])
-    });
-    crossing_ranges(contributions)
+    let grow = smooth_bounds(0.1, 1.5, ages);
+    let fade = smooth_bounds(22., 17., ages);
+    [grow[0] * fade[0], grow[1] * fade[1]]
 }
 
 /// Certify the native threshold without assuming an unrecorded actor-list order.
@@ -365,12 +367,12 @@ impl ShotCoverage for timeline::Timeline {
         start: [f32; 3],
         deltas: &[[f32; 3]],
     ) -> Option<Vec<([f32; 3], [f32; 3])>> {
-        let volumes = self.stable_volumes_at_fire(tick)?;
+        let volumes = self.weighted_volumes_at_fire(tick)?;
         let mut points = Vec::new();
         for delta in deltas {
             let end = std::array::from_fn(|i| start[i] + delta[i]);
-            for (density, origin) in &volumes {
-                if let Some(point) = density.estimated_entry(start, end) {
+            for (density, origin, weight) in &volumes {
+                if let Some(point) = density.estimated_entry_weighted(start, end, *weight) {
                     points.push((*origin, point));
                 }
             }

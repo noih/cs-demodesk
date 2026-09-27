@@ -60,8 +60,10 @@ pub fn policies_for_demo(bytes: &[u8]) -> anyhow::Result<Vec<FirePolicy>> {
     let source = parser::first_pass::convars::read(bytes, &NAMES).map_err(anyhow::Error::msg)?;
     let header = source.header();
     anyhow::ensure!(
-        header.patch_version == Some(14181)
-            && header.demo_version_name.as_deref() == Some("valve_demo_2"),
+        crate::analysis::compatibility::spread_defaults(
+            header.patch_version,
+            header.demo_version_name.as_deref()
+        ),
         "unsupported spread policy source build"
     );
     source
@@ -77,6 +79,11 @@ pub fn policies_for_demo(bytes: &[u8]) -> anyhow::Result<Vec<FirePolicy>> {
                 })
             };
             let rewind = (|| -> anyhow::Result<_> {
+                // Spread defaults were checked independently; they do not qualify rewind defaults.
+                anyhow::ensure!(
+                    crate::analysis::compatibility::rewind_defaults(header.patch_version),
+                    "unverified rewind defaults"
+                );
                 let max_unlag = fire
                     .values
                     .get(NAMES[3])
@@ -306,6 +313,7 @@ mod tests {
     }
 
     fn policy_demo(
+        patch_version: i32,
         reordered: bool,
         initial: bool,
         reset: bool,
@@ -399,7 +407,7 @@ mod tests {
             1,
             u32::MAX,
             &csgoproto::CDemoFileHeader {
-                patch_version: Some(14181),
+                patch_version: Some(patch_version),
                 demo_version_name: Some("valve_demo_2".into()),
                 ..Default::default()
             }
@@ -433,8 +441,27 @@ mod tests {
         out
     }
     #[test]
+    fn current_patch_preserves_recorded_spread_policy() {
+        for patch in [14181, 14185] {
+            let policies =
+                policies_for_demo(&policy_demo(patch, false, true, false, "1", &[])).unwrap();
+            assert!(policies
+                .iter()
+                .all(|p| p.policy.patterns_enabled && !p.policy.maximum_inaccuracy));
+            assert_eq!(
+                policies
+                    .iter()
+                    .map(|p| p.policy.only_up)
+                    .collect::<Vec<_>>(),
+                [false, true, false]
+            );
+            assert_eq!(policies[0].rewind.is_some(), patch == 14181);
+        }
+        assert!(policies_for_demo(&policy_demo(14186, false, true, false, "1", &[])).is_err());
+    }
+    #[test]
     fn policy_provenance_preserves_wire_order_and_return_to_default() {
-        let result = policies_for_demo(&policy_demo(false, true, false, "1", &[])).unwrap();
+        let result = policies_for_demo(&policy_demo(14181, false, true, false, "1", &[])).unwrap();
         assert_eq!(
             result.iter().map(|f| f.policy.only_up).collect::<Vec<_>>(),
             [false, true, false]
@@ -449,6 +476,7 @@ mod tests {
             default.use_full_interp && !default.force_full_interp && !default.force_target_time
         );
         let changed = policies_for_demo(&policy_demo(
+            14181,
             false,
             true,
             false,
@@ -471,6 +499,7 @@ mod tests {
         assert_eq!(changed[2].rewind, Some(policy));
         for invalid in ["NaN", "-1", "2"] {
             let bad = policies_for_demo(&policy_demo(
+                14181,
                 false,
                 true,
                 false,
@@ -481,15 +510,17 @@ mod tests {
             assert!(bad[0].rewind.is_some());
             assert!(bad[1].rewind.is_none() && bad[1].policy.only_up);
         }
-        assert!(policies_for_demo(&policy_demo(true, true, false, "1", &[])).is_err());
-        assert!(policies_for_demo(&policy_demo(false, false, false, "1", &[])).is_err());
-        assert!(policies_for_demo(&policy_demo(false, true, false, "invalid", &[])).is_err());
-        assert!(policies_for_demo(&policy_demo(false, true, true, "1", &[])).is_err());
-        let mut unknown = policy_demo(false, true, false, "1", &[]);
+        assert!(policies_for_demo(&policy_demo(14181, true, true, false, "1", &[])).is_err());
+        assert!(policies_for_demo(&policy_demo(14181, false, false, false, "1", &[])).is_err());
+        assert!(
+            policies_for_demo(&policy_demo(14181, false, true, false, "invalid", &[])).is_err()
+        );
+        assert!(policies_for_demo(&policy_demo(14181, false, true, true, "1", &[])).is_err());
+        let mut unknown = policy_demo(14181, false, true, false, "1", &[]);
         let end = unknown.len() - 3;
         unknown[end] = 19;
         assert!(policies_for_demo(&unknown).is_err());
-        let mut truncated = policy_demo(false, true, false, "1", &[]);
+        let mut truncated = policy_demo(14181, false, true, false, "1", &[]);
         truncated.pop();
         assert!(policies_for_demo(&truncated).is_err());
         assert!(policies_for_demo(b"PBDEMS2\0").is_err());
