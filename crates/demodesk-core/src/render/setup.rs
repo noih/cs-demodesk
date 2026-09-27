@@ -157,7 +157,13 @@ fn previous_directory(dir: &Path) -> PathBuf {
 }
 
 /// Replacement owns the whole directory, so arbitrary user folders must never be replaced.
-fn validate_install_directory(dir: &Path, repo: &str, replacing: bool) -> Result<()> {
+/// A folder is this tool's when DemoDesk installed it there or it already holds the tool's files.
+fn validate_install_directory(
+    dir: &Path,
+    repo: &str,
+    installed: fn(&Path) -> bool,
+    replacing: bool,
+) -> Result<()> {
     anyhow::ensure!(
         dir.is_absolute()
             && dir.components().count() >= 3
@@ -195,8 +201,9 @@ fn validate_install_directory(dir: &Path, repo: &str, replacing: bool) -> Result
             info.as_ref()
                 .and_then(|v| v.get("url"))
                 .and_then(|v| v.as_str())
-                .is_some_and(|url| url.starts_with(&prefix)),
-            "Choose an empty folder or this tool's DemoDesk installation folder: {}",
+                .is_some_and(|url| url.starts_with(&prefix))
+                || installed(&path),
+            "Choose an empty folder or a folder holding this tool: {}",
             path.display()
         );
     }
@@ -278,7 +285,7 @@ fn install_archive(
         .and_then(|url| url.split_once("/releases/download/"))
         .map(|(repo, _)| repo)
         .ok_or_else(|| anyhow!("Unrecognized tool download source"))?;
-    validate_install_directory(dir, repo, true)?;
+    validate_install_directory(dir, repo, valid, true)?;
     publish_install(dir, &staged)?;
     let _ = fs::remove_dir_all(work);
     Ok(())
@@ -354,12 +361,12 @@ fn unique_asset<'a>(
 
 pub fn install_hlae(directory: &Path, force: bool, log: Log) -> Result<PathBuf> {
     let dir = directory.to_path_buf();
-    validate_install_directory(&dir, "advancedfx/advancedfx", force)?;
+    validate_install_directory(&dir, "advancedfx/advancedfx", hlae_installed, force)?;
     recover_install(&dir)?;
     if !force && hlae_installed(&dir) {
         return Ok(dir);
     }
-    validate_install_directory(&dir, "advancedfx/advancedfx", true)?;
+    validate_install_directory(&dir, "advancedfx/advancedfx", hlae_installed, true)?;
     install_release(
         "advancedfx/advancedfx",
         &dir,
@@ -387,12 +394,12 @@ fn ffmpeg_asset(release: &GithubRelease) -> Result<&GithubAsset> {
 
 pub fn install_ffmpeg(directory: &Path, force: bool, log: Log) -> Result<PathBuf> {
     let dir = directory.to_path_buf();
-    validate_install_directory(&dir, "BtbN/FFmpeg-Builds", force)?;
+    validate_install_directory(&dir, "BtbN/FFmpeg-Builds", ffmpeg_installed, force)?;
     recover_install(&dir)?;
     if !force && ffmpeg_installed(&dir) {
         return Ok(dir);
     }
-    validate_install_directory(&dir, "BtbN/FFmpeg-Builds", true)?;
+    validate_install_directory(&dir, "BtbN/FFmpeg-Builds", ffmpeg_installed, true)?;
     install_release(
         "BtbN/FFmpeg-Builds",
         &dir,
@@ -463,12 +470,12 @@ fn vrf_asset(release: &GithubRelease) -> Result<&GithubAsset> {
 pub fn install_vrf(directory: &Path, force: bool, log: Log) -> Result<PathBuf> {
     let dir = directory.to_path_buf();
     let exe = dir.join(vrf_exe_name());
-    validate_install_directory(&dir, "ValveResourceFormat/ValveResourceFormat", force)?;
+    validate_install_directory(&dir, "ValveResourceFormat/ValveResourceFormat", vrf_installed, force)?;
     recover_install(&dir)?;
     if !force && vrf_installed(&dir) {
         return Ok(exe);
     }
-    validate_install_directory(&dir, "ValveResourceFormat/ValveResourceFormat", true)?;
+    validate_install_directory(&dir, "ValveResourceFormat/ValveResourceFormat", vrf_installed, true)?;
     install_release(
         "ValveResourceFormat/ValveResourceFormat",
         &dir,
@@ -879,8 +886,16 @@ mod tests {
         )
         .unwrap();
         assert!(hlae_installed(&dir));
-        validate_install_directory(&dir, "advancedfx/advancedfx", true).unwrap();
-        assert!(validate_install_directory(&dir, "BtbN/FFmpeg-Builds", true).is_err());
+        validate_install_directory(&dir, "advancedfx/advancedfx", hlae_installed, true).unwrap();
+        assert!(
+            validate_install_directory(&dir, "BtbN/FFmpeg-Builds", ffmpeg_installed, true).is_err()
+        );
+        // A manually extracted HLAE folder (no install-info.json) may be replaced too.
+        fs::remove_file(dir.join("install-info.json")).unwrap();
+        validate_install_directory(&dir, "advancedfx/advancedfx", hlae_installed, true).unwrap();
+        assert!(
+            validate_install_directory(&dir, "BtbN/FFmpeg-Builds", ffmpeg_installed, true).is_err()
+        );
         assert_ne!(previous_directory(&dir), dir);
     }
 
