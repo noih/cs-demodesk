@@ -7,9 +7,7 @@ A Windows desktop tool for managing and analyzing Counter-Strike 2 demos. Explor
 ## Download
 
 - **[Microsoft Store](https://apps.microsoft.com/detail/9N5G4VXSDGS5)** — Install and receive updates through Microsoft Store.
-- **[Portable EXE](https://github.com/noih/cs-demodesk/releases/latest)** — Download the standalone `.exe` from GitHub Releases and run it without installation.
-
-Both editions provide the same demo analysis, highlight video export, and 2D replay features.
+- **[Portable EXE](https://github.com/noih/cs-demodesk/releases/latest)** — Download the standalone `.exe` from GitHub Releases; no installation required.
 
 ## Before you start
 

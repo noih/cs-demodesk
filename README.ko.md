@@ -4,6 +4,11 @@
 
 Counter-Strike 2를 위한 Windows용 Demo 관리·분석 도구입니다. 플레이어 통계, 2D 리플레이와 실험적 이상 데이터를 확인하고 하이라이트나 의심스러운 장면을 영상으로 내보낼 수 있습니다.
 
+## 다운로드
+
+- **[Microsoft Store](https://apps.microsoft.com/detail/9N5G4VXSDGS5)** — Microsoft Store에서 설치하고 자동 업데이트를 받을 수 있습니다.
+- **[포터블 EXE](https://github.com/noih/cs-demodesk/releases/latest)** — GitHub Releases에서 `.exe` 다운로드. 설치 불필요.
+
 ## 사용 전 안내
 
 - CS2 업데이트 후 내보내기에 실패하면 설정에서 HLAE를 다시 다운로드하면 대부분 해결됩니다.
