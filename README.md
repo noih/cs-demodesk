@@ -11,6 +11,13 @@ A Windows desktop tool for managing and analyzing Counter-Strike 2 demos. Explor
 
 Both editions provide the same demo analysis, highlight video export, and 2D replay features.
 
+## Before you start
+
+- If export fails after a CS2 update, re-download HLAE from Settings; this usually fixes it.
+- Let tool downloads finish; closing the app or cancelling midway may leave the installation incomplete.
+- You cannot play while recording. Exports run one at a time.
+- Choose H.264 for playback in chat apps and browsers; NVIDIA encoding requires an NVIDIA GPU.
+
 ## Features
 
 ### Match statistics
@@ -46,7 +53,9 @@ Statistics are for reference, not a cheating verdict. They cannot identify delib
 
 ![2D replay](docs/images/en/07-2d-view.png)
 
-## Game files are never modified
+## Design
+
+### Read-only access to game files
 
 Nothing is written into the game folder: no plugin, script, or cfg, and no game file is changed. Recording launches a separate CS2 process through [HLAE](https://github.com/advancedfx/advancedfx) with `-insecure` (the same as using HLAE manually), sends commands over the game's own netcon console, and keeps game settings in a separate `USRLOCALCSGO` folder so the player's settings are untouched. All third-party tools are downloaded into the app's own data folder:
 
@@ -57,19 +66,9 @@ Nothing is written into the game folder: no plugin, script, or cfg, and no game 
 | Source 2 Viewer CLI | Radar image extraction from vpk | [ValveResourceFormat](https://github.com/ValveResourceFormat/ValveResourceFormat) (MIT) |
 | demoparser | Demo parsing (vendored) | [LaihoE/demoparser](https://github.com/LaihoE/demoparser) (MIT) |
 
-## Notes
+### File-based storage
 
-- Windows only; CS2 must be installed.
-- Recording hides CS2 by default. Turn off "Hide game in background" in the export dialog to show the game window.
-- One Steam account can run only one CS2 at a time, so the game cannot be played while recording. Export jobs run one at a time and queue.
-- The recording instance is launched with `-insecure` and cannot join VAC-secured servers; it closes when recording finishes and does not affect normal launches.
-- A CS2 update can break HLAE until HLAE releases a fix; re-download the tools from Settings once a new HLAE version is available.
-- Choose H.264 for playback in chat apps and browsers.
-- NVIDIA encoders require an NVIDIA GPU.
-
-## Design
-
-No database is required. Settings, export jobs and analysis caches are stored as files in the per-user local app data directory (`%LOCALAPPDATA%\dev.noih.demodesk\demodesk-data`) by default; the data folder can be changed in Settings. Clearing that setting restores the default on restart. Existing files are not moved; to reuse an older portable data folder, select it in Settings. Demos stay at their original paths and can be added individually or discovered through scan folders.
+No database is required. Settings, export jobs and analysis caches are stored as files in the user home directory (`%USERPROFILE%\.noih\demodesk-data`) by default; the data folder can be changed in Settings. Clearing that setting restores the default on restart. Existing files are not moved; to reuse an older portable data folder, select it in Settings. Demos stay at their original paths and can be added individually or discovered through scan folders.
 
 ## Build
 

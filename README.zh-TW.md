@@ -4,6 +4,13 @@
 
 專為 Counter-Strike 2 打造的 Windows Demo 管理與分析工具：查看玩家統計、2D 回放與實驗性異常數據，並將高光或可疑片段輸出為影片。
 
+## 使用須知
+
+- CS2 更新後若無法輸出影片，至設定頁重新下載 HLAE 通常即可恢復。
+- 請等待工具下載完成；中途關閉程式或取消下載，可能導致安裝不完整。
+- 錄影期間無法同時遊玩；多筆輸出會依序執行。
+- 通訊軟體或瀏覽器播放建議選 H.264；NVIDIA 編碼需 NVIDIA 顯示卡。
+
 ## 功能
 
 ### 比賽統計
@@ -39,7 +46,9 @@
 
 ![2D 回放](docs/images/zh-TW/07-2d-view.png)
 
-## 不修改遊戲檔案
+## 設計
+
+### 唯讀遊戲檔案
 
 不在遊戲目錄寫入任何 plugin、script 或 cfg，也不修改任何遊戲檔案。錄影透過 [HLAE](https://github.com/advancedfx/advancedfx) 以 `-insecure` 啟動獨立的 CS2 程序（與手動使用 HLAE 相同），經遊戲內建的 netcon 主控台送出指令，並以獨立的 `USRLOCALCSGO` 目錄保存遊戲設定，不影響玩家本身的設定。所有第三方工具皆下載至程式自己的資料目錄：
 
@@ -50,19 +59,9 @@
 | Source 2 Viewer CLI | 自 vpk 抽取雷達圖 | [ValveResourceFormat](https://github.com/ValveResourceFormat/ValveResourceFormat)（MIT） |
 | demoparser | 解析 demo（vendored） | [LaihoE/demoparser](https://github.com/LaihoE/demoparser)（MIT） |
 
-## 注意事項
+### 檔案式儲存
 
-- 僅支援 Windows，且須安裝 CS2。
-- 錄影時預設隱藏 CS2；若要顯示遊戲視窗，請在輸出設定關閉「隱藏遊戲在背景執行」。
-- 同一 Steam 帳號同時只能執行一個 CS2，錄影期間無法遊玩。輸出工作一次執行一個，其餘排隊。
-- 錄影用的 CS2 以 `-insecure` 啟動，無法連線 VAC 伺服器；錄影完成後自動關閉，不影響正常啟動。
-- CS2 更新可能導致 HLAE 失效，需等待 HLAE 發布新版後，再於設定頁重新下載工具。
-- 需在通訊軟體或瀏覽器直接播放時請選 H.264。
-- NVIDIA 編碼器需要 NVIDIA 顯示卡。
-
-## 設計
-
-不使用資料庫。設定、輸出工作與分析快取以檔案儲存，預設位於使用者本機 App 資料目錄 `%LOCALAPPDATA%\dev.noih.demodesk\demodesk-data`，可在設定中變更資料目錄。demo 保留在原始位置，可逐一加入，也可透過掃描資料夾載入。
+不使用資料庫。設定、輸出工作與分析快取以檔案儲存，預設位於使用者家目錄下的 `%USERPROFILE%\.noih\demodesk-data`，可在設定中變更資料目錄。demo 保留在原始位置，可逐一加入，也可透過掃描資料夾載入。
 
 ## 建置
 
