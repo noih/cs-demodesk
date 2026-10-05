@@ -115,3 +115,30 @@ Sources:
 - [Microsoft Job Objects](https://learn.microsoft.com/en-us/windows/win32/procthread/job-objects)
 - [Process attributes](https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-updateprocthreadattribute)
 - [Microsoft Detours](https://github.com/microsoft/Detours/wiki)
+
+
+## Tool update isolation
+
+HLAE, FFmpeg and Source 2 Viewer downloads require the release asset's SHA-256
+`digest`. Missing or mismatched hashes stop installation without changing the old
+tool. Verified ZIPs and a pending-install record survive an app crash. On restart,
+recovery runs in the background, rechecks the ZIP, discards incomplete extracted
+files and extracts again. Staging stays on the target volume, including custom
+installation directories. Explicit cancellation or failure removes the pending
+workspace so it does not restart automatically.
+
+An update requests exclusive access only after extraction. Existing exports and
+analysis/map extraction finish first; new work using that tool waits. Unrelated
+tools remain available. The lease covers replacement, settings publication and
+the startup probe, and releases on success, error or cancellation. On Windows,
+externally running HLAE/CS2, FFmpeg/ffprobe or Source2Viewer-CLI also delay their
+corresponding replacement. This process-name check is deliberately conservative;
+users may need to close an independently installed copy too. External programs
+can still race a launch; filesystem replacement errors preserve/restore the old
+installation rather than forcing replacement.
+
+The global progress dialog shows verification, extraction and waiting/replacement
+phases, including startup recovery. Closing it leaves the operation running;
+Cancel aborts preparation/waiting. Once the short directory swap begins it finishes
+or rolls back as one critical section. ZIP validation does not imply runtime
+compatibility or establish individual installed-file hashes.

@@ -871,6 +871,8 @@ mod tests {
                 tool,
                 false,
                 &mut super::setup::Progress {
+                    workspace: None,
+                    before_replace: None,
                     cancel: &std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
                     report: &mut |line| log.push(line),
                 },
@@ -899,6 +901,8 @@ mod tests {
                 tool,
                 false,
                 &mut super::setup::Progress {
+                    workspace: None,
+                    before_replace: None,
                     cancel: &std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
                     report: &mut |_| panic!("custom installed tool must not download"),
                 },

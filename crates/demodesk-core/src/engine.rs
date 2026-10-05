@@ -25,6 +25,8 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
+mod tool_access;
+
 const PARSE_CONCURRENCY: usize = 3;
 
 /// Events the UI cares about. Payloads are already JSON-serializable.
@@ -156,6 +158,7 @@ pub struct Engine {
     tool_checks: Mutex<HashMap<SetupTool, crate::render::diagnostics::ToolCheck>>,
     tool_check_lock: Mutex<()>,
     settings_lock: Mutex<()>,
+    tool_access: Arc<tool_access::ToolAccess>,
 }
 
 impl Engine {
@@ -199,9 +202,27 @@ impl Engine {
             tool_checks: Mutex::new(HashMap::new()),
             tool_check_lock: Mutex::new(()),
             settings_lock: Mutex::new(()),
+            tool_access: Arc::new(tool_access::ToolAccess::default()),
         });
+        crate::render::setup::recover_installs(
+            &engine.tools_dir(),
+            &engine.overrides(&engine.store.settings()),
+        );
         // Nothing can be recording yet, so an old plugin install is a leftover.
         engine.clean_leftovers();
+        for tool in [SetupTool::Hlae, SetupTool::Ffmpeg, SetupTool::Vrf] {
+            let journal = engine.tools_dir().join(format!(".install-{tool:?}.json"));
+            let workspace = std::fs::read(&journal)
+                .ok()
+                .and_then(|bytes| serde_json::from_slice::<PathBuf>(&bytes).ok())
+                .unwrap_or_else(|| engine.tools_dir().join(format!(".install-{tool:?}")));
+            if let Some(dir) = crate::render::setup::pending_directory(&workspace) {
+                if let Some(parent) = dir.parent() {
+                    let directory = (parent != engine.tools_dir()).then(|| parent.to_path_buf());
+                    engine.start_setup(tool, true, directory);
+                }
+            }
+        }
         Ok(engine)
     }
 
@@ -270,6 +291,7 @@ impl Engine {
 
     fn run_analysis_queue(self: Arc<Self>) {
         loop {
+            let _tools = self.tool_access.use_tools(&[SetupTool::Vrf]);
             let job = {
                 let mut queue = self.analysis_queue.lock().unwrap();
                 let Some(job) = queue.claim() else {
@@ -281,7 +303,7 @@ impl Engine {
                 job
             };
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                self.score_match(&job.demo_id, job.force)
+                self.score_match_unlocked(&job.demo_id, job.force)
             }))
             .unwrap_or_else(|_| {
                 Err(anyhow!(
@@ -327,6 +349,15 @@ impl Engine {
 
     /// Explicit scoring only. Basic demo auto-analysis never enters this path.
     pub fn score_match(
+        &self,
+        id: &str,
+        force: bool,
+    ) -> Result<crate::scoring::history::MatchResponse> {
+        let _tools = self.tool_access.use_tools(&[SetupTool::Vrf]);
+        self.score_match_unlocked(id, force)
+    }
+
+    fn score_match_unlocked(
         &self,
         id: &str,
         force: bool,
@@ -1221,6 +1252,7 @@ impl Engine {
     /// Radar image(s) + world mapping for a map, extracted from the game files
     /// on first use (or again after a game update).
     pub fn map_assets(&self, map: &str) -> Result<MapAssets> {
+        let _tools = self.tool_access.use_tools(&[SetupTool::Vrf]);
         if map.is_empty() || !map.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
             return Err(anyhow!("unsupported map name {map:?}"));
         }
@@ -1443,11 +1475,13 @@ impl Engine {
             {
                 continue;
             }
+            let _tools = self.tool_access.use_tools(&[tool]);
             let check = crate::render::diagnostics::check(&self.tool_paths(), tool);
             self.tool_checks.lock().unwrap().insert(tool, check);
         }
     }
     pub fn check_tool_update(&self, tool: SetupTool) -> Result<crate::render::setup::ToolUpdate> {
+        let _tools = self.tool_access.use_tools(&[tool]);
         let exe = crate::render::diagnostics::executable(&self.tool_paths(), tool)
             .cloned()
             .ok_or_else(|| anyhow!("Tool executable not found"))?;
@@ -1582,17 +1616,35 @@ impl Engine {
                     progress: line,
                 });
             };
+            // Keep staging on the target volume so publishing is a directory rename.
+            let workspace = directory
+                .as_deref()
+                .map(crate::render::paths::installation_directory)
+                .unwrap_or_else(|| engine.tools_dir())
+                .join(format!(".install-{tool:?}"));
+            let journal = engine.tools_dir().join(format!(".install-{tool:?}.json"));
+            let mut replacement = None;
+            let mut before_replace = || {
+                replacement = Some(engine.tool_access.replace(tool, &cancel)?);
+                Ok(())
+            };
             let mut installed = false;
-            let result = run_setup(
-                &engine.tools_dir(),
-                &overrides,
-                tool,
-                force,
-                &mut crate::render::setup::Progress {
-                    cancel: &cancel,
-                    report: &mut log,
-                },
-            )
+            let result = (|| {
+                std::fs::create_dir_all(engine.tools_dir())?;
+                std::fs::write(&journal, serde_json::to_vec(&workspace)?)?;
+                run_setup(
+                    &engine.tools_dir(),
+                    &overrides,
+                    tool,
+                    force,
+                    &mut crate::render::setup::Progress {
+                        cancel: &cancel,
+                        report: &mut log,
+                        workspace: Some(&workspace),
+                        before_replace: Some(&mut before_replace),
+                    },
+                )
+            })()
             .and_then(|_| {
                 let _guard = engine.settings_lock.lock().unwrap();
                 let mut settings = engine.store.settings();
@@ -1618,6 +1670,8 @@ impl Engine {
                 }
                 Ok(())
             });
+            let _ = std::fs::remove_file(journal);
+            drop(replacement);
             let cancelled = result.is_err() && cancel.load(Ordering::Relaxed);
             {
                 let mut downloads = engine.setup.lock().unwrap();
@@ -1850,6 +1904,9 @@ impl Engine {
     }
 
     fn run_job(self: &Arc<Self>, mut job: RenderJob) {
+        let _tools = self
+            .tool_access
+            .use_tools(&[SetupTool::Hlae, SetupTool::Ffmpeg]);
         // Serialize claiming a queued job with demo removal, including already-dequeued jobs.
         let guard = self.data_lock.lock().unwrap();
         if !self
@@ -2033,6 +2090,52 @@ mod tests {
         fn notify(&self, event: Event) {
             let _ = self.0.send(event);
         }
+    }
+
+    #[test]
+    fn startup_rechecks_interrupted_custom_download_and_keeps_old_tools_on_hash_failure() {
+        let root = tempfile::tempdir().unwrap();
+        let data = root.path().join("data");
+        let custom = root.path().join("custom");
+        let dir = custom.join("hlae");
+        let work = custom.join(".install-Hlae");
+        std::fs::create_dir_all(dir.join("x64")).unwrap();
+        std::fs::write(dir.join("HLAE.exe"), b"old exe").unwrap();
+        std::fs::write(dir.join("x64/AfxHookSource2.dll"), b"old dll").unwrap();
+        std::fs::create_dir_all(&work).unwrap();
+        std::fs::write(work.join("download.zip"), b"incomplete zip").unwrap();
+        std::fs::write(work.join("pending.json"), serde_json::to_vec(&serde_json::json!({
+            "directory": dir, "url": "https://github.com/advancedfx/advancedfx/releases/download/test/hlae.zip",
+            "tag": "test", "digest": format!("sha256:{}", "0".repeat(64)),
+        })).unwrap()).unwrap();
+        std::fs::create_dir_all(data.join("tools")).unwrap();
+        std::fs::write(
+            data.join("tools/.install-Hlae.json"),
+            serde_json::to_vec(&work).unwrap(),
+        )
+        .unwrap();
+        let (send, receive) = mpsc::channel();
+        let engine = Engine::new(data, Arc::new(Events(send))).unwrap();
+        loop {
+            if let Event::SetupFinished {
+                ok,
+                installed,
+                error,
+                ..
+            } = receive.recv_timeout(Duration::from_secs(5)).unwrap()
+            {
+                assert!(!ok && !installed);
+                assert!(error.unwrap().contains("SHA-256"));
+                break;
+            }
+        }
+        assert!(!engine.setup_state()[&SetupTool::Hlae].running);
+        assert_eq!(std::fs::read(dir.join("HLAE.exe")).unwrap(), b"old exe");
+        assert_eq!(
+            std::fs::read(dir.join("x64/AfxHookSource2.dll")).unwrap(),
+            b"old dll"
+        );
+        assert!(!work.exists());
     }
 
     #[test]

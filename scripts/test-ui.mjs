@@ -128,6 +128,23 @@ try {
   });
   await page.goto(server.resolvedUrls.local[0]);
   await page.locator('.demo-item').first().waitFor();
+  await page.evaluate(() => { window.setupState = {}; window.emitTestEvent({type:'setup-progress',tool:'ffmpeg',progress:'Verifying download'}); });
+  const installDialog = page.getByRole('dialog', {name:'Updating tools'});
+  await installDialog.getByText('Verifying download integrity…').waitFor();
+  assert.equal(await installDialog.locator('.app-spinner').count(), 1);
+  await page.evaluate(() => window.emitTestEvent({type:'setup-progress',tool:'ffmpeg',progress:'Waiting for tools to finish'}));
+  await installDialog.getByText('Waiting for the tool to finish. Close externally opened tools to continue.').waitFor();
+  await installDialog.getByRole('button', {name:'Close',exact:true}).click();
+  await installDialog.waitFor({state:'detached'});
+  await page.evaluate(() => window.emitTestEvent({type:'setup-progress',tool:'ffmpeg',progress:'Replacing tool'}));
+  assert.equal(await installDialog.count(), 0, 'Closing progress does not cancel or reopen it');
+  await page.evaluate(() => window.emitTestEvent({type:'setup-finished',tool:'ffmpeg',ok:true,installed:true,cancelled:false,error:null}));
+  await page.waitForTimeout(50);
+  await page.evaluate(() => window.emitTestEvent({type:'setup-progress',tool:'ffmpeg',progress:'Extracting verified download'}));
+  await installDialog.getByText('Extracting verified download…').waitFor();
+  await installDialog.getByRole('button', {name:'Cancel',exact:true}).click();
+  await installDialog.waitFor({state:'detached'});
+  await page.evaluate(() => { delete window.setupState; window.testCalls = []; });
   for (const [status, label] of [['queued', 'Queued'], ['validating', 'Validating'], ['parsing', 'Parsing']]) {
     await page.evaluate(async status => {
       const [demo] = await window.__TAURI_INTERNALS__.invoke('list_demos', {});

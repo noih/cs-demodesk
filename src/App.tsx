@@ -1,12 +1,13 @@
-import { NotificationProvider, Toast } from './components/Notifications.tsx';
+import { NotificationProvider, Toast, useNotify } from './components/Notifications.tsx';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Button, Flex, IconButton, Popover, Text, Tooltip } from '@radix-ui/themes';
-import { api, errorText, type AnalysisJob, type DemoMeta, type RenderJob, type Status } from './api.ts';
+import { api, errorText, type AnalysisJob, type DemoMeta, type RenderJob, type Status, type SettingsResponse } from './api.ts';
 import { createAppSync } from './appSync.ts';
 import { applyLanguage } from './i18n/index.ts';
 import { StartupGate } from './components/StartupGate.tsx';
 import { DemoList } from './components/DemoList.tsx';
+import { ToolInstallDialog } from './components/ToolInstallDialog.tsx';
 import { DemoView } from './components/DemoView.tsx';
 import { SettingsView } from './components/SettingsView.tsx';
 
@@ -19,6 +20,8 @@ export function App() {
 }
 
 function ReadyApp() {
+  const notify = useNotify();
+  const [setup, setSetup] = useState<SettingsResponse['setup']>({});
   const { t } = useTranslation();
   const theme = useAppTheme();
   const [fontSizeOpen, setFontSizeOpen] = useState(false);
@@ -41,7 +44,6 @@ function ReadyApp() {
   const refresh = useCallback(async () => { await rescan(); }, [rescan]);
 
   useEffect(() => {
-    void api.settings().then((s) => applyLanguage(s.settings.language)).catch(() => undefined);
     const sync = createAppSync(api, (snapshot) => {
       setStatus(snapshot.status);
       setDemos(snapshot.demos);
@@ -49,6 +51,11 @@ function ReadyApp() {
       setAnalysisJobs(snapshot.analysisJobs);
       setError(undefined);
     }, (ev) => {
+      if (ev.type === 'setup-progress') setSetup(current => ({ ...current, [ev.tool]: { running: true, log: [], progress: ev.progress } }));
+      if (ev.type === 'setup-finished') {
+        setSetup(current => ({ ...current, [ev.tool]: undefined }));
+        if (!ev.ok && !ev.cancelled) notify(ev.error ?? t('settings.unknownError'));
+      }
       if (ev.type === 'analysis-job-changed') setAnalysisJobs(list => {
         const old=list.find(j=>j.id===ev.job.id);
         return old && old.revision>ev.job.revision ? list : upsert(list,ev.job,j=>j.id).sort((a,b)=>b.sequence-a.sequence);
@@ -60,7 +67,10 @@ function ReadyApp() {
       });
     }, (error) => setError(errorText(error)));
     syncRef.current = sync;
-    void sync.refresh();
+    void sync.refresh().then(() => api.settings()).then(s => {
+      applyLanguage(s.settings.language);
+      setSetup(current => ({ ...s.setup, ...current }));
+    }).catch(() => undefined);
     return () => {
       syncRef.current = undefined;
       sync.dispose();
@@ -72,6 +82,7 @@ function ReadyApp() {
 
   return (
     <div className="layout">
+      <ToolInstallDialog setup={setup} />
       <header className="app-header">
         <div ref={setToolbar} className="header-tools" />
         <Flex align="center" gap="2" ml="auto">

@@ -5,6 +5,7 @@
 
 use anyhow::{anyhow, Context, Result};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -17,6 +18,8 @@ mod transport;
 pub struct Progress<'a> {
     pub cancel: &'a Arc<AtomicBool>,
     pub report: &'a mut dyn FnMut(String),
+    pub workspace: Option<&'a Path>,
+    pub before_replace: Option<&'a mut dyn FnMut() -> Result<()>>,
 }
 pub type Log<'a, 'b> = &'a mut Progress<'b>;
 
@@ -113,7 +116,8 @@ fn copy_download(
     Ok(())
 }
 
-fn extract_zip(zip_path: &Path, dest: &Path) -> Result<()> {
+fn extract_zip(zip_path: &Path, dest: &Path, cancel: &AtomicBool) -> Result<()> {
+    use std::io::Write;
     fs::create_dir_all(dest)?;
     let file = fs::File::open(zip_path)?;
     let mut archive = zip::ZipArchive::new(file)?;
@@ -131,7 +135,15 @@ fn extract_zip(zip_path: &Path, dest: &Path) -> Result<()> {
             fs::create_dir_all(parent)?;
         }
         let mut f = fs::File::create(&out)?;
-        std::io::copy(&mut entry, &mut f)?;
+        let mut buffer = [0; 65536];
+        loop {
+            anyhow::ensure!(!cancel.load(Ordering::Relaxed), "Download cancelled");
+            let n = entry.read(&mut buffer)?;
+            if n == 0 {
+                break;
+            }
+            f.write_all(&buffer[..n])?;
+        }
     }
     Ok(())
 }
@@ -145,6 +157,8 @@ struct GithubRelease {
 struct GithubAsset {
     name: String,
     browser_download_url: String,
+    #[serde(default)]
+    digest: Option<String>,
 }
 
 // ponytail: serialize only replacement/recovery; use per-directory locks if publishing becomes contended.
@@ -223,6 +237,44 @@ fn recover_install(dir: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Restore interrupted updates before tool paths are resolved at startup.
+pub(crate) fn recover_installs(tools_dir: &Path, overrides: &super::paths::PathOverrides) {
+    for (name, selected, repo, valid) in [
+        (
+            "hlae",
+            &overrides.hlae_exe,
+            "advancedfx/advancedfx",
+            hlae_installed as fn(&Path) -> bool,
+        ),
+        (
+            "ffmpeg",
+            &overrides.ffmpeg_exe,
+            "BtbN/FFmpeg-Builds",
+            ffmpeg_installed,
+        ),
+        (
+            "vrf",
+            &overrides.vrf_exe,
+            "ValveResourceFormat/ValveResourceFormat",
+            vrf_installed,
+        ),
+    ] {
+        let dir = selected
+            .as_deref()
+            .map(super::paths::installation_directory)
+            .unwrap_or_else(|| tools_dir.to_path_buf())
+            .join(name);
+        if !previous_directory(&dir).exists() {
+            continue;
+        }
+        if let Err(error) =
+            validate_install_directory(&dir, repo, valid, true).and_then(|_| recover_install(&dir))
+        {
+            eprintln!("cannot recover {name} installation: {error:#}");
+        }
+    }
+}
+
 fn publish_install(dir: &Path, staged: &Path) -> Result<()> {
     let backup = previous_directory(dir);
     let existed = dir.exists();
@@ -232,7 +284,7 @@ fn publish_install(dir: &Path, staged: &Path) -> Result<()> {
     if let Err(error) = fs::rename(staged, dir) {
         if existed {
             fs::rename(&backup, dir).context(
-                "replacement failed; previous installation is in the .previous directory",
+                "replacement failed; previous installation is in the .demodesk-previous directory",
             )?;
         }
         return Err(error.into());
@@ -244,22 +296,167 @@ fn publish_install(dir: &Path, staged: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Fully extract and validate before replacing a working installation.
-fn install_zip(dir: &Path, url: &str, tag: &str, valid: fn(&Path) -> bool, log: Log) -> Result<()> {
-    recover_install(dir)?;
-    let parent = dir
-        .parent()
-        .ok_or_else(|| anyhow!("Invalid tool directory"))?;
-    fs::create_dir_all(parent)?;
-    let work = tempfile::Builder::new()
-        .prefix(".demodesk-install-")
-        .tempdir_in(parent)?;
-    let zip = work.path().join("download.zip");
-    let result = download(url, &zip, log)
-        .and_then(|_| install_archive(dir, work.path(), tag, url, valid, log.cancel));
+#[derive(Serialize, Deserialize)]
+struct PendingInstall {
+    directory: PathBuf,
+    url: String,
+    tag: String,
+    digest: String,
+}
+
+fn verify_zip(path: &Path, digest: &str, log: Log) -> Result<()> {
+    let expected = digest
+        .strip_prefix("sha256:")
+        .filter(|value| value.len() == 64 && value.bytes().all(|b| b.is_ascii_hexdigit()))
+        .ok_or_else(|| anyhow!("Release asset has no valid SHA-256 digest"))?;
+    (log.report)("Verifying download".into());
+    let mut file = fs::File::open(path)?;
+    let mut hash = Sha256::new();
+    let mut buffer = [0; 65536];
+    loop {
+        log.check()?;
+        let n = file.read(&mut buffer)?;
+        if n == 0 {
+            break;
+        }
+        hash.update(&buffer[..n]);
+    }
+    anyhow::ensure!(
+        format!("{:x}", hash.finalize()).eq_ignore_ascii_case(expected),
+        "Downloaded ZIP failed SHA-256 verification; existing installation retained"
+    );
+    Ok(())
+}
+
+fn check_workspace(work: &Path) -> Result<()> {
+    // Only our dedicated workspace may be recursively cleared; reject redirected directories.
+    let metadata = match fs::symlink_metadata(work) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error.into()),
+    };
+    #[cfg(windows)]
+    let link = {
+        use std::os::windows::fs::MetadataExt;
+        metadata.file_attributes() & 0x400 != 0
+    };
+    #[cfg(not(windows))]
+    let link = metadata.is_symlink();
+    anyhow::ensure!(metadata.is_dir() && !link, "Invalid installation workspace");
+    Ok(())
+}
+
+pub(crate) fn pending_directory(work: &Path) -> Option<PathBuf> {
+    check_workspace(work).ok()?;
+    let pending: PendingInstall =
+        serde_json::from_slice(&fs::read(work.join("pending.json")).ok()?).ok()?;
+    Some(pending.directory)
+}
+
+/// A completed download survives a process crash; extracted files are never reused.
+fn install_zip(
+    dir: &Path,
+    url: &str,
+    tag: &str,
+    digest: &str,
+    valid: fn(&Path) -> bool,
+    log: Log,
+) -> Result<()> {
+    let work = log
+        .workspace
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| dir.with_extension("demodesk-install"));
+    check_workspace(&work)?;
+    fs::create_dir_all(&work)?;
+    let result = (|| {
+        let pending = PendingInstall {
+            directory: dir.to_owned(),
+            url: url.into(),
+            tag: tag.into(),
+            digest: digest.into(),
+        };
+        download(url, &work.join("download.zip"), log)?;
+        verify_zip(&work.join("download.zip"), digest, log)?;
+        fs::write(work.join("pending.json"), serde_json::to_vec(&pending)?)?;
+        finish_pending(&pending, &work, valid, log)
+    })();
+    // A deliberate cancellation/error must not silently restart on next launch.
+    let _ = fs::remove_dir_all(&work);
     result
 }
 
+fn finish_pending(
+    pending: &PendingInstall,
+    work: &Path,
+    valid: fn(&Path) -> bool,
+    log: Log,
+) -> Result<()> {
+    (log.report)("Extracting verified download".into());
+    let cancel = log.cancel.clone();
+    install_archive_with_replace(
+        &pending.directory,
+        work,
+        &pending.tag,
+        &pending.url,
+        valid,
+        &cancel,
+        &mut || {
+            (log.report)("Waiting for tools to finish".into());
+            if let Some(before) = log.before_replace.as_mut() {
+                before()?;
+            }
+            // Other applications are not covered by the engine's tool leases.
+            #[cfg(windows)]
+            if log.before_replace.is_some() {
+                let names: &[&str] = if pending.url.contains("/advancedfx/advancedfx/") {
+                    &["HLAE.exe", "cs2.exe"]
+                } else if pending.url.contains("/BtbN/FFmpeg-Builds/") {
+                    &["ffmpeg.exe", "ffprobe.exe"]
+                } else {
+                    &["Source2Viewer-CLI.exe"]
+                };
+                loop {
+                    log.check()?;
+                    let mut busy = false;
+                    for name in names {
+                        busy |= super::record::is_process_running(name)?;
+                    }
+                    if !busy {
+                        break;
+                    }
+                    std::thread::sleep(Duration::from_millis(250));
+                }
+            }
+            log.check()?;
+            (log.report)("Replacing tool".into());
+            Ok(())
+        },
+    )
+}
+
+fn resume_install(dir: &Path, valid: fn(&Path) -> bool, log: Log) -> Result<bool> {
+    let Some(work) = log.workspace.map(Path::to_path_buf) else {
+        return Ok(false);
+    };
+    check_workspace(&work)?;
+    let Ok(bytes) = fs::read(work.join("pending.json")) else {
+        return Ok(false);
+    };
+    let result = (|| {
+        let pending: PendingInstall = serde_json::from_slice(&bytes)?;
+        anyhow::ensure!(
+            pending.directory == dir,
+            "Interrupted installation targets a different directory"
+        );
+        verify_zip(&work.join("download.zip"), &pending.digest, log)?;
+        finish_pending(&pending, &work, valid, log)?;
+        Ok(true)
+    })();
+    let _ = fs::remove_dir_all(work);
+    result
+}
+
+#[cfg(test)]
 fn install_archive(
     dir: &Path,
     work: &Path,
@@ -268,9 +465,25 @@ fn install_archive(
     valid: fn(&Path) -> bool,
     cancel: &AtomicBool,
 ) -> Result<()> {
+    install_archive_with_replace(dir, work, tag, url, valid, cancel, &mut || Ok(()))
+}
+
+fn install_archive_with_replace(
+    dir: &Path,
+    work: &Path,
+    tag: &str,
+    url: &str,
+    valid: fn(&Path) -> bool,
+    cancel: &AtomicBool,
+    before_replace: &mut dyn FnMut() -> Result<()>,
+) -> Result<()> {
     anyhow::ensure!(!cancel.load(Ordering::Relaxed), "Download cancelled");
     let staged = work.join("extracted");
-    extract_zip(&work.join("download.zip"), &staged)?;
+    check_workspace(&staged)?;
+    if staged.exists() {
+        fs::remove_dir_all(&staged)?;
+    }
+    extract_zip(&work.join("download.zip"), &staged, cancel)?;
     if !valid(&staged) {
         return Err(anyhow!(
             "archive for {} is missing required tool files",
@@ -279,6 +492,8 @@ fn install_archive(
     }
     fs::write(staged.join("install-info.json"), serde_json::json!({ "tag": tag, "url": url, "installedAt": chrono::Utc::now().to_rfc3339() }).to_string())?;
     anyhow::ensure!(!cancel.load(Ordering::Relaxed), "Download cancelled");
+    before_replace()?;
+    recover_install(dir)?;
     let _commit = INSTALL_COMMIT.lock().unwrap();
     let repo = url
         .strip_prefix("https://github.com/")
@@ -286,6 +501,7 @@ fn install_archive(
         .map(|(repo, _)| repo)
         .ok_or_else(|| anyhow!("Unrecognized tool download source"))?;
     validate_install_directory(dir, repo, valid, true)?;
+    anyhow::ensure!(!cancel.load(Ordering::Relaxed), "Download cancelled");
     publish_install(dir, &staged)?;
     let _ = fs::remove_dir_all(work);
     Ok(())
@@ -298,6 +514,9 @@ fn install_release(
     valid: fn(&Path) -> bool,
     log: Log,
 ) -> Result<()> {
+    if resume_install(dir, valid, log)? {
+        return Ok(());
+    }
     for attempt in 0..2 {
         let release = release_for_tool(repo, select, log)?;
         let asset = select(&release)?;
@@ -305,6 +524,10 @@ fn install_release(
             dir,
             &asset.browser_download_url,
             &release.tag_name,
+            asset
+                .digest
+                .as_deref()
+                .ok_or_else(|| anyhow!("Release asset has no SHA-256 digest"))?,
             valid,
             log,
         ) {
@@ -362,7 +585,6 @@ fn unique_asset<'a>(
 pub fn install_hlae(directory: &Path, force: bool, log: Log) -> Result<PathBuf> {
     let dir = directory.to_path_buf();
     validate_install_directory(&dir, "advancedfx/advancedfx", hlae_installed, force)?;
-    recover_install(&dir)?;
     if !force && hlae_installed(&dir) {
         return Ok(dir);
     }
@@ -395,7 +617,6 @@ fn ffmpeg_asset(release: &GithubRelease) -> Result<&GithubAsset> {
 pub fn install_ffmpeg(directory: &Path, force: bool, log: Log) -> Result<PathBuf> {
     let dir = directory.to_path_buf();
     validate_install_directory(&dir, "BtbN/FFmpeg-Builds", ffmpeg_installed, force)?;
-    recover_install(&dir)?;
     if !force && ffmpeg_installed(&dir) {
         return Ok(dir);
     }
@@ -470,12 +691,21 @@ fn vrf_asset(release: &GithubRelease) -> Result<&GithubAsset> {
 pub fn install_vrf(directory: &Path, force: bool, log: Log) -> Result<PathBuf> {
     let dir = directory.to_path_buf();
     let exe = dir.join(vrf_exe_name());
-    validate_install_directory(&dir, "ValveResourceFormat/ValveResourceFormat", vrf_installed, force)?;
-    recover_install(&dir)?;
+    validate_install_directory(
+        &dir,
+        "ValveResourceFormat/ValveResourceFormat",
+        vrf_installed,
+        force,
+    )?;
     if !force && vrf_installed(&dir) {
         return Ok(exe);
     }
-    validate_install_directory(&dir, "ValveResourceFormat/ValveResourceFormat", vrf_installed, true)?;
+    validate_install_directory(
+        &dir,
+        "ValveResourceFormat/ValveResourceFormat",
+        vrf_installed,
+        true,
+    )?;
     install_release(
         "ValveResourceFormat/ValveResourceFormat",
         &dir,
@@ -628,7 +858,12 @@ fn latest_version(tool: super::SetupTool) -> Result<String> {
         .and_then(|value| value.to_str().ok())
         .and_then(|location| location.rsplit_once("/releases/tag/"))
         .map(|(_, tag)| tag.to_owned())
-        .ok_or_else(|| anyhow!("{url}: http status {} without a release tag", response.status()))
+        .ok_or_else(|| {
+            anyhow!(
+                "{url}: http status {} without a release tag",
+                response.status()
+            )
+        })
 }
 
 /// Title of the feed entry linking to releases/tag/latest.
@@ -667,6 +902,8 @@ mod tests {
             &mut output,
             Some(200_000),
             &mut Progress {
+                workspace: None,
+                before_replace: None,
                 cancel: &cancel,
                 report: &mut |_| cancel.store(true, Ordering::Relaxed),
             },
@@ -685,6 +922,8 @@ mod tests {
                 &mut output,
                 total,
                 &mut Progress {
+                    workspace: None,
+                    before_replace: None,
                     cancel: &Arc::new(AtomicBool::new(false)),
                     report: &mut |line| logs.push(line),
                 },
@@ -712,6 +951,7 @@ mod tests {
                 .map(|name| GithubAsset {
                     name: (*name).into(),
                     browser_download_url: format!("https://example.invalid/{name}"),
+                    digest: None,
                 })
                 .collect(),
         }
@@ -727,7 +967,8 @@ mod tests {
         );
         assert!(ffmpeg_banner_version("garbage").is_none());
         assert_eq!(
-            vrf_banner_version("Version: 20.0.6980+a06886f7d0604905\nOS: Microsoft Windows").as_deref(),
+            vrf_banner_version("Version: 20.0.6980+a06886f7d0604905\nOS: Microsoft Windows")
+                .as_deref(),
             Some("20.0.6980")
         );
         assert!(vrf_banner_version("OS: Microsoft Windows").is_none());
@@ -742,7 +983,11 @@ mod tests {
         let bin = dir.path().join("ffmpeg-N-1-win64-gpl/bin");
         fs::create_dir_all(&bin).unwrap();
         assert!(installed_release_tag(&bin.join("ffmpeg.exe")).is_none());
-        fs::write(dir.path().join("install-info.json"), r#"{"tag":"latest","url":"x"}"#).unwrap();
+        fs::write(
+            dir.path().join("install-info.json"),
+            r#"{"tag":"latest","url":"x"}"#,
+        )
+        .unwrap();
         assert_eq!(
             installed_release_tag(&bin.join("ffmpeg.exe")).as_deref(),
             Some("latest")
@@ -846,6 +1091,109 @@ mod tests {
         assert!(dir.join("new").is_file());
         assert!(!dir.join("old").exists());
         assert!(!previous_directory(&dir).exists());
+    }
+
+    #[test]
+    fn verified_zip_recovery_reextracts_and_hash_failure_preserves_old_installation() {
+        use std::io::Write;
+        let root = tempfile::tempdir().unwrap();
+        let dir = root.path().join("hlae");
+        fs::create_dir_all(dir.join("x64")).unwrap();
+        fs::write(dir.join("HLAE.exe"), b"old exe").unwrap();
+        fs::write(dir.join("x64/AfxHookSource2.dll"), b"old dll").unwrap();
+        let work = root.path().join("pending");
+        let archive = root.path().join("source.zip");
+        let mut zip = zip::ZipWriter::new(fs::File::create(&archive).unwrap());
+        for file in ["HLAE.exe", "x64/AfxHookSource2.dll"] {
+            zip.start_file(file, zip::write::SimpleFileOptions::default())
+                .unwrap();
+            zip.write_all(b"new version").unwrap();
+        }
+        zip.finish().unwrap();
+        let bytes = fs::read(&archive).unwrap();
+        let digest = format!("sha256:{:x}", Sha256::digest(&bytes));
+        let prepare = |digest: String| {
+            fs::create_dir_all(work.join("extracted/x64")).unwrap();
+            fs::write(work.join("extracted/HLAE.exe"), b"partial").unwrap();
+            fs::write(work.join("extracted/stale.txt"), b"must not survive").unwrap();
+            fs::write(work.join("download.zip"), &bytes).unwrap();
+            fs::write(
+                work.join("pending.json"),
+                serde_json::to_vec(&PendingInstall {
+                    directory: dir.clone(),
+                    url: "https://github.com/advancedfx/advancedfx/releases/download/test/hlae.zip"
+                        .into(),
+                    tag: "test".into(),
+                    digest,
+                })
+                .unwrap(),
+            )
+            .unwrap();
+        };
+        let cancel = Arc::new(AtomicBool::new(false));
+        let mut log = Progress {
+            cancel: &cancel,
+            report: &mut |_| {},
+            workspace: Some(&work),
+            before_replace: None,
+        };
+        prepare(format!("sha256:{}", "0".repeat(64)));
+        assert!(resume_install(&dir, hlae_installed, &mut log)
+            .unwrap_err()
+            .to_string()
+            .contains("SHA-256"));
+        assert_eq!(fs::read(dir.join("HLAE.exe")).unwrap(), b"old exe");
+        assert!(!work.exists());
+        prepare(digest.clone());
+        cancel.store(true, Ordering::Relaxed);
+        assert!(resume_install(&dir, hlae_installed, &mut log).is_err());
+        assert_eq!(
+            fs::read(dir.join("x64/AfxHookSource2.dll")).unwrap(),
+            b"old dll"
+        );
+        assert!(!work.exists());
+        cancel.store(false, Ordering::Relaxed);
+        prepare(digest);
+        assert_eq!(pending_directory(&work), Some(dir.clone()));
+        assert!(resume_install(&dir, hlae_installed, &mut log).unwrap());
+        assert_eq!(fs::read(dir.join("HLAE.exe")).unwrap(), b"new version");
+        assert_eq!(
+            fs::read(dir.join("x64/AfxHookSource2.dll")).unwrap(),
+            b"new version"
+        );
+        assert!(!dir.join("stale.txt").exists());
+        assert!(!work.exists());
+    }
+
+    #[test]
+    fn startup_recovers_default_and_custom_installations_without_downloading() {
+        let root = tempfile::tempdir().unwrap();
+        let custom = root.path().join("custom");
+        let dirs = [root.path().join("hlae"), custom.join("vrf")];
+        for (dir, files) in [
+            (&dirs[0], vec!["HLAE.exe", "x64/AfxHookSource2.dll"]),
+            (&dirs[1], vec![vrf_exe_name()]),
+        ] {
+            for file in files {
+                let path = previous_directory(dir).join(file);
+                fs::create_dir_all(path.parent().unwrap()).unwrap();
+                fs::write(path, b"old version").unwrap();
+            }
+        }
+        let overrides = super::super::paths::PathOverrides {
+            vrf_exe: Some(custom),
+            ..Default::default()
+        };
+        recover_installs(root.path(), &overrides);
+        recover_installs(root.path(), &overrides);
+        assert_eq!(fs::read(dirs[0].join("HLAE.exe")).unwrap(), b"old version");
+        assert_eq!(
+            fs::read(dirs[1].join(vrf_exe_name())).unwrap(),
+            b"old version"
+        );
+        for dir in dirs {
+            assert!(!previous_directory(&dir).exists());
+        }
     }
 
     #[test]

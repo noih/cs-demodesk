@@ -779,5 +779,14 @@
       "percent": "%",
       "shots": "shots"
     }
+  },
+  "toolInstall": {
+    "title": "Updating tools",
+    "hint": "Existing work can finish. New work using this tool waits during replacement. Closing this dialog does not cancel the update.",
+    "prepare": "Preparing update…",
+    "verify": "Verifying download integrity…",
+    "extract": "Extracting verified download…",
+    "wait": "Waiting for the tool to finish. Close externally opened tools to continue.",
+    "replace": "Replacing tool…"
   }
 }
