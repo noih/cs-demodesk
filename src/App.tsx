@@ -24,7 +24,7 @@ function ReadyApp() {
   const [fontSizeOpen, setFontSizeOpen] = useState(false);
   const [toolbar, setToolbar] = useState<HTMLDivElement | null>(null);
   const [selectionRequest, setSelectionRequest] = useState(0);
-  const [requestedTab, setRequestedTab] = useState('players');
+  const [tab, setTab] = useState('players');
   const [status, setStatus] = useState<Status>();
   const [demos, setDemos] = useState<DemoMeta[]>([]);
   const [analysisJobs,setAnalysisJobs]=useState<AnalysisJob[]>([]);
@@ -75,7 +75,7 @@ function ReadyApp() {
       <header className="app-header">
         <div ref={setToolbar} className="header-tools" />
         <Flex align="center" gap="2" ml="auto">
-          <QueueDialog jobs={jobs} analysisJobs={analysisJobs} demos={demos} onChanged={refresh} onSelect={(id, tab) => { setSelectedId(id); setShowSettings(false); setRequestedTab(tab); setSelectionRequest(n => n + 1); }} />
+          <QueueDialog jobs={jobs} analysisJobs={analysisJobs} demos={demos} onChanged={refresh} onSelect={(id, tab) => { setSelectedId(id); setShowSettings(false); setTab(tab); setSelectionRequest(n => n + 1); }} />
           <Tooltip delayDuration={150} content={t(theme.appearance === 'dark' ? 'ui.light' : 'ui.dark')}><IconButton variant="ghost" aria-label={t(theme.appearance === 'dark' ? 'ui.light' : 'ui.dark')} onClick={theme.toggle}>{theme.appearance === 'dark' ? <i aria-hidden="true" className="bi bi-sun app-icon"  /> : <i aria-hidden="true" className="bi bi-moon app-icon" />}</IconButton></Tooltip>
           <Popover.Root open={fontSizeOpen} onOpenChange={setFontSizeOpen}>
             <Tooltip delayDuration={150} content={t('ui.fontSize')}><Popover.Trigger><Button variant="ghost" aria-label={t('ui.fontSize')}>Aa</Button></Popover.Trigger></Tooltip>
@@ -99,7 +99,6 @@ function ReadyApp() {
           toolbar={toolbar}
           selectionRequest={selectionRequest}
           onSelect={(id) => {
-            setRequestedTab('players');
             setSelectedId(id);
             setShowSettings(false);
           }}
@@ -114,7 +113,7 @@ function ReadyApp() {
         {showSettings ? (
           <SettingsView onChanged={refresh} toolsRequest={toolsRequest} toolsTarget={toolsTarget} />
         ) : selected ? (
-          <DemoView analysisJobs={analysisJobs} onSetup={showTools} requestedTab={requestedTab} selectionRequest={selectionRequest} key={selected.id} meta={selected} jobs={jobs.filter((j) => j.demoId === selected.id)} status={status} onChanged={refresh} onRemoved={() => setSelectedId(undefined)} />
+          <DemoView analysisJobs={analysisJobs} onSetup={showTools} tab={tab} setTab={setTab} key={selected.id} meta={selected} jobs={jobs.filter((j) => j.demoId === selected.id)} status={status} onChanged={refresh} onRemoved={() => setSelectedId(undefined)} />
         ) : (
           <Flex align="center" justify="center" style={{ height: '100%' }}>
             <Flex direction="column" align="center">

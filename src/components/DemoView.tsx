@@ -12,15 +12,13 @@ import { RendersTab } from './RendersTab.tsx';
 import { ChartsTab } from './ChartsTab.tsx';
 import { ReplayTab } from './ReplayTab.tsx';
 
-export function DemoView({ analysisJobs, meta, jobs, status, onChanged, onRemoved, requestedTab, selectionRequest, onSetup }: { analysisJobs: AnalysisJob[]; onSetup: (target: 'render' | 'replay') => void; requestedTab: string; selectionRequest: number; meta: DemoMeta; jobs: RenderJob[]; status?: Status; onChanged: () => Promise<void>; onRemoved: () => void }) {
+export function DemoView({ analysisJobs, meta, jobs, status, onChanged, onRemoved, tab, setTab, onSetup }: { analysisJobs: AnalysisJob[]; onSetup: (target: 'render' | 'replay') => void; tab: string; setTab: (tab: string) => void; meta: DemoMeta; jobs: RenderJob[]; status?: Status; onChanged: () => Promise<void>; onRemoved: () => void }) {
   const { t } = useTranslation();
   const notify = useNotify();
   const [parsed, setParsed] = useState<ParsedDemo>();
   const [loading, setLoading] = useState(true);
   const [parseRequested, setParseRequested] = useState(false);
   const parsing = parseRequested || meta.status === 'queued' || meta.status === 'validating' || meta.status === 'parsing';
-  const [tab, setTab] = useState(requestedTab);
-  useEffect(() => { setTab(requestedTab); }, [requestedTab, selectionRequest]);
   const tabScrollRef = useRef<HTMLDivElement>(null);
   const [confirmRemove, setConfirmRemove] = useState(false);
   const [deleting, setDeleting] = useState(false);
