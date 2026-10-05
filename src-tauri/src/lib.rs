@@ -14,6 +14,8 @@ use tauri::{AppHandle, Emitter, Manager, State};
 mod data_directory;
 #[cfg(windows)]
 mod webview_runtime;
+#[cfg(windows)]
+mod store_updates;
 use data_directory::DataDirectory;
 type Directory = Arc<DataDirectory>;
 
@@ -108,7 +110,13 @@ async fn blocking<T: Send + 'static>(
 }
 
 #[tauri::command]
-async fn check_for_updates() -> CmdResult<demodesk_core::updates::Update> {
+async fn check_for_updates(window: tauri::WebviewWindow) -> CmdResult<demodesk_core::updates::Update> {
+    #[cfg(windows)]
+    if demodesk_core::updates::is_packaged().map_err(err)? {
+        return store_updates::check(window).await;
+    }
+    #[cfg(not(windows))]
+    let _ = window;
     tauri::async_runtime::spawn_blocking(|| demodesk_core::updates::check().map_err(err))
         .await
         .map_err(err)?

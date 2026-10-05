@@ -4,7 +4,8 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Serialize)]
 #[serde(tag = "status", rename_all = "camelCase")]
 pub enum Update {
-    Packaged,
+    StoreCurrent,
+    StoreAvailable,
     Current,
     Available { version: String },
 }
@@ -17,7 +18,7 @@ struct Release {
 }
 
 #[cfg(windows)]
-pub(crate) fn is_packaged() -> Result<bool> {
+pub fn is_packaged() -> Result<bool> {
     use windows_sys::Win32::Foundation::{APPMODEL_ERROR_NO_PACKAGE, ERROR_INSUFFICIENT_BUFFER};
     use windows_sys::Win32::Storage::Packaging::Appx::GetCurrentPackageFullName;
     let mut length = 0;
@@ -31,7 +32,7 @@ pub(crate) fn is_packaged() -> Result<bool> {
 }
 
 #[cfg(not(windows))]
-pub(crate) fn is_packaged() -> Result<bool> {
+pub fn is_packaged() -> Result<bool> {
     Ok(false)
 }
 
@@ -59,7 +60,7 @@ fn newer_release(current: &str, release: Release) -> Result<Update> {
 pub fn check() -> Result<Update> {
     // Sideloaded packages also use the packaged route; never replace their EXE.
     if is_packaged()? {
-        return Ok(Update::Packaged);
+        bail!("Store update checks require the application window");
     }
     let agent: ureq::Agent = ureq::Agent::config_builder()
         .timeout_global(Some(std::time::Duration::from_secs(10)))

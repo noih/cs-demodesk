@@ -791,6 +791,8 @@ dependencies = [
  "tauri-plugin-dialog",
  "tauri-plugin-opener",
  "tauri-plugin-single-instance",
+ "windows",
+ "windows-future",
  "windows-sys 0.61.2",
 ]
 

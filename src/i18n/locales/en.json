@@ -56,6 +56,9 @@
     "goToSettings": "Go to Settings"
   },
   "about": {
+    "storeUpdateAvailable": "An update is available in Microsoft Store",
+    "storeCurrent": "Microsoft Store currently offers no updates for this installation.",
+    "updateCurrent": "You’re up to date.",
     "updateChecking": "Checking for updates…",
     "updateAvailable": "Version {{version}} available",
     "updateFailed": "Unable to check for updates. Reopen About to try again.",

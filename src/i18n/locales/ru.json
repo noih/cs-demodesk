@@ -56,6 +56,9 @@
     "goToSettings": "Открыть настройки"
   },
   "about": {
+    "storeUpdateAvailable": "В Microsoft Store доступно обновление",
+    "storeCurrent": "Microsoft Store пока не предлагает обновлений для этой установки.",
+    "updateCurrent": "Установлена последняя версия.",
     "updateChecking": "Проверка обновлений…",
     "updateAvailable": "Доступна версия {{version}}",
     "updateFailed": "Не удалось проверить обновления. Откройте окно «О программе» заново, чтобы повторить попытку.",

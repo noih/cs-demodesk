@@ -24,4 +24,6 @@ serde_json = "1"
 tauri-plugin-single-instance = "2"
 
 [target.'cfg(windows)'.dependencies]
+windows = { version = "0.61", features = ["Services_Store", "Win32_UI_Shell", "Win32_System_Com"] }
+windows-future = "0.2"
 windows-sys = { version = "0.61", features = ["Win32_UI_WindowsAndMessaging", "Win32_Globalization", "Win32_UI_Shell", "Win32_System_Com", "Win32_System_Threading", "Win32_Security"] }

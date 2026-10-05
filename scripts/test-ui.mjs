@@ -385,7 +385,7 @@ try {
   await page.getByRole('button', {name:'GitHub: Version 1.0.10 available',exact:true}).waitFor();
   assert.equal(await updateCount(), initialChecks + 2, 'Reopening About retries after failure');
   await page.getByRole('dialog').getByRole('button', {name:'Close',exact:true}).click();
-  for (const status of ['current', 'packaged']) {
+  for (const status of ['current', 'storeCurrent']) {
     await page.evaluate(status => window.updateStatus = {status}, status);
     await page.getByRole('button', {name:/^About/}).click();
     const github = page.getByRole('dialog').getByRole('button', {name:'GitHub',exact:true});
@@ -395,6 +395,15 @@ try {
     assert.equal(await page.evaluate(() => window.openedUrl), 'https://github.com/noih/cs-demodesk');
     await page.getByRole('dialog').getByRole('button', {name:'Close',exact:true}).click();
   }
+  await page.evaluate(() => window.updateStatus = {status:'storeAvailable'});
+  await page.getByRole('button', {name:/^About/}).click();
+  const storeUpdate = page.getByRole('button', {name:'Microsoft Store: An update is available in Microsoft Store',exact:true});
+  await storeUpdate.waitFor();
+  assert.equal(await storeUpdate.getAttribute('data-accent-color'), 'green');
+  assert.equal(await page.getByRole('dialog').getByRole('button', {name:'GitHub',exact:true}).getAttribute('data-accent-color'), 'gray');
+  await storeUpdate.click();
+  assert.equal(await page.evaluate(() => window.openedUrl), 'https://apps.microsoft.com/detail/9N5G4VXSDGS5');
+  await page.getByRole('dialog').getByRole('button', {name:'Close',exact:true}).click();
   await page.getByRole('tab').filter({hasText:'Players'}).click();
   const tables = page.getByRole('table');
   assert.equal(await tables.count(), 2);

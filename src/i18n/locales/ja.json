@@ -56,6 +56,9 @@
     "goToSettings": "設定へ"
   },
   "about": {
+    "storeUpdateAvailable": "Microsoft Store に更新があります",
+    "storeCurrent": "Microsoft Store には現在、このインストールに適用できる更新はありません。",
+    "updateCurrent": "最新バージョンです。",
     "updateChecking": "更新を確認中…",
     "updateAvailable": "新しいバージョン {{version}}",
     "updateFailed": "更新を確認できませんでした。「このアプリについて」を開き直して再試行してください。",

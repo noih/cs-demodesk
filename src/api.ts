@@ -420,7 +420,7 @@ export interface AssessmentHistory { sourceFingerprint: string | null; records: 
 
 // ---- commands ----
 
-export type UpdateStatus = { status: 'packaged' | 'current' } | { status: 'available'; version: string };
+export type UpdateStatus = { status: 'storeCurrent' | 'storeAvailable' | 'current' } | { status: 'available'; version: string };
 
 export const api = {
   browseDirectory: (path: string | null) => invoke<string>('browse_directory', { path }),

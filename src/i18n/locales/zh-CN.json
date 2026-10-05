@@ -56,6 +56,9 @@
     "goToSettings": "前往设置"
   },
   "about": {
+    "storeUpdateAvailable": "Microsoft Store 有可用更新",
+    "storeCurrent": "Microsoft Store 目前未提供此安装版本的更新。",
+    "updateCurrent": "目前已是最新版本。",
     "updateChecking": "正在检查更新…",
     "updateAvailable": "有新版本 {{version}}",
     "updateFailed": "无法检查更新，请重新打开关于窗口再试一次。",

@@ -38,7 +38,9 @@ export function AboutDialog() {
   }, [checkUpdates]);
   const checking = update === undefined;
   const available = update !== 'failed' && update?.status === 'available' ? update.version : undefined;
-  const updateLabel = checking ? t('about.updateChecking') : available ? t('about.updateAvailable', { version: available }) : undefined;
+  const storeAvailable = update !== 'failed' && update?.status === 'storeAvailable';
+  const hasUpdate = Boolean(available) || storeAvailable;
+  const updateLabel = checking ? t('about.updateChecking') : available ? t('about.updateAvailable', { version: available }) : storeAvailable ? t('about.storeUpdateAvailable') : undefined;
   const [version, setVersion] = useState<string>();
   useEffect(() => {
     void api.status().then((s) => setVersion(s.version)).catch(() => undefined);
@@ -48,7 +50,7 @@ export function AboutDialog() {
       <Tooltip delayDuration={150} content={updateLabel ?? t('about.button')}><Dialog.Trigger>
         <IconButton variant="ghost" color="gray" aria-label={updateLabel ? `${t('about.button')}: ${updateLabel}` : t('about.button')} >
           {checking ? <span aria-hidden="true" className="app-spinner app-spinner-1" /> :
-            <i aria-hidden="true" className={available ? "bi bi-arrow-up-circle-fill app-icon" : "bi bi-info-circle app-icon"} style={available ? { color: "var(--green-11)" } : undefined} />}
+            <i aria-hidden="true" className={hasUpdate ? "bi bi-arrow-up-circle-fill app-icon" : "bi bi-info-circle app-icon"} style={hasUpdate ? { color: "var(--green-11)" } : undefined} />}
 
         </IconButton>
       </Dialog.Trigger></Tooltip>
@@ -75,14 +77,18 @@ export function AboutDialog() {
             GitHub {available && <><i aria-hidden="true" className="bi bi-arrow-up-circle-fill app-icon" />v{available}</>}
             <i aria-hidden="true" className="bi bi-box-arrow-up-right app-icon" />
           </Button>
-          <Button size="2" variant="soft" color="gray" onClick={() => void api.openUrl('https://apps.microsoft.com/detail/9N5G4VXSDGS5')}>
-            Microsoft Store <i aria-hidden="true" className="bi bi-box-arrow-up-right app-icon" />
+          <Button size="2" variant="soft" color={storeAvailable ? 'green' : 'gray'}
+            aria-label={storeAvailable ? `Microsoft Store: ${t('about.storeUpdateAvailable')}` : 'Microsoft Store'}
+            onClick={() => void api.openUrl('https://apps.microsoft.com/detail/9N5G4VXSDGS5')}>
+            Microsoft Store {storeAvailable && <i aria-hidden="true" className="bi bi-arrow-up-circle-fill app-icon" />}<i aria-hidden="true" className="bi bi-box-arrow-up-right app-icon" />
           </Button>
         </Flex>
         {checking && <Flex role="status" align="center" gap="2" mt="3">
           <span aria-hidden="true" className="app-spinner app-spinner-1" />
           <Text size="2" color="gray">{t('about.updateChecking')}</Text>
         </Flex>}
+        {update !== 'failed' && update?.status === 'storeCurrent' && <Text as="p" size="2" color="gray" mt="3">{t('about.storeCurrent')}</Text>}
+        {update !== 'failed' && update?.status === 'current' && <Text as="p" size="2" color="gray" mt="3">{t('about.updateCurrent')}</Text>}
         {update === 'failed' && <Text as="p" size="2" color="gray" mt="3">{t('about.updateFailed')}</Text>}
         <Text as="div" size="2" weight="medium" mt="5" mb="2">
           {t('about.thirdParty')}
