@@ -46,7 +46,7 @@ mod window;
 use crate::model::{DemoInfo, Highlight};
 use actions::{build_schedule, steamid_to_account_id, ActionsOptions, Camera, RenderClip};
 use anyhow::{anyhow, Result};
-use encode::{bytes_to_mb, concat_clips, encode_to_size_with_progress, mux_clip};
+use encode::{bytes_to_mb, concat_clips, encode_to_size_with_progress, mux_clip, Control};
 use leftovers::{has_leftovers, remove_leftovers};
 use paths::{resolve_tool_paths, to_forward_slashes, PathOverrides, ToolPaths, IS_WINDOWS};
 use record::{collect_clip_outputs, run_recording_session, RecordSession};
@@ -399,9 +399,11 @@ fn join_highlight_parts(
     output_dir: &Path,
     options: &RenderOptions,
     log: &mut dyn FnMut(String),
+    cancel: &AtomicBool,
 ) -> Result<Vec<RenderedClip>> {
     let mut joined = Vec::new();
     for (index, h) in highlights.iter().enumerate() {
+        Control::new(cancel, log).check_cancelled()?;
         let group: Vec<_> = parts.iter().filter(|c| c.highlight_id == h.id).collect();
         let files: Vec<_> = group.iter().filter_map(|c| c.file.clone()).collect();
         let file = if files.len() != group.len() || files.is_empty() {
@@ -410,7 +412,9 @@ fn join_highlight_parts(
             Some(files[0].clone())
         } else {
             let dest = output_dir.join(format!("highlight-{:02}.{}", index + 1, options.container));
-            if let Err(error) = concat_clips(ffmpeg, &files, &dest) {
+            if let Err(error) = concat_clips(ffmpeg, &files, &dest, &mut Control::new(cancel, log))
+            {
+                Control::new(cancel, log).check_cancelled()?;
                 log(format!("{}: {error:#}", h.title));
                 joined.push(RenderedClip {
                     highlight_id: h.id.clone(),
@@ -531,7 +535,7 @@ pub fn render_highlights(input: RenderJobInput) -> Result<RenderResult> {
     if cancel.load(std::sync::atomic::Ordering::Relaxed) {
         return Err(anyhow!("cancelled"));
     }
-    let (preset, mut compatible) = encode::checked_record_preset(ffmpeg, &o, log)?;
+    let (preset, mut compatible) = encode::checked_record_preset(ffmpeg, &o, log, &cancel)?;
     let total_seconds: f64 = recording
         .iter()
         .map(|h| (h.end_tick - h.start_tick) as f64 / demo.tick_rate)
@@ -635,6 +639,7 @@ pub fn render_highlights(input: RenderJobInput) -> Result<RenderResult> {
                            log: &mut dyn FnMut(String),
                            report: &mut dyn FnMut(f64)|
      -> Result<PathBuf> {
+        Control::new(&cancel, log).check_cancelled()?;
         let Some(mb) = o.max_size_mb else {
             report(1.0);
             return Ok(file);
@@ -653,6 +658,7 @@ pub fn render_highlights(input: RenderJobInput) -> Result<RenderResult> {
             o.audio_kbps,
             &mut compatible,
             report,
+            &mut Control::new(&cancel, log),
         )?;
         log(format!(
             "{} → {} ({} kbps, {} MB)",
@@ -708,9 +714,16 @@ pub fn render_highlights(input: RenderJobInput) -> Result<RenderResult> {
             });
             continue;
         }
-        let file = match mux_clip(ffmpeg, out, &dest, o.audio_kbps) {
+        let file = match mux_clip(
+            ffmpeg,
+            out,
+            &dest,
+            o.audio_kbps,
+            &mut Control::new(&cancel, log),
+        ) {
             Ok(_) => Some(dest),
             Err(error) => {
+                Control::new(&cancel, log).check_cancelled()?;
                 log(format!("clip {}: {error:#}", out.index + 1));
                 None
             }
@@ -726,7 +739,15 @@ pub fn render_highlights(input: RenderJobInput) -> Result<RenderResult> {
             bytes: None,
         });
     }
-    result.clips = join_highlight_parts(ffmpeg, &highlights, result.clips, &output_dir, &o, log)?;
+    result.clips = join_highlight_parts(
+        ffmpeg,
+        &highlights,
+        result.clips,
+        &output_dir,
+        &o,
+        log,
+        &cancel,
+    )?;
     result.failed_highlights = result
         .clips
         .iter()
@@ -752,7 +773,7 @@ pub fn render_highlights(input: RenderJobInput) -> Result<RenderResult> {
                 })
                 .collect();
         }
-        concat_clips(ffmpeg, &muxed, &merged)?;
+        concat_clips(ffmpeg, &muxed, &merged, &mut Control::new(&cancel, log))?;
         stage("encoding: fitting");
         let merged = fit_to_size(merged, log, &mut |p| {
             progress(muxing_end + (0.99 - muxing_end) * p)
@@ -783,6 +804,7 @@ pub fn render_highlights(input: RenderJobInput) -> Result<RenderResult> {
                                 / total_seconds.max(0.001),
                     )
                 });
+                Control::new(&cancel, log).check_cancelled()?;
                 match fitted {
                     Ok(file) => {
                         c.bytes = Some(std::fs::metadata(&file)?.len());
@@ -800,6 +822,7 @@ pub fn render_highlights(input: RenderJobInput) -> Result<RenderResult> {
             completed_seconds += seconds;
         }
     }
+    Control::new(&cancel, log).check_cancelled()?;
     if !o.keep_raw_files {
         for (pass_dir, indices) in pass_dirs.iter().zip(&passes) {
             for i in 0..indices.len() {
@@ -1112,6 +1135,7 @@ mod tests {
             std::path::Path::new("unused"),
             &RenderOptions::default(),
             &mut |_| {},
+            &std::sync::atomic::AtomicBool::new(false),
         )
         .unwrap();
         assert_eq!(joined.len(), 1);
@@ -1167,6 +1191,7 @@ mod tests {
             dir.path(),
             &RenderOptions::default(),
             &mut |_| {},
+            &std::sync::atomic::AtomicBool::new(false),
         )
         .unwrap();
         assert_eq!(joined.len(), 2);

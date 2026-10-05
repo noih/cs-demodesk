@@ -276,7 +276,7 @@ mod platform {
         pub fn output_with_progress(
             &self,
             command: &mut Command,
-            progress: &mut dyn FnMut(&[u8]),
+            progress: &mut dyn FnMut(&[u8]) -> io::Result<()>,
         ) -> io::Result<Output> {
             let stdout = tempfile::NamedTempFile::new()?;
             let mut reader = stdout.reopen()?;
@@ -286,7 +286,10 @@ mod platform {
             let status = loop {
                 let before = data.len();
                 reader.read_to_end(&mut data)?;
-                progress(&data[before..]);
+                if let Err(error) = progress(&data[before..]) {
+                    self.finish()?;
+                    return Err(error);
+                }
                 if let Some(status) = child.try_wait()? {
                     break status;
                 }
@@ -295,7 +298,7 @@ mod platform {
             self.finish()?;
             let before = data.len();
             reader.read_to_end(&mut data)?;
-            progress(&data[before..]);
+            progress(&data[before..])?;
             stderr.seek(SeekFrom::Start(0))?;
             let mut errors = vec![];
             stderr.read_to_end(&mut errors)?;
@@ -489,7 +492,7 @@ impl ProcessTree {
     pub fn output_with_progress(
         &self,
         command: &mut std::process::Command,
-        progress: &mut dyn FnMut(&[u8]),
+        progress: &mut dyn FnMut(&[u8]) -> std::io::Result<()>,
     ) -> std::io::Result<std::process::Output> {
         use std::io::{Read, Seek, SeekFrom};
         let stdout = tempfile::NamedTempFile::new()?;
@@ -503,7 +506,11 @@ impl ProcessTree {
         let status = loop {
             let before = data.len();
             reader.read_to_end(&mut data)?;
-            progress(&data[before..]);
+            if let Err(error) = progress(&data[before..]) {
+                child.kill()?;
+                child.wait()?;
+                return Err(error);
+            }
             if let Some(status) = child.try_wait()? {
                 break status;
             }
@@ -511,7 +518,7 @@ impl ProcessTree {
         };
         let before = data.len();
         reader.read_to_end(&mut data)?;
-        progress(&data[before..]);
+        progress(&data[before..])?;
         stderr.seek(SeekFrom::Start(0))?;
         let mut errors = vec![];
         stderr.read_to_end(&mut errors)?;

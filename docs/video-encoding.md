@@ -49,3 +49,20 @@ checked in CS2 with grenade, fire, round-win and C4 sounds across clip boundarie
 Recording reports scheduled demo-time markers, weighted by clip duration. Encoding reads FFmpeg's `out_time_us` while the process runs and combines both CPU passes. Size retries use the remaining progress range; completed output is still verified before reporting success.
 
 The UI labels overall progress as estimated: recording gets 70% of the work budget when size fitting is enabled, 90% otherwise. These phase weights are not time estimates. Elapsed time updates each second; there is no countdown. Progress stays below 100% until the job succeeds, and older job records can omit the optional progress field.
+
+Post-processing checks cancellation every 250 ms and terminates the owned process
+tree before returning. Every five seconds, the watchdog checks for increasing
+FFmpeg frame counts or reported output bytes, or changes to the current output
+file's size or modification time. Six consecutive quiet intervals (30 seconds)
+stop the process; any progress resets the quiet interval count. This tolerance
+also applies at startup and to each new pass. It allows bursty writes and slower
+machines, but is a heuristic rather than proof that the encoder is deadlocked.
+CPU usage, elapsed video time and repeated progress messages alone do not count
+as progress.
+
+A stalled size-fitting operation restarts that video's encoding from the source
+immediately, at most three retries after the initial attempt. Other completed
+videos are retained. Cancellation and ordinary encoder errors do not trigger
+stall retries. Interrupted attempts clean up their temporary output and pass
+logs; the source and existing destination are preserved. Job logs record the
+encoding passes, size checks, stall counters and retry number.

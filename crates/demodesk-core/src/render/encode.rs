@@ -8,9 +8,74 @@ use super::record::ClipOutput;
 use anyhow::{anyhow, Result};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::{Duration, Instant};
 
+pub struct Control<'a> {
+    cancel: &'a AtomicBool,
+    log: &'a mut dyn FnMut(String),
+    check_interval: Duration,
+}
+
+impl<'a> Control<'a> {
+    pub fn new(cancel: &'a AtomicBool, log: &'a mut dyn FnMut(String)) -> Self {
+        Self {
+            cancel,
+            log,
+            check_interval: Duration::from_secs(5),
+        }
+    }
+
+    pub fn check_cancelled(&self) -> Result<()> {
+        if self.cancel.load(Ordering::Relaxed) {
+            return Err(anyhow!("cancelled"));
+        }
+        Ok(())
+    }
+}
+
+fn stalled(error: &anyhow::Error) -> bool {
+    error
+        .downcast_ref::<std::io::Error>()
+        .is_some_and(|e| e.kind() == std::io::ErrorKind::TimedOut)
+}
+
+fn retry_stalled<T>(
+    control: &mut Control<'_>,
+    mut attempt: impl FnMut(&mut Control<'_>) -> Result<T>,
+) -> Result<T> {
+    for retry in 0..=3 {
+        control.check_cancelled()?;
+        let result = attempt(control);
+        control.check_cancelled()?;
+        match result {
+            Err(error) if stalled(&error) => {
+                (control.log)(format!("encoding stalled: {error:#}"));
+                if retry == 3 {
+                    return Err(
+                        error.context("encoding stalled after 3 retries; source video retained")
+                    );
+                }
+                (control.log)(format!(
+                    "restarting this video's encoding from source: retry {}/3",
+                    retry + 1
+                ));
+            }
+            result => return result,
+        }
+    }
+    unreachable!()
+}
+
+#[cfg(test)]
 fn run(exe: &Path, args: &[String]) -> Result<()> {
-    run_progress(exe, args, 1.0, &mut |_| {})
+    run_progress(
+        exe,
+        args,
+        1.0,
+        &mut |_| {},
+        &mut Control::new(&AtomicBool::new(false), &mut |_| {}),
+    )
 }
 
 fn run_progress(
@@ -18,28 +83,20 @@ fn run_progress(
     args: &[String],
     seconds: f64,
     progress: &mut dyn FnMut(f64),
+    control: &mut Control<'_>,
 ) -> Result<()> {
+    control.check_cancelled()?;
     let mut cmd = Command::new(exe);
     cmd.args(["-progress", "pipe:1", "-nostats"]);
     cmd.args(args)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::piped());
-    let mut pending = String::new();
-    let out = ProcessTree::new()?.output_with_progress(&mut cmd, &mut |chunk| {
-        pending.push_str(&String::from_utf8_lossy(chunk));
-        while let Some(end) = pending.find('\n') {
-            if let Some(micros) = pending[..end]
-                .trim()
-                .strip_prefix("out_time_us=")
-                .and_then(|v| v.parse::<f64>().ok())
-                .filter(|v| v.is_finite())
-            {
-                progress((micros / 1_000_000.0 / seconds).clamp(0.0, 1.0));
-            }
-            pending.drain(..=end);
-        }
-    })?;
+    let output = args
+        .last()
+        .map(Path::new)
+        .filter(|p| *p != Path::new("NUL") && *p != Path::new("/dev/null"));
+    let out = monitored_output(&mut cmd, seconds, progress, control, output)?;
     if !out.status.success() {
         let err = String::from_utf8_lossy(&out.stderr);
         let tail: Vec<&str> = err.lines().rev().take(5).collect();
@@ -50,6 +107,82 @@ fn run_progress(
         ));
     }
     Ok(())
+}
+
+fn monitored_output(
+    cmd: &mut Command,
+    seconds: f64,
+    progress: &mut dyn FnMut(f64),
+    control: &mut Control<'_>,
+    output: Option<&Path>,
+) -> Result<std::process::Output> {
+    control.check_cancelled()?;
+    let mut pending = String::new();
+    let mut checked_at = Instant::now();
+    let mut active = false;
+    let mut idle_checks = 0;
+    let file_state = || {
+        output
+            .and_then(|p| std::fs::metadata(p).ok())
+            .map(|m| (m.len(), m.modified().ok()))
+    };
+    let mut previous_file = file_state();
+    let mut counters = [0.0_f64; 2];
+    Ok(ProcessTree::new()?.output_with_progress(cmd, &mut |chunk| {
+        if control.cancel.load(Ordering::Relaxed) {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::Interrupted,
+                "cancelled",
+            ));
+        }
+        let current_file = file_state();
+        active |= current_file != previous_file;
+        previous_file = current_file;
+        pending.push_str(&String::from_utf8_lossy(chunk));
+        while let Some(end) = pending.find('\n') {
+            if let Some((key, value)) = pending[..end].trim().split_once('=') {
+                if let Some(index) = ["frame", "total_size"]
+                    .iter()
+                    .position(|k| *k == key)
+                {
+                    if let Ok(value) = value.parse::<f64>() {
+                        if value.is_finite() && value > counters[index] {
+                            counters[index] = value;
+                            active = true;
+                        }
+                    }
+                }
+            }
+            if let Some(micros) = pending[..end]
+                .trim()
+                .strip_prefix("out_time_us=")
+                .and_then(|v| v.parse::<f64>().ok())
+                .filter(|v| v.is_finite())
+            {
+                progress((micros / 1_000_000.0 / seconds).clamp(0.0, 1.0));
+            }
+            pending.drain(..=end);
+        }
+        if checked_at.elapsed() >= control.check_interval {
+            idle_checks = if active { 0 } else { idle_checks + 1 };
+            active = false;
+            checked_at = Instant::now();
+        }
+        // ponytail: six quiet windows tolerate bursty writes; tune with slow-machine traces.
+        if idle_checks >= 6 {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                format!(
+                    "encoding process had no frame, output size or output file changes for six {}-second checks (frame={}, reported_bytes={}, file_bytes={})",
+                    control.check_interval.as_secs_f64(),
+                    counters[0],
+                    counters[1],
+                    previous_file.as_ref().map_or(0, |(bytes, _)| *bytes)
+                ),
+            ));
+        }
+        Ok(())
+    })?)
 }
 
 fn s(v: &str) -> String {
@@ -64,7 +197,8 @@ pub fn ffprobe_exe(ffmpeg_exe: &Path) -> PathBuf {
     })
 }
 
-fn probe_media(ffmpeg_exe: &Path, file: &Path) -> Result<(f64, bool)> {
+fn probe_media(ffmpeg_exe: &Path, file: &Path, control: &mut Control<'_>) -> Result<(f64, bool)> {
+    control.check_cancelled()?;
     let mut cmd = Command::new(ffprobe_exe(ffmpeg_exe));
     cmd.args([
         "-v",
@@ -75,7 +209,7 @@ fn probe_media(ffmpeg_exe: &Path, file: &Path) -> Result<(f64, bool)> {
         "json",
     ])
     .arg(file);
-    let out = ProcessTree::new()?.output(&mut cmd)?;
+    let out = monitored_output(&mut cmd, 1.0, &mut |_| {}, control, None)?;
     if !out.status.success() {
         return Err(anyhow!("cannot probe input video"));
     }
@@ -92,10 +226,21 @@ fn probe_media(ffmpeg_exe: &Path, file: &Path) -> Result<(f64, bool)> {
 }
 
 pub fn probe_duration_seconds(ffmpeg_exe: &Path, file: &Path) -> Result<f64> {
-    Ok(probe_media(ffmpeg_exe, file)?.0)
+    Ok(probe_media(
+        ffmpeg_exe,
+        file,
+        &mut Control::new(&AtomicBool::new(false), &mut |_| {}),
+    )?
+    .0)
 }
 
-pub fn mux_clip(ffmpeg_exe: &Path, clip: &ClipOutput, dest: &Path, audio_kbps: u32) -> Result<()> {
+pub fn mux_clip(
+    ffmpeg_exe: &Path,
+    clip: &ClipOutput,
+    dest: &Path,
+    audio_kbps: u32,
+    control: &mut Control<'_>,
+) -> Result<()> {
     let video = clip
         .video
         .as_ref()
@@ -126,17 +271,22 @@ pub fn mux_clip(ffmpeg_exe: &Path, clip: &ClipOutput, dest: &Path, audio_kbps: u
     }
     args.extend([s("-movflags"), s("+faststart")]);
     args.push(dest.to_string_lossy().to_string());
-    run(ffmpeg_exe, &args)
+    run_progress(ffmpeg_exe, &args, 1.0, &mut |_| {}, control)
 }
 
-pub fn concat_clips(ffmpeg_exe: &Path, clips: &[PathBuf], dest: &Path) -> Result<()> {
+pub fn concat_clips(
+    ffmpeg_exe: &Path,
+    clips: &[PathBuf],
+    dest: &Path,
+    control: &mut Control<'_>,
+) -> Result<()> {
     let list = dest.parent().unwrap().join("concat.txt");
     let body: Vec<String> = clips
         .iter()
         .map(|c| format!("file '{}'", to_forward_slashes(c).replace('\'', "'\\''")))
         .collect();
     std::fs::write(&list, body.join("\n"))?;
-    let r = run(
+    let r = run_progress(
         ffmpeg_exe,
         &[
             s("-y"),
@@ -152,6 +302,9 @@ pub fn concat_clips(ffmpeg_exe: &Path, clips: &[PathBuf], dest: &Path) -> Result
             s("+faststart"),
             dest.to_string_lossy().to_string(),
         ],
+        1.0,
+        &mut |_| {},
+        control,
     );
     let _ = std::fs::remove_file(&list);
     r
@@ -168,6 +321,7 @@ pub fn video_bitrate_for_size(max_size_mb: f64, seconds: f64, audio_kbps: u32) -
         .max(0.0)) as u32
 }
 
+#[derive(Debug)]
 pub struct SizeResult {
     pub bitrate_kbps: u32,
     pub bytes: u64,
@@ -205,7 +359,7 @@ fn with_nvenc_fallback<T>(
 ) -> Result<T> {
     match encode(*compatible) {
         Ok(value) => Ok(value),
-        Err(first) if !*compatible => {
+        Err(first) if !*compatible && !stalled(&first) && first.to_string() != "cancelled" => {
             *compatible = true;
             eprintln!("NVENC failed; retrying with compatibility settings: {first:#}");
             encode(true).map_err(|last| {
@@ -221,6 +375,7 @@ pub fn checked_record_preset(
     ffmpeg: &Path,
     options: &super::RenderOptions,
     log: &mut dyn FnMut(String),
+    cancel: &AtomicBool,
 ) -> Result<(String, bool)> {
     let preset = record_preset(&options.codec, options.crf, options.fps);
     if !options.codec.contains("nvenc") {
@@ -252,7 +407,13 @@ pub fn checked_record_preset(
             s("null"),
             s(if cfg!(windows) { "NUL" } else { "/dev/null" }),
         ]);
-        run(ffmpeg, &args)?;
+        run_progress(
+            ffmpeg,
+            &args,
+            1.0,
+            &mut |_| {},
+            &mut Control::new(cancel, log),
+        )?;
         Ok(selected)
     })?;
     if compatible {
@@ -306,6 +467,7 @@ pub fn encode_to_size(
         audio_kbps,
         &mut false,
         &mut |_| {},
+        &mut Control::new(&AtomicBool::new(false), &mut |_| {}),
     )
 }
 
@@ -318,177 +480,216 @@ pub fn encode_to_size_with_progress(
     audio_kbps: u32,
     compatible: &mut bool,
     progress: &mut dyn FnMut(f64),
+    control: &mut Control<'_>,
 ) -> Result<SizeResult> {
-    if !CODECS.iter().any(|(name, _)| *name == codec) {
-        return Err(anyhow!("unsupported video encoder: {codec}"));
-    }
-    if !max_size_mb.is_finite() || max_size_mb <= 0.0 {
-        return Err(anyhow!("invalid file size limit"));
-    }
-    if input == output {
-        return Err(anyhow!("input and output must be different files"));
-    }
-    let (seconds, has_audio) = probe_media(ffmpeg_exe, input)?;
-    let audio_kbps = if has_audio { audio_kbps } else { 0 };
-    let limit = (max_size_mb * 1_000_000.0).floor() as u64;
-    let mut bitrate = video_bitrate_for_size(max_size_mb, seconds, audio_kbps);
-    if bitrate == 0 {
-        return Err(anyhow!(
-            "size limit is too small for this duration and audio bitrate"
-        ));
-    }
-    let temp = tempfile::Builder::new()
-        .prefix("encode-")
-        .suffix(".mp4")
-        .tempfile_in(
-            output
-                .parent()
-                .filter(|p| !p.as_os_str().is_empty())
-                .unwrap_or(Path::new(".")),
-        )?
-        .into_temp_path();
-    let input_s = input.to_string_lossy().to_string();
-    let output_s = temp.to_string_lossy().to_string();
-    let mut common = vec![
-        s("-y"),
-        s("-i"),
-        input_s.clone(),
-        s("-map"),
-        s("0:v:0"),
-        s("-map"),
-        s("0:a:0?"),
-        s("-c:a"),
-        s("aac"),
-        s("-b:a"),
-        format!("{audio_kbps}k"),
-        s("-ar"),
-        s("48000"),
-        s("-ac"),
-        s("2"),
-        s("-movflags"),
-        s("+faststart"),
-        s("-pix_fmt"),
-        s("yuv420p"),
-        s("-fps_mode"),
-        s("passthrough"),
-    ];
-    common.extend(tag_args(codec));
     let mut reported = 0.0_f64;
-    for attempt in 0..4 {
-        // Leave space for size verification and retries without moving backwards.
-        let start = 1.0 - 0.1_f64.powi(attempt);
-        let span = 0.9 * 0.1_f64.powi(attempt);
-        if codec.contains("nvenc") {
-            with_nvenc_fallback(compatible, |fallback| {
-                let mut args = common.clone();
-                args.extend([
+    retry_stalled(control, |control| {
+        if !CODECS.iter().any(|(name, _)| *name == codec) {
+            return Err(anyhow!("unsupported video encoder: {codec}"));
+        }
+        if !max_size_mb.is_finite() || max_size_mb <= 0.0 {
+            return Err(anyhow!("invalid file size limit"));
+        }
+        if input == output {
+            return Err(anyhow!("input and output must be different files"));
+        }
+        (control.log)(format!(
+            "size fitting: {} ({codec}, limit {max_size_mb} MB)",
+            input.file_name().unwrap_or_default().to_string_lossy()
+        ));
+        let (seconds, has_audio) = probe_media(ffmpeg_exe, input, control)?;
+        let audio_kbps = if has_audio { audio_kbps } else { 0 };
+        let limit = (max_size_mb * 1_000_000.0).floor() as u64;
+        let mut bitrate = video_bitrate_for_size(max_size_mb, seconds, audio_kbps);
+        if bitrate == 0 {
+            return Err(anyhow!(
+                "size limit is too small for this duration and audio bitrate"
+            ));
+        }
+        let temp = tempfile::Builder::new()
+            .prefix("encode-")
+            .suffix(".mp4")
+            .tempfile_in(
+                output
+                    .parent()
+                    .filter(|p| !p.as_os_str().is_empty())
+                    .unwrap_or(Path::new(".")),
+            )?
+            .into_temp_path();
+        let input_s = input.to_string_lossy().to_string();
+        let output_s = temp.to_string_lossy().to_string();
+        let mut common = vec![
+            s("-y"),
+            s("-i"),
+            input_s.clone(),
+            s("-map"),
+            s("0:v:0"),
+            s("-map"),
+            s("0:a:0?"),
+            s("-c:a"),
+            s("aac"),
+            s("-b:a"),
+            format!("{audio_kbps}k"),
+            s("-ar"),
+            s("48000"),
+            s("-ac"),
+            s("2"),
+            s("-movflags"),
+            s("+faststart"),
+            s("-pix_fmt"),
+            s("yuv420p"),
+            s("-fps_mode"),
+            s("passthrough"),
+        ];
+        common.extend(tag_args(codec));
+        for attempt in 0..4 {
+            control.check_cancelled()?;
+            (control.log)(format!(
+                "size fitting attempt {}/4: {bitrate} kbps, {seconds:.2} seconds",
+                attempt + 1
+            ));
+            // Leave space for size verification and retries without moving backwards.
+            let start = 1.0 - 0.1_f64.powi(attempt);
+            let span = 0.9 * 0.1_f64.powi(attempt);
+            if codec.contains("nvenc") {
+                with_nvenc_fallback(compatible, |fallback| {
+                    let mut args = common.clone();
+                    args.extend([
+                        s("-c:v"),
+                        s(codec),
+                        s("-rc"),
+                        s("vbr"),
+                        s("-b:v"),
+                        format!("{bitrate}k"),
+                        s("-maxrate"),
+                        format!("{bitrate}k"),
+                        s("-bufsize"),
+                        format!("{}k", u64::from(bitrate) * 2),
+                    ]);
+                    args.extend(
+                        if fallback {
+                            NVENC_COMPATIBLE
+                        } else {
+                            NVENC_RECORDING
+                        }
+                        .split_whitespace()
+                        .map(s),
+                    );
+                    args.extend([
+                        s("-force_key_frames"),
+                        s("expr:gte(t,n_forced*2)"),
+                        s("-profile:v"),
+                        s(if is_hevc(codec) { "main" } else { "high" }),
+                    ]);
+                    if is_hevc(codec) && !fallback {
+                        args.extend([s("-b_ref_mode"), s("middle")]);
+                    }
+                    args.push(output_s.clone());
+                    run_progress(
+                        ffmpeg_exe,
+                        &args,
+                        seconds,
+                        &mut |p| {
+                            reported = reported.max(start + span * p);
+                            progress(reported);
+                        },
+                        control,
+                    )
+                })?;
+            } else {
+                let tmp = tempfile::tempdir()?;
+                let passlog = tmp
+                    .path()
+                    .join("ffmpeg2pass")
+                    .to_string_lossy()
+                    .replace('\\', "/");
+                let null_sink = if cfg!(windows) { "NUL" } else { "/dev/null" };
+                let rate = [
                     s("-c:v"),
                     s(codec),
-                    s("-rc"),
-                    s("vbr"),
                     s("-b:v"),
                     format!("{bitrate}k"),
                     s("-maxrate"),
-                    format!("{bitrate}k"),
+                    format!("{}k", (bitrate as f64 * 1.3) as u32),
                     s("-bufsize"),
                     format!("{}k", u64::from(bitrate) * 2),
-                ]);
-                args.extend(
-                    if fallback {
-                        NVENC_COMPATIBLE
+                    s("-preset"),
+                    s("medium"),
+                    s("-pix_fmt"),
+                    s("yuv420p"),
+                    s("-fps_mode"),
+                    s("passthrough"),
+                ];
+                let pass_args = |n: u32| -> Vec<String> {
+                    if codec == "libx265" {
+                        vec![
+                            s("-x265-params"),
+                            format!("pass={n}:stats={}.x265", passlog.replace(':', "\\:")),
+                        ]
                     } else {
-                        NVENC_RECORDING
+                        vec![
+                            s("-pass"),
+                            n.to_string(),
+                            s("-passlogfile"),
+                            passlog.clone(),
+                        ]
                     }
-                    .split_whitespace()
-                    .map(s),
-                );
-                args.extend([
-                    s("-force_key_frames"),
-                    s("expr:gte(t,n_forced*2)"),
-                    s("-profile:v"),
-                    s(if is_hevc(codec) { "main" } else { "high" }),
-                ]);
-                if is_hevc(codec) && !fallback {
-                    args.extend([s("-b_ref_mode"), s("middle")]);
-                }
-                args.push(output_s.clone());
-                run_progress(ffmpeg_exe, &args, seconds, &mut |p| {
-                    reported = reported.max(start + span * p);
-                    progress(reported);
-                })
-            })?;
-        } else {
-            let tmp = tempfile::tempdir()?;
-            let passlog = tmp
-                .path()
-                .join("ffmpeg2pass")
-                .to_string_lossy()
-                .replace('\\', "/");
-            let null_sink = if cfg!(windows) { "NUL" } else { "/dev/null" };
-            let rate = [
-                s("-c:v"),
-                s(codec),
-                s("-b:v"),
-                format!("{bitrate}k"),
-                s("-maxrate"),
-                format!("{}k", (bitrate as f64 * 1.3) as u32),
-                s("-bufsize"),
-                format!("{}k", u64::from(bitrate) * 2),
-                s("-preset"),
-                s("medium"),
-                s("-pix_fmt"),
-                s("yuv420p"),
-                s("-fps_mode"),
-                s("passthrough"),
-            ];
-            let pass_args = |n: u32| -> Vec<String> {
-                if codec == "libx265" {
-                    vec![
-                        s("-x265-params"),
-                        format!("pass={n}:stats={}.x265", passlog.replace(':', "\\:")),
-                    ]
-                } else {
-                    vec![
-                        s("-pass"),
-                        n.to_string(),
-                        s("-passlogfile"),
-                        passlog.clone(),
-                    ]
-                }
-            };
-            let mut pass1 = vec![s("-y"), s("-i"), input_s.clone(), s("-map"), s("0:v:0")];
-            pass1.extend(rate.iter().cloned());
-            pass1.extend(pass_args(1));
-            pass1.extend([s("-an"), s("-f"), s("null"), s(null_sink)]);
-            run_progress(ffmpeg_exe, &pass1, seconds, &mut |p| {
-                progress(start + span * p / 2.0)
-            })?;
-            let mut pass2 = common.clone();
-            pass2.extend(rate.iter().cloned());
-            pass2.extend(pass_args(2));
-            pass2.push(output_s.clone());
-            run_progress(ffmpeg_exe, &pass2, seconds, &mut |p| {
-                progress(start + span * (0.5 + p / 2.0))
-            })?;
+                };
+                let mut pass1 = vec![s("-y"), s("-i"), input_s.clone(), s("-map"), s("0:v:0")];
+                pass1.extend(rate.iter().cloned());
+                pass1.extend(pass_args(1));
+                pass1.extend([s("-an"), s("-f"), s("null"), s(null_sink)]);
+                (control.log)("size fitting: CPU pass 1/2".into());
+                run_progress(
+                    ffmpeg_exe,
+                    &pass1,
+                    seconds,
+                    &mut |p| {
+                        reported = reported.max(start + span * p / 2.0);
+                        progress(reported)
+                    },
+                    control,
+                )?;
+                let mut pass2 = common.clone();
+                pass2.extend(rate.iter().cloned());
+                pass2.extend(pass_args(2));
+                pass2.push(output_s.clone());
+                (control.log)("size fitting: CPU pass 2/2".into());
+                run_progress(
+                    ffmpeg_exe,
+                    &pass2,
+                    seconds,
+                    &mut |p| {
+                        reported = reported.max(start + span * (0.5 + p / 2.0));
+                        progress(reported)
+                    },
+                    control,
+                )?;
+            }
+            control.check_cancelled()?;
+            let bytes = std::fs::metadata(&temp)?.len();
+            (control.log)(format!(
+                "size fitting result: {bytes} bytes (limit {limit})"
+            ));
+            if bytes > 0 && bytes <= limit {
+                temp.persist(output)?;
+                progress(1.0);
+                return Ok(SizeResult {
+                    bitrate_kbps: bitrate,
+                    bytes,
+                });
+            }
+            let audio_bytes = audio_kbps as f64 * 1000.0 * seconds / 8.0;
+            let ratio = ((limit as f64 - audio_bytes) / (bytes as f64 - audio_bytes).max(1.0)
+                * 0.97)
+                .clamp(0.0, 0.95);
+            bitrate = (bitrate as f64 * ratio).floor() as u32;
+            if bitrate == 0 {
+                break;
+            }
         }
-        let bytes = std::fs::metadata(&temp)?.len();
-        if bytes > 0 && bytes <= limit {
-            temp.persist(output)?;
-            progress(1.0);
-            return Ok(SizeResult {
-                bitrate_kbps: bitrate,
-                bytes,
-            });
-        }
-        let audio_bytes = audio_kbps as f64 * 1000.0 * seconds / 8.0;
-        let ratio = ((limit as f64 - audio_bytes) / (bytes as f64 - audio_bytes).max(1.0) * 0.97)
-            .clamp(0.0, 0.95);
-        bitrate = (bitrate as f64 * ratio).floor() as u32;
-        if bitrate == 0 {
-            break;
-        }
-    }
-    Err(anyhow!("could not meet {max_size_mb} MB without changing resolution, FPS or encoder; source video was retained"))
+        Err(anyhow!("could not meet {max_size_mb} MB without changing resolution, FPS or encoder; source video was retained"))
+    })
 }
 
 pub fn bytes_to_mb(bytes: u64) -> f64 {
@@ -498,6 +699,216 @@ pub fn bytes_to_mb(bytes: u64) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn progress_fixture() {
+        use std::io::Write;
+        let Ok(mode) = std::env::var("DEMODESK_ENCODE_TEST_MODE") else {
+            return;
+        };
+        if mode == "stuck" || mode == "quiet" {
+            std::thread::sleep(Duration::from_secs(if mode == "stuck" { 4 } else { 2 }));
+            return;
+        }
+        if mode == "cpu" {
+            let started = Instant::now();
+            while started.elapsed() < Duration::from_secs(2) {
+                std::hint::black_box((0..1000).sum::<u64>());
+            }
+            return;
+        }
+        if mode == "bursty" {
+            for frame in 1..=4 {
+                std::thread::sleep(Duration::from_millis(750));
+                println!("frame={frame}");
+                std::io::stdout().flush().unwrap();
+            }
+            return;
+        }
+        for frame in 1..=40 {
+            let value = if matches!(mode.as_str(), "size" | "heartbeat") {
+                1
+            } else {
+                frame
+            };
+            let bytes = if mode == "size" { frame * 64 } else { 0 };
+            println!(
+                "frame={value}\nout_time_us={}\ntotal_size={bytes}\nprogress=continue",
+                frame * 1000
+            );
+            std::io::stdout().flush().unwrap();
+            std::thread::sleep(Duration::from_millis(50));
+        }
+    }
+
+    fn progress_command(mode: &str) -> Command {
+        let mut cmd = Command::new(std::env::current_exe().unwrap());
+        cmd.args([
+            "--exact",
+            "render::encode::tests::progress_fixture",
+            "--nocapture",
+        ])
+        .env("DEMODESK_ENCODE_TEST_MODE", mode);
+        cmd
+    }
+
+    #[test]
+    fn stalled_encoding_retries_three_times_but_advancing_encoding_finishes() {
+        let cancel = AtomicBool::new(false);
+        let mut logs = Vec::new();
+        let mut log = |line| logs.push(line);
+        let mut control = Control::new(&cancel, &mut log);
+        control.check_interval = Duration::from_millis(250);
+        let mut attempts = 0;
+        let error = retry_stalled(&mut control, |control| {
+            attempts += 1;
+            let started = Instant::now();
+            let result = monitored_output(
+                &mut progress_command(if attempts == 4 { "heartbeat" } else { "stuck" }),
+                1.0,
+                &mut |_| {},
+                control,
+                None,
+            );
+            assert!(started.elapsed() >= control.check_interval * 6);
+            result
+        })
+        .unwrap_err();
+        assert!(stalled(&error));
+        assert_eq!(attempts, 4);
+        for mode in ["advancing", "size", "bursty"] {
+            let started = Instant::now();
+            let out = monitored_output(
+                &mut progress_command(mode),
+                1.0,
+                &mut |_| {},
+                &mut control,
+                None,
+            )
+            .unwrap();
+            assert!(out.status.success());
+            assert!(started.elapsed() > control.check_interval);
+        }
+        assert_eq!(
+            logs.iter().filter(|line| line.contains("retry ")).count(),
+            3
+        );
+    }
+
+    #[test]
+    fn cancelled_encoding_stops_promptly_without_retry_or_nvenc_fallback() {
+        let cancel = AtomicBool::new(false);
+        let mut log = |_| {};
+        let mut control = Control::new(&cancel, &mut log);
+        let mut attempts = 0;
+        let mut compatible = false;
+        let mut cancelled_at = None;
+        let error = retry_stalled(&mut control, |control| {
+            with_nvenc_fallback(&mut compatible, |_| {
+                attempts += 1;
+                monitored_output(
+                    &mut progress_command("advancing"),
+                    1.0,
+                    &mut |_| {
+                        cancelled_at.get_or_insert_with(Instant::now);
+                        cancel.store(true, Ordering::Relaxed);
+                    },
+                    control,
+                    None,
+                )
+            })
+        })
+        .unwrap_err();
+        assert_eq!(error.to_string(), "cancelled");
+        assert_eq!(attempts, 1);
+        assert!(!compatible);
+        assert!(cancelled_at.unwrap().elapsed() < Duration::from_secs(1));
+        // Already-cancelled work must never launch a child.
+        assert_eq!(
+            monitored_output(
+                &mut Command::new("missing-encoder"),
+                1.0,
+                &mut |_| {},
+                &mut control,
+                None,
+            )
+            .unwrap_err()
+            .to_string(),
+            "cancelled"
+        );
+    }
+
+    #[test]
+    fn retries_stop_on_success_or_non_stall_errors() {
+        let cancel = AtomicBool::new(false);
+        let mut log = |_| {};
+        let mut control = Control::new(&cancel, &mut log);
+        let mut attempts = 0;
+        let value = retry_stalled(&mut control, |_| {
+            attempts += 1;
+            if attempts < 3 {
+                Err(std::io::Error::new(std::io::ErrorKind::TimedOut, "stuck").into())
+            } else {
+                Ok(42)
+            }
+        })
+        .unwrap();
+        assert_eq!((value, attempts), (42, 3));
+        attempts = 0;
+        assert!(retry_stalled::<()>(&mut control, |_| {
+            attempts += 1;
+            Err(anyhow!("invalid codec"))
+        })
+        .is_err());
+        assert_eq!(attempts, 1);
+    }
+
+    #[test]
+    fn output_file_changes_keep_silent_process_alive() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("encode.mp4");
+        let cancel = AtomicBool::new(false);
+        let mut log = |_| {};
+        let mut control = Control::new(&cancel, &mut log);
+        control.check_interval = Duration::from_millis(250);
+        std::thread::scope(|scope| {
+            scope.spawn(|| {
+                use std::io::Write;
+                let mut file = std::fs::File::create(&path).unwrap();
+                for _ in 0..50 {
+                    file.write_all(&[0; 64]).unwrap();
+                    file.flush().unwrap();
+                    std::thread::sleep(Duration::from_millis(50));
+                }
+            });
+            let output = monitored_output(
+                &mut progress_command("quiet"),
+                1.0,
+                &mut |_| {},
+                &mut control,
+                Some(&path),
+            )
+            .unwrap();
+            assert!(output.status.success());
+        });
+    }
+
+    #[test]
+    fn cpu_activity_without_media_progress_is_stalled() {
+        let cancel = AtomicBool::new(false);
+        let mut log = |_| {};
+        let mut control = Control::new(&cancel, &mut log);
+        control.check_interval = Duration::from_millis(250);
+        let output = monitored_output(
+            &mut progress_command("cpu"),
+            1.0,
+            &mut |_| {},
+            &mut control,
+            None,
+        )
+        .unwrap_err();
+        assert!(stalled(&output));
+    }
 
     #[test]
     fn compatibility_retry_is_bounded_and_reused() {
@@ -609,6 +1020,7 @@ mod tests {
                     live_update = true;
                 }
             },
+            &mut Control::new(&AtomicBool::new(false), &mut |_| {}),
         )
         .unwrap();
         assert!(
@@ -638,6 +1050,39 @@ mod tests {
         .to_vec();
         generate.push(input.to_string_lossy().into_owned());
         run(&ffmpeg, &generate).unwrap();
+        let cancelled_output = dir.path().join("cancelled.mp4");
+        std::fs::write(&cancelled_output, b"existing output").unwrap();
+        let cancel = AtomicBool::new(false);
+        let mut logs = Vec::new();
+        let source_bytes = std::fs::metadata(&input).unwrap().len();
+        let error = encode_to_size_with_progress(
+            &ffmpeg,
+            &input,
+            &cancelled_output,
+            0.5,
+            "libx264",
+            192,
+            &mut false,
+            &mut |p| {
+                if p > 0.0 {
+                    cancel.store(true, Ordering::Relaxed);
+                }
+            },
+            &mut Control::new(&cancel, &mut |line| logs.push(line)),
+        )
+        .unwrap_err();
+        assert_eq!(error.to_string(), "cancelled");
+        assert_eq!(std::fs::metadata(&input).unwrap().len(), source_bytes);
+        assert_eq!(
+            std::fs::read(&cancelled_output).unwrap(),
+            b"existing output"
+        );
+        assert!(!logs.iter().any(|line| line.contains("retry ")));
+        assert!(!std::fs::read_dir(dir.path()).unwrap().any(|entry| entry
+            .unwrap()
+            .file_name()
+            .to_string_lossy()
+            .starts_with("encode-")));
         for (codec, _) in CODECS {
             if codec.contains("nvenc") && std::env::var_os("TEST_NVENC").is_none() {
                 continue;
@@ -657,6 +1102,7 @@ mod tests {
                     ..super::super::RenderOptions::default()
                 },
                 &mut |_| {},
+                &AtomicBool::new(false),
             )
             .unwrap();
             args.extend(preset.split_whitespace().map(s));
@@ -671,6 +1117,7 @@ mod tests {
                 192,
                 &mut false,
                 &mut |p| updates.push(p),
+                &mut Control::new(&AtomicBool::new(false), &mut |_| {}),
             )
             .unwrap();
             assert_eq!(updates.last(), Some(&1.0));
@@ -730,6 +1177,7 @@ mod tests {
                     192,
                     &mut true,
                     &mut |_| {},
+                    &mut Control::new(&AtomicBool::new(false), &mut |_| {}),
                 )
                 .unwrap();
                 assert!(result.bytes > 0 && result.bytes <= 500_000);
@@ -825,6 +1273,14 @@ mod tests {
                 .bytes
                 <= 500_000
         );
-        assert!(!probe_media(&ffmpeg, &output).unwrap().1);
+        assert!(
+            !probe_media(
+                &ffmpeg,
+                &output,
+                &mut Control::new(&AtomicBool::new(false), &mut |_| {})
+            )
+            .unwrap()
+            .1
+        );
     }
 }
