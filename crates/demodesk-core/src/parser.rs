@@ -367,7 +367,8 @@ impl DemoParser {
                 .map(|v| v.as_slice())
                 .unwrap_or(&[]),
         );
-        let (mut rounds, defusers) = rounds_from_events(&groups);
+        let demo_end_tick = crate::demo_readiness::end_tick_bytes(bytes)?;
+        let (mut rounds, defusers) = rounds_from_events(&groups, demo_end_tick);
 
         let mut cash = BTreeMap::new();
         // Roster + user ids at every freeze end.
@@ -805,6 +806,7 @@ fn ticks_of(groups: &HashMap<&str, Vec<&GameEvent>>, name: &str) -> Vec<i32> {
 
 fn rounds_from_events(
     groups: &HashMap<&str, Vec<&GameEvent>>,
+    demo_end_tick: Option<i32>,
 ) -> (Vec<RoundInfo>, HashMap<i32, String>) {
     let starts = ticks_of(groups, "round_start");
     let freeze_ends = ticks_of(groups, "round_freeze_end");
@@ -852,12 +854,25 @@ fn rounds_from_events(
         .map(|(end_tick, round, winner, reason)| {
             let start_tick = last_before(&starts, end_tick).unwrap_or(0);
             let freeze_end_tick = between(&freeze_ends, start_tick, end_tick).unwrap_or(start_tick);
+            // The final round can omit round_officially_ended while the demo keeps playing.
+            let boundary = starts
+                .iter()
+                .copied()
+                .find(|&t| t > end_tick)
+                .into_iter()
+                .chain(demo_end_tick)
+                .min();
+            let officially_ended_tick = first_after(&officially, end_tick)
+                .or(boundary)
+                .unwrap_or(end_tick)
+                .min(boundary.unwrap_or(i32::MAX))
+                .max(end_tick);
             RoundInfo {
                 round,
                 start_tick,
                 freeze_end_tick,
                 end_tick,
-                officially_ended_tick: first_after(&officially, end_tick).unwrap_or(end_tick),
+                officially_ended_tick,
                 winner: match winner.as_str() {
                     "CT" => Some(Team::Ct),
                     "T" | "TERRORIST" => Some(Team::T),
@@ -873,6 +888,86 @@ fn rounds_from_events(
         })
         .collect();
     (rounds, defusers)
+}
+
+#[cfg(test)]
+mod round_tests {
+    use super::*;
+    use parser::second_pass::game_events::EventField;
+
+    fn event(name: &str, tick: i32) -> GameEvent {
+        GameEvent {
+            name: name.into(),
+            tick,
+            fields: vec![EventField {
+                name: "round".into(),
+                data: Some(Variant::I32(1)),
+            }],
+        }
+    }
+
+    #[test]
+    fn final_kill_keeps_tail_without_official_round_end() {
+        let events = [event("round_start", 100), event("round_end", 1000)];
+        let mut groups: HashMap<&str, Vec<&GameEvent>> = HashMap::new();
+        for ev in &events {
+            groups.entry(&ev.name).or_default().push(ev);
+        }
+        let (rounds, _) = rounds_from_events(&groups, Some(2280));
+        let demo: DemoData = serde_json::from_value(serde_json::json!({
+            "info": {"path": "test.dem", "mapName": "de_test", "serverName": "",
+                "tickRate": 64.0, "players": []},
+            "rounds": rounds,
+            "kills": [{"tick": 1000, "round": 0,
+                "attacker": {"steamid": "ct1", "name": "Player", "team": "CT",
+                    "health": 100, "weaponName": "AK-47"},
+                "victim": {"steamid": "t1", "name": "Opponent", "team": "TERRORIST", "weaponName": "AK-47"},
+                "weapon": "ak47", "headshot": true, "noscope": false, "penetrated": 0,
+                "thruSmoke": false, "attackerBlind": false, "attackerInAir": false,
+                "assistedFlash": false, "distance": 10.0, "hitgroup": "head", "isFreezePeriod": false}]
+        })).unwrap();
+        let highlights = crate::detector::detect(
+            &demo,
+            &DetectOptions {
+                min_score: 0.0,
+                ..Default::default()
+            },
+        );
+        assert_eq!(highlights.len(), 1);
+        assert_eq!(highlights[0].end_tick, 1192);
+        assert_eq!(highlights[0].key_moments, [[680, 1192]]);
+    }
+
+    #[test]
+    fn round_tail_respects_official_end_next_round_and_demo_end() {
+        for (official, next, demo_end, expected) in [
+            (None, None, Some(1064), 1064),
+            (None, None, Some(1000), 1000),
+            (None, None, None, 1000),
+            (Some(1200), None, Some(2280), 1200),
+            (Some(1200), None, None, 1200),
+            (None, Some(1100), Some(2280), 1100),
+            (Some(2000), Some(1100), Some(2280), 1100),
+            (Some(1200), None, Some(1064), 1064),
+        ] {
+            let mut events = vec![event("round_start", 100), event("round_end", 1000)];
+            if let Some(tick) = official {
+                events.push(event("round_officially_ended", tick));
+            }
+            if let Some(tick) = next {
+                events.push(event("round_start", tick));
+            }
+            let mut groups: HashMap<&str, Vec<&GameEvent>> = HashMap::new();
+            for ev in &events {
+                groups.entry(&ev.name).or_default().push(ev);
+            }
+            let (rounds, _) = rounds_from_events(&groups, demo_end);
+            assert_eq!(
+                rounds[0].officially_ended_tick, expected,
+                "official={official:?}, next={next:?}, demo_end={demo_end:?}"
+            );
+        }
+    }
 }
 
 #[cfg(test)]
