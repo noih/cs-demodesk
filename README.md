@@ -12,7 +12,6 @@ A Windows desktop tool for managing and analyzing Counter-Strike 2 demos. Explor
 ## Before you start
 
 - If export fails after a CS2 update, re-download HLAE from Settings; this usually fixes it.
-- Let tool downloads finish; closing the app or cancelling midway may leave the installation incomplete.
 - You cannot play while recording. Exports run one at a time.
 - Choose H.264 for playback in chat apps and browsers; NVIDIA encoding requires an NVIDIA GPU.
 
