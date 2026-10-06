@@ -421,6 +421,45 @@ try {
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), 'Table overflow stays inside the page');
     if (process.env.UI_SCREENSHOT_DIR) await page.screenshot({path:process.env.UI_SCREENSHOT_DIR+'/players-'+width+'.png'});
   }
+  const tableScrollers = page.locator('.rt-TableRoot [data-radix-scroll-area-viewport]');
+  const scrollBox = await tableScrollers.first().boundingBox();
+  const dragX = scrollBox.x + scrollBox.width / 2;
+  const dragY = scrollBox.y + 20;
+  await page.mouse.move(dragX, dragY);
+  await page.mouse.down();
+  await page.mouse.move(dragX - 120, dragY, {steps:5});
+  await page.mouse.up();
+  assert.ok(await tableScrollers.first().evaluate(el => el.scrollLeft > 0), 'Left-button dragging scrolls horizontally');
+  assert.equal(await tableScrollers.last().evaluate(el => el.scrollLeft), 0, 'Dragging affects only one team');
+  const releasedLeft = await tableScrollers.first().evaluate(el => el.scrollLeft);
+  await page.mouse.move(dragX - 180, dragY);
+  assert.equal(await tableScrollers.first().evaluate(el => el.scrollLeft), releasedLeft, 'Releasing the mouse stops dragging');
+  await page.mouse.down();
+  await page.mouse.move(scrollBox.x + scrollBox.width + 30, dragY, {steps:5});
+  await page.mouse.up();
+  assert.equal(await tableScrollers.first().evaluate(el => el.scrollLeft), 0, 'Dragging right outside the table remains captured and scrolls back');
+  assert.equal(await tableScrollers.first().evaluate(el => el.style.cursor), '', 'Releasing outside the table clears the dragging cursor');
+  assert.ok(await tableScrollers.first().evaluate(el => {
+    const event = new WheelEvent('wheel', {deltaY:120,bubbles:true,cancelable:true});
+    const before = el.scrollLeft;
+    el.dispatchEvent(event);
+    return !event.defaultPrevented && el.scrollLeft === before;
+  }), 'Vertical wheel keeps its native behavior');
+  await tableScrollers.first().evaluate(el => { el.scrollLeft = 0; });
+  for (const cell of [tables.first().locator('tbody th').first(), cells.first(), tables.first().getByRole('columnheader').first()]) {
+    await cell.dblclick();
+    assert.equal(await page.evaluate(() => getSelection().toString()), await cell.innerText(), 'Double-click selects the complete cell for copying');
+  }
+  await page.evaluate(() => getSelection().removeAllRanges());
+  await tables.first().locator('tbody th').first().hover();
+  const hoverStyle = await tables.first().locator('tbody tr').first().evaluate(row => ({
+    background: getComputedStyle(row).backgroundColor,
+    cells: [...row.children].map(cell => getComputedStyle(cell).backgroundColor),
+    bar: getComputedStyle(row.children[3]).backgroundImage,
+  }));
+  assert.notEqual(hoverStyle.background, 'rgba(0, 0, 0, 0)', 'Hover highlights the entire row, including the player name and gaps');
+  assert.ok(hoverStyle.cells.every(color => color === 'rgba(0, 0, 0, 0)'), 'Cells keep the continuous row highlight visible');
+  assert.match(hoverStyle.bar, /linear-gradient/, 'Hover preserves the stat bars');
   for (const category of ['Aim','Activity','Utility','Opening duels','Trades','Clutches','Duels']) {
     await page.getByRole('button',{name:category,exact:true}).click();
     assert.equal(await tables.count(),2);

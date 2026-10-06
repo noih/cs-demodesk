@@ -80,7 +80,7 @@ body {
   cursor: pointer;
 }
 .row-click:hover td,
-.row-hover:hover td {
+.row-hover:hover {
   background: var(--gray-a2);
 }
 .row-selected td {
@@ -649,6 +649,8 @@ video {
 
 .player-row.dead .player-name strong { color:color-mix(in srgb,var(--app-danger) 75%,var(--app-muted)); }
 
+.player-table [data-radix-scroll-area-viewport] { cursor:grab; }
+.player-table td, .player-table th { user-select:text; }
 .clutch-table .rt-TableCell:last-child { white-space:nowrap; text-align:left; }
 .clutch-table .rt-TableRowHeaderCell { white-space:normal; overflow-wrap:anywhere; }
 .clutch-table .rt-TableColumnHeaderCell:last-child { text-align:left; }

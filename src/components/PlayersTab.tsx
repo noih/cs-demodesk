@@ -1,5 +1,5 @@
 import { displayPlayerName } from '../playerName.ts';
-import { useState, type ReactNode } from 'react';
+import { useCallback, useState, type ReactNode } from 'react';
 import { useAppTheme } from '../AppTheme.tsx';
 import { Badge, Button, Card, Flex, Heading, Table, Text, Tooltip } from '@radix-ui/themes';
 import { useTranslation } from 'react-i18next';
@@ -17,6 +17,55 @@ export function PlayersTab({ parsed }: { parsed: ParsedDemo }) {
   const { t } = useTranslation();
   const [group, setGroup] = useState<(typeof GROUPS)[number]>('general');
   const [weaponGroup, setWeaponGroup] = useState<(typeof WEAPON_GROUPS)[number]>('all');
+  const tableRef = useCallback((element: HTMLDivElement | null) => {
+    const viewport = element?.querySelector<HTMLElement>('[data-radix-scroll-area-viewport]');
+    if (!viewport) return;
+    let drag: { id: number; x: number; left: number } | undefined;
+    const down = (event: PointerEvent) => {
+      if (event.pointerType !== 'mouse' || event.button !== 0 || viewport.scrollWidth <= viewport.clientWidth) return;
+      event.preventDefault();
+      drag = { id: event.pointerId, x: event.clientX, left: viewport.scrollLeft };
+    };
+    const move = (event: PointerEvent) => {
+      if (drag?.id !== event.pointerId) return;
+      if (!viewport.hasPointerCapture(event.pointerId)) {
+        if (Math.abs(event.clientX - drag.x) < 4) return;
+        viewport.setPointerCapture(event.pointerId);
+        viewport.style.cursor = 'grabbing';
+      }
+      viewport.scrollLeft = drag.left + drag.x - event.clientX;
+    };
+    const stop = () => { drag = undefined; viewport.style.cursor = ''; };
+    const selectCell = (event: MouseEvent) => {
+      const cell = event.target instanceof Element ? event.target.closest('td, th') : null;
+      if (!cell) return;
+      const text = document.createTreeWalker(cell, NodeFilter.SHOW_TEXT);
+      const first = text.nextNode();
+      if (!first) return;
+      let last = first;
+      while (text.nextNode()) last = text.currentNode;
+      const range = document.createRange();
+      range.setStart(first, 0);
+      range.setEnd(last, last.textContent?.length ?? 0);
+      const selection = window.getSelection();
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+    };
+    viewport.addEventListener('pointerdown', down);
+    viewport.addEventListener('pointermove', move);
+    viewport.addEventListener('pointerup', stop);
+    viewport.addEventListener('pointercancel', stop);
+    viewport.addEventListener('lostpointercapture', stop);
+    viewport.addEventListener('dblclick', selectCell);
+    return () => {
+      viewport.removeEventListener('pointerdown', down);
+      viewport.removeEventListener('pointermove', move);
+      viewport.removeEventListener('pointerup', stop);
+      viewport.removeEventListener('pointercancel', stop);
+      viewport.removeEventListener('lostpointercapture', stop);
+      viewport.removeEventListener('dblclick', selectCell);
+    };
+  }, []);
   const aim = (p: PlayerStats) => p.aim[weaponGroup] ?? EMPTY_AIM;
   const { colors: theme } = useAppTheme();
   const colors = playerColors(parsed.stats, theme.players.split(','));
@@ -114,7 +163,7 @@ export function PlayersTab({ parsed }: { parsed: ParsedDemo }) {
         <Heading data-text-role="subtitle" size="4">{parsed.score[team]}</Heading>
         {group === 'general' && <Text size="1" color="gray">{t('players.kills', { count: parsed.stats.filter(p => p.team === team).reduce((sum, p) => sum + p.kills, 0) })}</Text>}
       </Flex>
-      <Table.Root size="1" layout={group === 'clutches' ? 'auto' : 'fixed'} className={`nowrap-headers ${group === 'clutches' ? 'clutch-table' : ''}`} style={{ overflowX: 'auto', minWidth: 0 }}>
+      <Table.Root ref={tableRef} size="1" layout={group === 'clutches' ? 'auto' : 'fixed'} className={`player-table nowrap-headers ${group === 'clutches' ? 'clutch-table' : ''}`} style={{ overflowX: 'auto', minWidth: 0 }}>
         <colgroup><col style={{ width: group === 'clutches' ? '40%' : `${playerWidth}ch` }} />{columnWidths.map((width, i) => <col key={i} style={{ width: group === 'clutches' ? ['20%', '20%', '20%', '1%'][i] : `${width}ch` }} />)}</colgroup>
         <Table.Header><Table.Row>
           <Table.ColumnHeaderCell style={{ minWidth: 140 }}>{t('common.player')}</Table.ColumnHeaderCell>
