@@ -453,9 +453,7 @@ pub(crate) fn probe_output(
             result => {
                 child.kill()?;
                 child.wait()?;
-                if let Err(error) = result {
-                    return Err(error);
-                }
+                result?;
                 break None;
             }
         }

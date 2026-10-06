@@ -462,26 +462,37 @@ pub fn encode_to_size(
         ffmpeg_exe,
         input,
         output,
-        max_size_mb,
-        codec,
-        audio_kbps,
+        SizeOptions {
+            max_size_mb,
+            codec,
+            audio_kbps,
+        },
         &mut false,
         &mut |_| {},
         &mut Control::new(&AtomicBool::new(false), &mut |_| {}),
     )
 }
 
+pub struct SizeOptions<'a> {
+    pub max_size_mb: f64,
+    pub codec: &'a str,
+    pub audio_kbps: u32,
+}
+
 pub fn encode_to_size_with_progress(
     ffmpeg_exe: &Path,
     input: &Path,
     output: &Path,
-    max_size_mb: f64,
-    codec: &str,
-    audio_kbps: u32,
+    options: SizeOptions<'_>,
     compatible: &mut bool,
     progress: &mut dyn FnMut(f64),
     control: &mut Control<'_>,
 ) -> Result<SizeResult> {
+    let SizeOptions {
+        max_size_mb,
+        codec,
+        audio_kbps,
+    } = options;
     let mut reported = 0.0_f64;
     retry_stalled(control, |control| {
         if !CODECS.iter().any(|(name, _)| *name == codec) {
@@ -1059,9 +1070,11 @@ mod tests {
             &ffmpeg,
             &input,
             &cancelled_output,
-            0.5,
-            "libx264",
-            192,
+            SizeOptions {
+                max_size_mb: 0.5,
+                codec: "libx264",
+                audio_kbps: 192,
+            },
             &mut false,
             &mut |p| {
                 if p > 0.0 {
@@ -1112,9 +1125,11 @@ mod tests {
                 &ffmpeg,
                 &capture,
                 &output,
-                0.5,
-                codec,
-                192,
+                SizeOptions {
+                    max_size_mb: 0.5,
+                    codec: codec,
+                    audio_kbps: 192,
+                },
                 &mut false,
                 &mut |p| updates.push(p),
                 &mut Control::new(&AtomicBool::new(false), &mut |_| {}),
@@ -1172,9 +1187,11 @@ mod tests {
                     &ffmpeg,
                     &compatible_capture,
                     &fitted,
-                    0.5,
-                    codec,
-                    192,
+                    SizeOptions {
+                        max_size_mb: 0.5,
+                        codec: codec,
+                        audio_kbps: 192,
+                    },
                     &mut true,
                     &mut |_| {},
                     &mut Control::new(&AtomicBool::new(false), &mut |_| {}),

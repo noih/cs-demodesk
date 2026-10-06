@@ -53,8 +53,8 @@ impl<'a> Noise<'a> {
                         .map(|i| if delta[i] == 0 { 1. - frac[i] } else { frac[i] })
                         .product::<f32>();
                     let at = (cell[2] * 128 * 128 + cell[1] * 128 + cell[0]) * 4;
-                    for c in 0..2 {
-                        out[c] += self.pixels[at + c] as f32 / 255. * weight;
+                    for (c, channel) in out.iter_mut().enumerate() {
+                        *channel += self.pixels[at + c] as f32 / 255. * weight;
                     }
                 }
             }
@@ -158,6 +158,11 @@ pub struct Point {
     pub opacity_density: f32,
     pub absorption_density: f32,
 }
+pub struct SampleView<'a> {
+    pub view: &'a View,
+    pub dot_forward: f32,
+    pub depth_fade: f32,
+}
 fn noise_field(
     noise: &Noise<'_>,
     m: &Material,
@@ -165,9 +170,11 @@ fn noise_field(
     grid: [f32; 3],
     normal: [f32; 3],
     warped: [f32; 3],
-    view: &View,
-    dot_forward: f32,
+    sample: &SampleView<'_>,
 ) -> Result<f32> {
+    let SampleView {
+        view, dot_forward, ..
+    } = *sample;
     let t = m.speed * time;
     let local = sub(grid, [0.5; 3]);
     let mut high = scale(local, 7.);
@@ -228,12 +235,13 @@ pub fn point(
     cloud: &Cloud<'_>,
     noise: &Noise<'_>,
     material: &Material,
-    view: &View,
+    sample: &SampleView<'_>,
     frame: &EffectFrame,
     bullet: BulletSample,
-    dot_forward: f32,
-    depth_fade: f32,
 ) -> Result<Point> {
+    let SampleView {
+        view, depth_fade, ..
+    } = *sample;
     material.validate()?;
     let world = bullet.position;
     let grid = add(scale(sub(world, cloud.origin), 0.05), [16.; 3]);
@@ -283,8 +291,7 @@ pub fn point(
         uv,
         normal,
         he.warped_position,
-        view,
-        dot_forward,
+        sample,
     )?;
     let shape = cloud.parameters.shape;
     let w = shape[3].clamp(0.0001, 0.9999);
@@ -482,15 +489,17 @@ pub fn march_layers(
                 layer.cloud,
                 noise,
                 material,
-                &local_view,
+                &SampleView {
+                    view: &local_view,
+                    dot_forward,
+                    depth_fade: settings.depth_fade,
+                },
                 frame,
                 BulletSample {
                     position: add(position, offset),
                     opening,
                     glow,
                 },
-                dot_forward,
-                settings.depth_fade,
             )?;
             accumulate(p, settings.step * 0.25, &mut alpha, &mut absorption);
             if alpha > 0.991 {
@@ -519,15 +528,17 @@ pub fn march_layers(
                 layer.cloud,
                 noise,
                 material,
-                &local_view,
+                &SampleView {
+                    view: &local_view,
+                    dot_forward,
+                    depth_fade: settings.depth_fade,
+                },
                 frame,
                 BulletSample {
                     position: add(position, offset),
                     opening,
                     glow,
                 },
-                dot_forward,
-                settings.depth_fade,
             )?;
             accumulate(
                 p,

@@ -103,7 +103,10 @@ fn index(v: &Value, key: &str) -> Result<usize> {
     )?)
 }
 fn floats<const N: usize>(bytes: &[u8]) -> Result<Vec<[f32; N]>> {
-    ensure!(bytes.len() % (N * 4) == 0, "truncated PHYS float buffer");
+    ensure!(
+        bytes.len().is_multiple_of(N * 4),
+        "truncated PHYS float buffer"
+    );
     bytes
         .chunks_exact(N * 4)
         .map(|b| {

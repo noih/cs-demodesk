@@ -169,7 +169,7 @@ pub fn triangle(
 pub fn triangle_normal(vertices: [[f32; 3]; 3]) -> [f32; 3] {
     let n = cross(sub(vertices[1], vertices[0]), sub(vertices[2], vertices[0]));
     let square = (n[1] * n[1] + n[0] * n[0]) + n[2] * n[2];
-    if square <= 1.1754943508222875e-35 {
+    if square <= 1.175_494_35e-35 {
         return [0.; 3];
     }
     let inv = 1. / square.sqrt();

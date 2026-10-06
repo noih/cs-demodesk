@@ -1,5 +1,5 @@
 //! `cargo run --example encode_size -- <in.mp4> <out.mp4> <max_mb> <codec>` — exercise encode_to_size.
-use demodesk_core::render::encode::{encode_to_size_with_progress, Control};
+use demodesk_core::render::encode::{encode_to_size_with_progress, Control, SizeOptions};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 
@@ -11,9 +11,11 @@ fn main() {
         &ffmpeg,
         Path::new(&a[1]),
         Path::new(&a[2]),
-        a[3].parse().unwrap(),
-        &a[4],
-        192,
+        SizeOptions {
+            max_size_mb: a[3].parse().unwrap(),
+            codec: &a[4],
+            audio_kbps: 192,
+        },
         &mut false,
         &mut |_| {},
         &mut Control::new(&AtomicBool::new(false), &mut |line| {

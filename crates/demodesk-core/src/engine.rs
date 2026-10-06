@@ -44,7 +44,7 @@ pub enum Event {
         step: u8,
     },
     JobChanged {
-        job: RenderJob,
+        job: Box<RenderJob>,
     },
     SetupProgress {
         tool: SetupTool,
@@ -1734,7 +1734,9 @@ impl Engine {
         check_ascii_path(Path::new(&meta.path))?;
         let job = self.store.new_job(demo_id, highlight_ids, options)?;
         self.render_queue.lock().unwrap().push_back(job.id.clone());
-        self.notify.notify(Event::JobChanged { job: job.clone() });
+        self.notify.notify(Event::JobChanged {
+            job: Box::new(job.clone()),
+        });
         self.pump();
         Ok(job)
     }
@@ -1809,7 +1811,9 @@ impl Engine {
             .unwrap()
             .extend(jobs.iter().map(|j| j.id.clone()));
         for job in &jobs {
-            self.notify.notify(Event::JobChanged { job: job.clone() });
+            self.notify.notify(Event::JobChanged {
+                job: Box::new(job.clone()),
+            });
         }
         self.pump();
         Ok(jobs)
@@ -1900,7 +1904,9 @@ impl Engine {
         if let Err(e) = self.store.save_job(job) {
             eprintln!("could not save job {}: {e:#}", job.id);
         }
-        self.notify.notify(Event::JobChanged { job: job.clone() });
+        self.notify.notify(Event::JobChanged {
+            job: Box::new(job.clone()),
+        });
     }
 
     fn run_job(self: &Arc<Self>, mut job: RenderJob) {

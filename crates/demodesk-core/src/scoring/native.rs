@@ -76,7 +76,6 @@ pub fn evaluate(
                             prepared.assets.weapons.as_ref(),
                             frame,
                             scene,
-                            &scene.cpu_smoke,
                             visibility.map(|v| &v.world),
                         ),
                     );

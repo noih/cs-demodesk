@@ -185,7 +185,7 @@ fn decode_hex(text: &str) -> Option<Vec<u8>> {
         b'A'..=b'F' => Some(b - b'A' + 10),
         _ => None,
     };
-    if text.len() % 2 != 0 || text.len() > 16 * 1024 * 1024 {
+    if !text.len().is_multiple_of(2) || text.len() > 16 * 1024 * 1024 {
         return None;
     }
     text.as_bytes()

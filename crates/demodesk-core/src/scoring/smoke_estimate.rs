@@ -6,6 +6,7 @@ use crate::analysis::{
     line_of_sight::{Occlusion, World},
     native_body::{PlayerFrame, SceneOcclusion},
 };
+use crate::smoke::ShotCoverage;
 use serde_json::Value;
 
 pub struct Estimator {
@@ -35,10 +36,10 @@ impl Estimator {
         weapons: Option<&Value>,
         players: &[PlayerFrame],
         scene: &SceneOcclusion,
-        smoke: &impl crate::smoke::ShotCoverage,
         world: Option<&World>,
     ) -> SmokeVerdict {
         use SmokeVerdict::*;
+        let smoke = &scene.cpu_smoke;
         if smoke.is_empty_at_fire() {
             return Clear;
         }
@@ -58,20 +59,11 @@ impl Estimator {
         else {
             return Unknown;
         };
-        self.paths(
-            shot.tick,
-            &shot.player_id,
-            fire.origin,
-            &candidates,
-            players,
-            scene,
-            world,
-        )
+        self.paths(shot, fire.origin, &candidates, players, scene, world)
     }
     fn paths(
         &self,
-        tick: i32,
-        shooter: &str,
+        shot: &Shot,
         origin: [f32; 3],
         candidates: &[([f32; 3], [f32; 3])],
         players: &[PlayerFrame],
@@ -79,6 +71,8 @@ impl Estimator {
         world: &World,
     ) -> SmokeVerdict {
         use SmokeVerdict::*;
+        let tick = shot.tick;
+        let shooter = &shot.player_id;
         let first = self
             .explosions
             .partition_point(|(t, _)| f64::from(*t) < f64::from(tick) - self.rate * 5.);
@@ -116,7 +110,7 @@ impl Estimator {
             // Current body poses are sufficient for this estimate; uncertain penetration is excluded.
             let ray = std::array::from_fn(|i| point[i] - origin[i]);
             let mut blocked = false;
-            for player in players.iter().filter(|p| p.player_id != shooter) {
+            for player in players.iter().filter(|p| &p.player_id != shooter) {
                 for body in &player.capsules {
                     match crate::analysis::collision::capsule::contacts(
                         body.a.map(|v| v as f32),
@@ -164,13 +158,20 @@ mod tests {
         .unwrap();
         let scene = SceneOcclusion::default();
         let estimate = Estimator::new(&[], 64.);
+        let shot = |tick| Shot {
+            tick,
+            player_id: "a".into(),
+            weapon: "ak47".into(),
+            round: None,
+            direction: None,
+        };
         let candidates = [([100., 0., 0.], [100., 0., 0.])];
         assert_eq!(
-            estimate.paths(640, "a", [0.; 3], &candidates, &[], &scene, &empty),
+            estimate.paths(&shot(640), [0.; 3], &candidates, &[], &scene, &empty),
             SmokeVerdict::Crossing
         );
         assert_eq!(
-            estimate.paths(640, "a", [100., 0., 0.], &candidates, &[], &scene, &empty),
+            estimate.paths(&shot(640), [100., 0., 0.], &candidates, &[], &scene, &empty),
             SmokeVerdict::Crossing
         );
         let wall = World::new(vec![Triangle {
@@ -179,7 +180,7 @@ mod tests {
         }])
         .unwrap();
         assert_eq!(
-            estimate.paths(640, "a", [0.; 3], &candidates, &[], &scene, &wall),
+            estimate.paths(&shot(640), [0.; 3], &candidates, &[], &scene, &wall),
             SmokeVerdict::Unknown
         );
         let dynamic = SceneOcclusion {
@@ -190,7 +191,7 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(
-            estimate.paths(640, "a", [0.; 3], &candidates, &[], &dynamic, &empty),
+            estimate.paths(&shot(640), [0.; 3], &candidates, &[], &dynamic, &empty),
             SmokeVerdict::Unknown
         );
         let he = Estimator::new(
@@ -200,16 +201,16 @@ mod tests {
             64.,
         );
         assert_eq!(
-            he.paths(640, "a", [0.; 3], &candidates, &[], &scene, &empty),
+            he.paths(&shot(640), [0.; 3], &candidates, &[], &scene, &empty),
             SmokeVerdict::Unknown
         );
         assert_eq!(
-            he.paths(921, "a", [0.; 3], &candidates, &[], &scene, &empty),
+            he.paths(&shot(921), [0.; 3], &candidates, &[], &scene, &empty),
             SmokeVerdict::Crossing
         );
         let mixed = [([2000., 0., 0.], [2000., 0., 0.]), candidates[0]];
         assert_eq!(
-            he.paths(640, "a", [0.; 3], &mixed, &[], &scene, &empty),
+            he.paths(&shot(640), [0.; 3], &mixed, &[], &scene, &empty),
             SmokeVerdict::Unknown
         );
         let unknown = Estimator::new(
@@ -217,7 +218,7 @@ mod tests {
             64.,
         );
         assert_eq!(
-            unknown.paths(640, "a", [0.; 3], &candidates, &[], &scene, &empty),
+            unknown.paths(&shot(640), [0.; 3], &candidates, &[], &scene, &empty),
             SmokeVerdict::Unknown
         );
     }

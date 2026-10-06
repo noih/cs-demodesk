@@ -68,7 +68,7 @@ fn clip(query: &mut Query, delta: [f32; 3], fraction: f32) -> Result<[f32; 3]> {
     }
     let mut truncate = None;
     for (i, interval) in query.intervals.iter_mut().enumerate() {
-        interval.segment.start = inverse * interval.segment.start;
+        interval.segment.start *= inverse;
         interval.segment.end = min(inverse * interval.segment.end, 1.);
         if truncate.is_none() && interval.segment.start > 1. {
             truncate = Some(i);

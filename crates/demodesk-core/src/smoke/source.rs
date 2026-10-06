@@ -48,7 +48,7 @@ pub fn replay(
         .prop_controller
         .id_to_name
         .iter()
-        .filter_map(|(id, name)| {
+        .filter(|(_, name)| {
             matches!(
                 name.as_str(),
                 "m_bDidSmokeEffect"
@@ -56,13 +56,15 @@ pub fn replay(
                     | "m_nVoxelFrameDataSize"
                     | "m_vSmokeDetonationPos"
             )
-            .then(|| (*id, name.clone()))
         })
+        .map(|(id, name)| (*id, name.clone()))
         .collect();
     let name_of = |id: u32| {
         if (SMOKE_VOXELS_ID..SMOKE_VOXELS_ID + SMOKE_VOXELS_LIMIT).contains(&id) {
             Some(format!("smokeVoxel/{}", id - SMOKE_VOXELS_ID))
-        } else { selected.get(&id).cloned() }
+        } else {
+            selected.get(&id).cloned()
+        }
     };
     let mut fields = Vec::<Field>::new();
     let mut ids = HashMap::new();
@@ -106,12 +108,7 @@ pub fn replay(
                         updates.push((e.entity_id, e.serial, "$present".to_string(), vec![0, 1]));
                         for (id, value) in &e.props {
                             if let Some(name) = name_of(*id) {
-                                updates.push((
-                                    e.entity_id,
-                                    e.serial,
-                                    name,
-                                    compact::value(value)?,
-                                ));
+                                updates.push((e.entity_id, e.serial, name, compact::value(value)?));
                             }
                         }
                     }
@@ -226,7 +223,11 @@ mod tests {
         let bytes = std::fs::read(std::env::var("SMOKE_DEMO").unwrap()).unwrap();
         let start = std::time::Instant::now();
         let result = replay(&DemoParser::new(), &bytes, 0, 10000, 64., &[]).unwrap();
-        eprintln!("elapsed_us={} hash={}", start.elapsed().as_micros(), sha1_smol::Sha1::from(serde_json::to_vec(&result).unwrap()).digest());
+        eprintln!(
+            "elapsed_us={} hash={}",
+            start.elapsed().as_micros(),
+            sha1_smol::Sha1::from(serde_json::to_vec(&result).unwrap()).digest()
+        );
         let covered = result
             .iter()
             .filter(|s| s.cells.as_ref().is_some_and(|c| !c.is_empty()))

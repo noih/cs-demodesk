@@ -145,7 +145,7 @@ pub fn high_explosives(
             continue;
         }
         let age = frame.now - h.position_time[3];
-        ensure!(age >= 0. && age < 5., "HE sample outside ring lifetime");
+        ensure!((0. ..5.).contains(&age), "HE sample outside ring lifetime");
         if age >= context.cloud_age - 0.4 {
             continue;
         }

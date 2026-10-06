@@ -154,10 +154,11 @@ pub(crate) fn attach(
                         .iter()
                         .filter_map(|r| {
                             let target_id = r.steamid()?;
-                            if r.num("team_num")? != 5.0 - team
-                                || (!(r.num("life_state") == Some(0.0) && r.num("health")? > 0.0)
-                                    && !deaths.contains(&(tick, target_id.clone())))
-                            {
+                            if r.num("team_num")? != 5.0 - team {
+                                return None;
+                            }
+                            let alive = r.num("life_state") == Some(0.0) && r.num("health")? > 0.0;
+                            if !alive && !deaths.contains(&(tick, target_id.clone())) {
                                 return None;
                             }
                             // ponytail: estimated torso centre; use measured body attachments when available here.

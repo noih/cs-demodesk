@@ -16,8 +16,8 @@ const AXES: [[i32; 3]; 6] = [
 fn index(p: [i32; 3]) -> usize {
     let mut out = 0;
     for bit in 0..5 {
-        for axis in 0..3 {
-            out |= (((p[axis] >> bit) & 1) as usize) << (bit * 3 + axis);
+        for (axis, coordinate) in p.iter().enumerate() {
+            out |= (((coordinate >> bit) & 1) as usize) << (bit * 3 + axis);
         }
     }
     out
@@ -29,8 +29,9 @@ fn coordinates(i: usize) -> [i32; 3] {
             .sum()
     })
 }
-pub(super) fn lookup() -> &'static Vec<([i32; 3], [Option<usize>; 6])> {
-    static LOOKUP: OnceLock<Vec<([i32; 3], [Option<usize>; 6])>> = OnceLock::new();
+type CellNeighbours = ([i32; 3], [Option<usize>; 6]);
+pub(super) fn lookup() -> &'static Vec<CellNeighbours> {
+    static LOOKUP: OnceLock<Vec<CellNeighbours>> = OnceLock::new();
     LOOKUP.get_or_init(|| {
         (0..N)
             .map(|i| {
@@ -619,9 +620,9 @@ impl Density {
                     } else {
                         0.
                     };
-                    for axis in 0..3 {
+                    for (axis, component) in force.iter_mut().enumerate() {
                         if blocked_axes & (1 << axis) != 0 {
-                            force[axis] = 0.;
+                            *component = 0.;
                         }
                     }
                     [vx, vy, vz] = force;
@@ -655,7 +656,9 @@ mod tests {
         assert!(sim.estimated_entry(ray.0, ray.1).is_some());
         assert!(sim.estimated_entry_weighted(ray.0, ray.1, 0.1).is_none());
         assert!(sim.estimated_entry_weighted(ray.0, ray.1, 0.5).is_some());
-        assert!(sim.estimated_entry_weighted(ray.0, ray.1, f32::NAN).is_none());
+        assert!(sim
+            .estimated_entry_weighted(ray.0, ray.1, f32::NAN)
+            .is_none());
         assert_eq!(
             sim.estimated_entry([10., 10., 10.], ray.1),
             Some([10., 10., 10.])
