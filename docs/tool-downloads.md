@@ -6,7 +6,7 @@ latest published release is the fallback. These are distinct endpoints:
 `releases/download/latest/<asset>` targets the rolling tag, whereas
 `releases/latest/download/<asset>` follows GitHub's latest release selection.
 
-Choose exactly one compatible asset: FFmpeg win64 GPL static, HLAE portable ZIP,
+Choose exactly one compatible asset: FFmpeg win64 GPL shared, HLAE portable ZIP,
 and Source 2 Viewer CLI for the target platform. Reject missing or ambiguous
 matches and report available asset names instead of guessing an architecture or
 variant. A download returning 404 or 410 refreshes metadata once. Other failures
@@ -75,7 +75,11 @@ apps on the affected machine to determine whether package context matters.
 Each tool downloads into one fixed `.installing` sibling directory. The ZIP must
 extract successfully and contain the required binaries before installation is
 replaced. HLAE needs HLAE.exe and x64/AfxHookSource2.dll; FFmpeg needs ffmpeg.exe
-and ffprobe.exe in the same directory; Source 2 Viewer needs its CLI executable.
+and ffprobe.exe in the same directory, along with the shared build DLLs. Both
+FFmpeg executables must pass a startup check before replacement. Source 2 Viewer
+needs its CLI executable.
+ZIP extraction retains the complete shared build, including its DLLs. Existing
+static FFmpeg installations remain usable until the user downloads an update.
 An incomplete directory does not count as an installed tool.
 
 Replacement moves the old directory to one `.previous` sibling. A failed move
@@ -87,3 +91,14 @@ are not automatically deleted.
 
 Verification: `cargo test -p demodesk-core render::setup::tests` covers asset
 selection, incomplete installs, corrupt ZIPs, rollback and interrupted swaps.
+
+Shared FFmpeg download/startup verification (uses a dedicated test directory):
+
+```powershell
+$env:DEMODESK_TEST_FFMPEG_DIR = "$PWD/target/ffmpeg-shared-check"
+cargo test -p demodesk-core --lib render::setup::tests::real_shared_ffmpeg_install -- --ignored --nocapture
+```
+
+DLL additions, changes and removals invalidate the cached FFmpeg startup check.
+Use the installed executable with the checks in [video encoding](video-encoding.md)
+to exercise CPU and NVIDIA encoding.

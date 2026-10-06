@@ -1,6 +1,6 @@
 //! Downloads the third-party binaries into `<tools_dir>`:
 //!   hlae/     latest advancedfx release (github.com/advancedfx/advancedfx)
-//!   ffmpeg/   BtbN static win64 build (github.com/BtbN/FFmpeg-Builds)
+//!   ffmpeg/   BtbN shared win64 build (github.com/BtbN/FFmpeg-Builds)
 //!   vrf/      Source2Viewer-CLI (github.com/ValveResourceFormat), reads radar images out of the game's VPK
 
 use anyhow::{anyhow, Context, Result};
@@ -490,6 +490,18 @@ fn install_archive_with_replace(
             dir.display()
         ));
     }
+    if url.ends_with("-win64-gpl-shared.zip") {
+        let exe = super::paths::find_file(&staged, "ffmpeg.exe", 4)
+            .ok_or_else(|| anyhow!("shared FFmpeg archive is missing ffmpeg.exe"))?;
+        for path in [&exe, &exe.with_file_name("ffprobe.exe")] {
+            anyhow::ensure!(!cancel.load(Ordering::Relaxed), "Download cancelled");
+            anyhow::ensure!(
+                probe_stdout(path, "-version").is_some(),
+                "Shared FFmpeg cannot start {}; required DLLs may be missing or incompatible",
+                path.display()
+            );
+        }
+    }
     fs::write(staged.join("install-info.json"), serde_json::json!({ "tag": tag, "url": url, "installedAt": chrono::Utc::now().to_rfc3339() }).to_string())?;
     anyhow::ensure!(!cancel.load(Ordering::Relaxed), "Download cancelled");
     before_replace()?;
@@ -609,8 +621,8 @@ fn ffmpeg_installed(dir: &Path) -> bool {
 fn ffmpeg_asset(release: &GithubRelease) -> Result<&GithubAsset> {
     unique_asset(
         release,
-        |name| name.starts_with("ffmpeg-") && name.ends_with("-win64-gpl.zip"),
-        "static win64 GPL FFmpeg ZIP",
+        |name| name.starts_with("ffmpeg-") && name.ends_with("-win64-gpl-shared.zip"),
+        "shared win64 GPL FFmpeg ZIP",
     )
 }
 
@@ -1017,18 +1029,79 @@ mod tests {
 
     #[test]
     fn ffmpeg_selection_accepts_versioned_names_and_rejects_other_builds() {
-        let name = "ffmpeg-N-126475-g35b7df64a0-win64-gpl.zip";
+        let name = "ffmpeg-N-126475-g35b7df64a0-win64-gpl-shared.zip";
         let current = release(&[
-            "ffmpeg-N-126475-win64-gpl-shared.zip",
+            "ffmpeg-N-126475-win64-gpl.zip",
             "ffmpeg-N-126475-win64-lgpl.zip",
             "ffmpeg-N-126475-winarm64-gpl.zip",
             "ffmpeg-n9.0.1-win64-gpl-9.0.zip",
             name,
         ]);
         assert_eq!(ffmpeg_asset(&current).unwrap().name, name);
-        assert!(ffmpeg_asset(&release(&["ffmpeg-master-latest-win64-gpl.zip"])).is_ok());
+        assert!(ffmpeg_asset(&release(&["ffmpeg-master-latest-win64-gpl-shared.zip"])).is_ok());
         assert!(ffmpeg_asset(&release(&["ffmpeg-master-latest-win64-lgpl.zip"])).is_err());
-        assert!(ffmpeg_asset(&release(&[name, "ffmpeg-master-latest-win64-gpl.zip"])).is_err());
+        assert!(ffmpeg_asset(&release(&[
+            name,
+            "ffmpeg-master-latest-win64-gpl-shared.zip"
+        ]))
+        .is_err());
+    }
+
+    #[test]
+    fn broken_shared_build_preserves_static_installation() {
+        use std::io::Write;
+        let root = tempfile::tempdir().unwrap();
+        let dir = root.path().join("ffmpeg");
+        fs::create_dir(&dir).unwrap();
+        for name in ["ffmpeg.exe", "ffprobe.exe"] {
+            fs::write(dir.join(name), b"existing static build").unwrap();
+        }
+        let work = root.path().join("stage");
+        fs::create_dir(&work).unwrap();
+        let mut zip = zip::ZipWriter::new(fs::File::create(work.join("download.zip")).unwrap());
+        for name in ["version/bin/ffmpeg.exe", "version/bin/ffprobe.exe"] {
+            zip.start_file(name, zip::write::SimpleFileOptions::default())
+                .unwrap();
+            zip.write_all(b"broken shared executable").unwrap();
+        }
+        zip.finish().unwrap();
+        let error = install_archive(
+            &dir, &work, "latest",
+            "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl-shared.zip",
+            ffmpeg_installed, &AtomicBool::new(false),
+        ).unwrap_err();
+        assert!(error.to_string().contains("Shared FFmpeg cannot start"));
+        assert_eq!(
+            fs::read(dir.join("ffmpeg.exe")).unwrap(),
+            b"existing static build"
+        );
+    }
+
+    #[test]
+    #[ignore = "downloads shared FFmpeg into DEMODESK_TEST_FFMPEG_DIR"]
+    fn real_shared_ffmpeg_install() {
+        let dir = PathBuf::from(
+            std::env::var_os("DEMODESK_TEST_FFMPEG_DIR").expect("set test directory"),
+        );
+        let cancel = Arc::new(AtomicBool::new(false));
+        install_ffmpeg(
+            &dir,
+            true,
+            &mut Progress {
+                cancel: &cancel,
+                report: &mut |line| println!("{line}"),
+                workspace: None,
+                before_replace: None,
+            },
+        )
+        .unwrap();
+        let exe = super::super::paths::find_file(&dir, "ffmpeg.exe", 4).unwrap();
+        assert!(probe_stdout(&exe, "-version").is_some());
+        assert!(probe_stdout(&exe.with_file_name("ffprobe.exe"), "-version").is_some());
+        assert!(check_update(super::super::SetupTool::Ffmpeg, &exe)
+            .unwrap()
+            .installed
+            .is_some());
     }
 
     #[test]

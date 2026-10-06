@@ -39,11 +39,25 @@ pub fn fingerprint(paths: &ToolPaths, tool: SetupTool) -> Fingerprint {
         if tool == SetupTool::Hlae {
             files.push(exe.parent().unwrap().join("x64/AfxHookSource2.dll"));
         } else if tool == SetupTool::Ffmpeg {
+            let bin = exe.parent().unwrap().to_path_buf();
             files.push(exe.with_file_name(if cfg!(windows) {
                 "ffprobe.exe"
             } else {
                 "ffprobe"
             }));
+            // Shared builds need their DLLs; changes must invalidate the startup check.
+            let mut dlls: Vec<_> = std::fs::read_dir(bin)
+                .into_iter()
+                .flatten()
+                .filter_map(Result::ok)
+                .map(|entry| entry.path())
+                .filter(|path| {
+                    path.extension()
+                        .is_some_and(|ext| ext.eq_ignore_ascii_case("dll"))
+                })
+                .collect();
+            dlls.sort();
+            files.extend(dlls);
         }
     }
     Fingerprint(
@@ -194,6 +208,27 @@ pub fn environment() -> serde_json::Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn shared_ffmpeg_dll_changes_invalidate_cached_check() {
+        let dir = tempfile::tempdir().unwrap();
+        let exe = dir.path().join("ffmpeg.exe");
+        std::fs::write(&exe, b"ffmpeg").unwrap();
+        std::fs::write(dir.path().join("ffprobe.exe"), b"ffprobe").unwrap();
+        let paths = ToolPaths {
+            ffmpeg_exe: Some(exe),
+            ..Default::default()
+        };
+        let static_build = fingerprint(&paths, SetupTool::Ffmpeg);
+        let dll = dir.path().join("avcodec-63.dll");
+        std::fs::write(&dll, b"shared library").unwrap();
+        let shared_build = fingerprint(&paths, SetupTool::Ffmpeg);
+        assert_ne!(static_build, shared_build);
+        std::fs::write(&dll, b"updated library").unwrap();
+        assert_ne!(shared_build, fingerprint(&paths, SetupTool::Ffmpeg));
+        std::fs::remove_file(&dll).unwrap();
+        assert_eq!(static_build, fingerprint(&paths, SetupTool::Ffmpeg));
+    }
 
     #[test]
     fn report_explains_cache_state_and_only_includes_useful_check_output() {
