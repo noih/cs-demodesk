@@ -61,7 +61,8 @@ try {
       if(cmd==='open_url'){window.openedUrl=args.url;return;}
       if(cmd==='open_path'){window.openedPath=args.path;return;}
       if(cmd==='get_status')return window.missingTools ? {...status,ok:false,missingRenderTools:window.missingRenderTools ?? ['HLAE','ffmpeg']} : status;
-      if(cmd==='get_storage_bytes'){if(window.holdStorage)await new Promise(resolve=>window.releaseStorage=resolve);return {parsedBytes:1048576,anomalyBytes:0,clipsBytes:0,radarBytes:0};}
+      if(cmd==='get_storage_bytes'){if(window.holdStorage)await new Promise(resolve=>window.releaseStorage=resolve);return window.storageBytes ?? {parsedBytes:1048576,anomalyBytes:0,clipsBytes:0,radarBytes:0};}
+      if(['clear_all_analysis','clear_anomaly_data','clear_all_clips','clear_radar'].includes(cmd))return new Promise((resolve,reject)=>{window.releaseClear=()=>resolve(1048576);window.rejectClear=()=>reject('Clear failed');});
       if(cmd==='tool_diagnostics')return JSON.stringify({environment:{appVersion:'test'},tools:Object.fromEntries(['hlae','ffmpeg','vrf'].map(tool=>[tool,{path:window.toolPaths?.[tool+'Exe']??null,cache:window.toolChecks?.[tool]?'valid':'missing',lastCheck:window.toolChecks?.[tool]??null}]))});
       if(cmd==='check_tools' && window.holdToolCheck)await new Promise(resolve=>window.releaseToolCheck=resolve);
       if(cmd==='get_settings' || cmd==='check_tools')return { toolChecks:window.toolChecks ?? Object.fromEntries(['hlae','ffmpeg','vrf'].map(tool=>[tool,{ok:Boolean(window.toolPaths?.[tool+'Exe']),path:window.toolPaths?.[tool+'Exe']??null}])),settings:window.savedSettings ?? {language:'en',replayFolders:[],scanGameReplays:true},doctor:{ok:true,problems:[],paths:window.toolPaths || {}},detected:{},setup:window.setupState ?? {},dataDir:'E:/data',dataDirOverride:window.selectedDataDirectory ?? null,restartRequired:Boolean(window.selectedDataDirectory && window.selectedDataDirectory!=='E:/data'),defaultDataDir:'E:/data',parsedBytes:0,anomalyBytes:0,clipsBytes:0,radarBytes:0 };
@@ -772,6 +773,23 @@ try {
   assert.equal(await toolCheckCalls(), checksBeforeSettings, 'Entering Settings reads cached tool readiness without running checks');
 
   const settingsPage = page.locator('.settings-page');
+  await page.evaluate(() => { window.storageBytes = {parsedBytes:1048576,anomalyBytes:1048576,clipsBytes:1048576,radarBytes:1048576}; });
+  for (const [index, command] of ['clear_all_analysis','clear_anomaly_data','clear_all_clips','clear_radar'].entries()) {
+    const empty = settingsPage.getByRole('button', {name:'Empty',exact:true}).nth(index);
+    for (const fail of [false, true]) {
+      await empty.click();
+      await page.getByRole('alertdialog').getByRole('button', {name:'Empty',exact:true}).click();
+      await page.waitForFunction(cmd => window.testCalls.some(c => c.cmd === cmd), command);
+      assert.equal(await empty.isDisabled(), true, 'Storage clear stays disabled while deletion is pending');
+      const calls = await page.evaluate(cmd => window.testCalls.filter(c => c.cmd === cmd).length, command);
+      await empty.evaluate(button => { button.click(); button.click(); });
+      assert.equal(await page.getByRole('alertdialog').count(), 0, 'Repeated clicks cannot reopen the clear dialog');
+      assert.equal(await page.evaluate(cmd => window.testCalls.filter(c => c.cmd === cmd).length, command), calls);
+      await page.evaluate(fail => fail ? window.rejectClear() : window.releaseClear(), fail);
+      await page.waitForFunction(index => ![...document.querySelectorAll('.settings-page button')].filter(button => button.textContent === 'Empty')[index].disabled, index);
+    }
+  }
+  await page.getByRole('alert').filter({hasText:'Clear failed'}).getByRole('button', {name:'Close',exact:true}).click();
   assert.equal(await settingsPage.getByText('Anomaly data', {exact:true}).count(), 1);
   await settingsPage.getByText('Anomaly data', {exact:true}).locator('xpath=following-sibling::button[1]').click();
   assert.equal(await page.evaluate(()=>window.openedPath.replaceAll('\\','/')), 'E:/data/analysis');

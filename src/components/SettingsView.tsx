@@ -107,6 +107,19 @@ function PathField({ label, value, placeholder, hint, note, description, action,
 /** Storage categories share the data folder selected above them. */
 function StorageRow({ label, what, path, bytes, confirm, onClear }: { label: string; what: string; path: string; bytes: number | undefined; confirm: string; onClear: () => Promise<void> }) {
   const { t } = useTranslation();
+  const clearingRef = useRef(false);
+  const [clearing, setClearing] = useState(false);
+  const clear = async () => {
+    if (clearingRef.current) return;
+    clearingRef.current = true;
+    setClearing(true);
+    try {
+      await onClear();
+    } finally {
+      clearingRef.current = false;
+      setClearing(false);
+    }
+  };
   return (
     <>
       <Text size="2" weight="medium" style={{ minWidth: 0 }}>{label}</Text>
@@ -115,7 +128,7 @@ function StorageRow({ label, what, path, bytes, confirm, onClear }: { label: str
         <i aria-hidden="true" className="bi bi-folder2-open app-icon"  />
       </IconButton>
       <ConfirmDialog title={t('settings.emptyTitle', { what })} description={confirm} confirmLabel={t('settings.empty')}
-        onConfirm={() => void onClear()} trigger={<Button size="2" variant="outline" color="red" disabled={bytes === undefined || bytes === 0}>{t('settings.empty')}</Button>} />
+        onConfirm={() => void clear()} trigger={<Button size="2" variant="outline" color="red" aria-busy={clearing} disabled={clearing || bytes === undefined || bytes === 0}>{t('settings.empty')}</Button>} />
     </>
   );
 }
