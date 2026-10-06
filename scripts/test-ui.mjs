@@ -391,6 +391,9 @@ try {
     await page.getByRole('button', {name:/^About/}).click();
     const github = page.getByRole('dialog').getByRole('button', {name:'GitHub',exact:true});
     await github.waitFor();
+    await checkingNotice.waitFor({state:'detached'});
+    assert.equal(await page.getByText('Microsoft Store currently offers no updates for this installation.', {exact:true}).count(), 0, 'No Store update needs no notice');
+    assert.equal(await page.getByText('You’re up to date.', {exact:true}).count(), 0, 'No update needs no notice');
     assert.equal(await github.getAttribute('data-accent-color'), 'gray');
     await github.click();
     assert.equal(await page.evaluate(() => window.openedUrl), 'https://github.com/noih/cs-demodesk');

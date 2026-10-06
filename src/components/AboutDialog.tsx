@@ -87,8 +87,6 @@ export function AboutDialog() {
           <span aria-hidden="true" className="app-spinner app-spinner-1" />
           <Text size="2" color="gray">{t('about.updateChecking')}</Text>
         </Flex>}
-        {update !== 'failed' && update?.status === 'storeCurrent' && <Text as="p" size="2" color="gray" mt="3">{t('about.storeCurrent')}</Text>}
-        {update !== 'failed' && update?.status === 'current' && <Text as="p" size="2" color="gray" mt="3">{t('about.updateCurrent')}</Text>}
         {update === 'failed' && <Text as="p" size="2" color="gray" mt="3">{t('about.updateFailed')}</Text>}
         <Text as="div" size="2" weight="medium" mt="5" mb="2">
           {t('about.thirdParty')}
