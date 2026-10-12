@@ -15,6 +15,37 @@ use csgoproto::maps::STICKER_ID_TO_NAME;
 use csgoproto::maps::WEAPINDICIES;
 use std::fmt;
 
+fn dropped_equipment(class: &str, owner: Option<&Variant>, item: Option<&Variant>) -> Option<&'static str> {
+    if class.contains("Projectile") || class == "CInferno" { return None; }
+    // Source 2 transmits invalid handles as 24-bit all-ones; accept the full sentinel too.
+    if !matches!(owner, Some(Variant::U32(0x00ff_ffff | u32::MAX))) { return None; }
+    let Some(Variant::U32(item)) = item else { return None; };
+    // C4 has its own replay state. Contracts and other economy items are not weapons.
+    if !matches!(item, 1..=48 | 57 | 59..=61 | 63..=64 | 500..=526) { return None; }
+    WEAPINDICIES.get(item).copied()
+}
+
+#[cfg(test)]
+mod dropped_equipment_tests {
+    use super::*;
+
+    #[test]
+    fn only_ownerless_weapons_and_utility_are_dropped() {
+        let invalid = Variant::U32(u32::MAX);
+        for (id, name) in [(7, "AK-47"), (43, "Flashbang"), (45, "Smoke Grenade"), (48, "Incendiary Grenade")] {
+            assert_eq!(dropped_equipment("CSmokeGrenade", Some(&invalid), Some(&Variant::U32(id))), Some(name));
+            assert_eq!(dropped_equipment("CSmokeGrenade", Some(&Variant::U32(0x00ff_ffff)), Some(&Variant::U32(id))), Some(name));
+            assert_eq!(dropped_equipment("CSmokeGrenade", Some(&Variant::U32(10)), Some(&Variant::U32(id))), None);
+            assert_eq!(dropped_equipment("CSmokeGrenade", None, Some(&Variant::U32(id))), None);
+            assert_eq!(dropped_equipment("CSmokeGrenadeProjectile", Some(&invalid), Some(&Variant::U32(id))), None);
+        }
+        for id in [49, 50, 62, 999] {
+            assert_eq!(dropped_equipment("CWeapon", Some(&invalid), Some(&Variant::U32(id))), None);
+        }
+        assert_eq!(dropped_equipment("CWeapon", Some(&invalid), None), None);
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum PropType {
     Team,
@@ -281,8 +312,25 @@ impl<'a> SecondPassParser<'a> {
     }
 
     pub fn collect_projectiles(&mut self) {
-        for projectile_entid in &self.projectiles {
-            let grenade_type = match self.find_grenade_type(projectile_entid) {
+        // Equipment has the same networked cell coordinates as projectiles. Only
+        // ownerless items are on the ground; missing ownership is not evidence of a drop.
+        let dropped: Vec<(i32, String)> = if self.parse_grenades {
+            self.entities.iter().flatten().filter_map(|ent| {
+                let class = &self.cls_by_id.get(ent.cls_id as usize)?.name;
+                let ids = &self.prop_controller.special_ids;
+                let owner = self.get_prop_from_ent(&ids.h_owner_entity?, &ent.entity_id).ok();
+                let item = self.get_prop_from_ent(&ids.item_def?, &ent.entity_id).ok();
+                Some((ent.entity_id, format!("dropped:{}", dropped_equipment(class, owner.as_ref(), item.as_ref())?)))
+            }).collect()
+        } else { Vec::new() };
+        let mut entities: Vec<(i32, Option<String>)> = self.projectiles.iter()
+            .filter(|id| !dropped.iter().any(|(dropped_id, _)| dropped_id == *id))
+            .map(|id| (*id, None)).collect();
+        entities.extend(dropped.into_iter().map(|(id, name)| (id, Some(name))));
+        for (entity_id, dropped_name) in entities {
+            let projectile_entid = &entity_id;
+            let is_dropped = dropped_name.is_some();
+            let grenade_type = match dropped_name.or_else(|| self.find_grenade_type(projectile_entid)) {
                 Some(t) => {
                     if !t.contains("Projectile") && !self.parse_grenades {
                         continue;
@@ -294,16 +342,16 @@ impl<'a> SecondPassParser<'a> {
             };
             let steamid = match self.find_thrower_steamid(projectile_entid) {
                 Ok(u) => u,
-                _ if grenade_type == "CInferno" => 0,
+                _ if grenade_type == "CInferno" || is_dropped => 0,
                 _ => continue,
             };
             let name = match self.find_thrower_name(projectile_entid) {
                 Ok(x) => x,
-                _ if grenade_type == "CInferno" => String::new(),
+                _ if grenade_type == "CInferno" || is_dropped => String::new(),
                 _ => continue,
             };
-            // Projectiles are the only ones with coordinates others map to 0.0, map them to None as it is clearer.
-            let (x, y, z) = if grenade_type.contains("Project") {
+            // Infernos use their fire cells; world items and flying projectiles use cell coordinates.
+            let (x, y, z) = if grenade_type.contains("Project") || is_dropped {
                 let x = self.collect_cell_coordinate_grenade(CoordinateAxis::X, projectile_entid).ok();
                 let y = self.collect_cell_coordinate_grenade(CoordinateAxis::Y, projectile_entid).ok();
                 let z = self.collect_cell_coordinate_grenade(CoordinateAxis::Z, projectile_entid).ok();

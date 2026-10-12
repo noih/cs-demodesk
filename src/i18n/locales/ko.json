@@ -434,6 +434,8 @@
       "weapon": "무기",
       "view": "시야 방향",
       "grenades": "투척물",
+      "groundWeapons": "바닥 무기",
+      "groundUtility": "바닥 투척물",
       "shots": "사격",
       "bomb": "폭탄",
       "deaths": "사망 위치",

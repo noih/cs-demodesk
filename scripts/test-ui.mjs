@@ -2,7 +2,7 @@ import { checkReplayDrawing } from './check-replay-drawing.mjs';
 import assert from 'node:assert/strict';
 import { readdir, readFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
-import { preview } from 'vite';
+import { createServer, preview } from 'vite';
 import { initialAppearance, THEMES } from '../src/themes.ts';
 import { projectReference } from '../src/recoil.ts';
 const calibration = JSON.parse(await readFile(new URL('../src/data/recoil-reference.json', import.meta.url), 'utf8'));
@@ -12,7 +12,11 @@ assert.equal(initialAppearance('light', true), 'light');
 assert.equal(initialAppearance('invalid', true), 'dark');
 assert.equal(initialAppearance(null, false), 'light');
 assert.equal(Object.keys(THEMES.dark).join(), Object.keys(THEMES.light).join());
-const server = await preview({ preview: { port: 0, host: '127.0.0.1' } });
+const dev = process.env.TEST_UI_DEV === '1';
+const server = dev
+  ? await createServer({ cacheDir: `out/ui-dev-cache-${process.pid}`, server: { port: 0, host: '127.0.0.1' } })
+  : await preview({ preview: { port: 0, host: '127.0.0.1' } });
+if (dev) await server.listen();
 const browser = await chromium.launch({ channel: 'chrome', headless: true, ignoreDefaultArgs: ['--hide-scrollbars'], args: ['--disable-features=OverlayScrollbar'] });
 try {
   const page = await browser.newPage({ viewport: { width: 1360, height: 940 } });
@@ -178,7 +182,7 @@ try {
       const missing = await read('http://127.0.0.1:1/unavailable');
       return {frames:result.data.frames.length,last:result.data.frames.at(-1).t,paints,invalid:typeof invalid.error,missing:typeof missing.error};
     } finally { running = false; URL.revokeObjectURL(url); }
-  }, '/assets/'+workerFile);
+  }, dev ? '/src/replay/load.worker.ts' : '/assets/'+workerFile);
   assert.equal(workerResult.frames,50000);
   assert.equal(workerResult.last,49999);
   assert.ok(workerResult.paints > 0, 'UI paints while replay worker loads');
@@ -1669,4 +1673,4 @@ try {
   await page.getByText('Unrecognized filesystem error: E:/data', {exact:true}).waitFor();
   assert.deepEqual(errors,[]);
   console.log('UI checks passed: virtual lists, lazy demo reads, content-sized tabs, themes, charts, filters, queue jump, settings.');
-} finally { await browser.close(); await new Promise(resolve => server.httpServer.close(resolve)); }
+} finally { await browser.close(); if (dev) await server.close(); else await new Promise(resolve => server.httpServer.close(resolve)); }

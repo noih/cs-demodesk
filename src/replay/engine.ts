@@ -21,6 +21,7 @@ export interface PlayerState {
   ducking: boolean;
   walking: boolean;
   weapon: string;
+  inventory: string[];
   money: number;
   /** ground speed in units/s, from the surrounding frames */
   speed: number;
@@ -63,6 +64,7 @@ export interface Death {
   y: number;
   z: number;
   t: number;
+  team?: Team;
 }
 export interface BombState {
   state: 'carried' | 'dropped' | 'planted' | 'defused' | 'exploded';
@@ -80,6 +82,7 @@ export interface TickState {
   round?: RoundInfo;
   players: PlayerState[];
   grenades: GrenadeState[];
+  dropped: { id: number; weapon: string; x: number; y: number; z: number }[];
   effects: Effect[];
   fireCells?: number[][];
   smokeCells?: number[][];
@@ -258,6 +261,7 @@ export class Replay {
         ducking: (flags & FLAG.ducking) !== 0,
         walking: (flags & FLAG.walking) !== 0,
         weapon: data.weapons[weapon] ?? '',
+        inventory: alive ? row.slice(10).map(id => data.weapons[id] ?? '').filter(Boolean) : [],
         money: money ?? 0,
         speed: glide && span ? dist / (span / data.tickRate) : 0,
         kills: nk,
@@ -301,7 +305,8 @@ export class Replay {
       smokeCells: smokeAt(data.smoke, tick),
       effects: acc.effects.filter((f) => f.end > tick),
       shots: acc.shots,
-      deaths: acc.deaths,
+      deaths: acc.deaths.map(d => ({ ...d, team: data.players[d.pid] ? this.team(data.players[d.pid]!.steamid, round) : undefined })),
+      dropped: (a.d ?? []).map(([id, weapon, x, y, z]) => ({ id: id!, weapon: data.weapons[weapon!] ?? '', x: x!, y: y!, z: z! })),
       bomb,
       feed,
       clock: this.clock(tick, round, bomb),

@@ -1,11 +1,47 @@
 import { sharpenCas } from '../src/replay/cas.ts';
-import { draw, DEFAULT_TOGGLES } from '../src/replay/draw.ts';
+import { draw, DEFAULT_TOGGLES, COLORS } from '../src/replay/draw.ts';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { Replay } from '../src/replay/engine.ts';
 import { FLAG } from '../src/api.ts';
+import { equipmentIcon, equipmentId, rosterEquipment } from '../src/replay/equipment.ts';
+import { access } from 'node:fs/promises';
+
+test('equipment icons resolve parser names and event aliases to local assets', async () => {
+  for (const [name, event] of [['AK-47', 'ak47'], ['M4A1-S', 'm4a1_silencer'], ['USP-S', 'usp_silencer'], ['Smoke Grenade', 'smokegrenade'], ['High Explosive Grenade', 'hegrenade'], ['Incendiary Grenade', 'incgrenade'], ['Flashbang', 'flashbang']]) {
+    assert.equal(equipmentIcon(name), equipmentIcon(`weapon_${event}`));
+    await access(new URL(`../public${equipmentIcon(name)}`, import.meta.url));
+  }
+  assert.equal(equipmentId('knife_karambit'), 'knife');
+  assert.equal(equipmentIcon('unknown weapon'), undefined);
+});
+
+test('inventory and ground equipment follow sampled state through throws, pickups, death and seeking', () => {
+  const first = frame(47628), second = frame(47632), dead = frame(47636, -1, false);
+  first.p[0].push(1, 2, 2, 3);
+  second.p[0].push(1, 2);
+  first.d = [[90, 1, 10, 20, 30]];
+  second.d = [];
+  const r = replay([first, second, dead], [{ t:47636, k:'death', p:0, x:0, y:0, z:0 }]);
+  r.data.weapons = ['', 'AK-47', 'Flashbang', 'Smoke Grenade'];
+  assert.deepEqual(r.stateAt(47631).players[0].inventory, ['AK-47', 'Flashbang', 'Flashbang', 'Smoke Grenade']);
+  assert.deepEqual(r.stateAt(47632).players[0].inventory, ['AK-47', 'Flashbang']);
+  assert.deepEqual(r.stateAt(47632).dropped, []);
+  assert.deepEqual(r.stateAt(47636).players[0].inventory, []);
+  assert.equal(r.stateAt(47636).deaths[0].team, 'CT');
+  assert.deepEqual(r.stateAt(47628).dropped, [{id:90, weapon:'AK-47', x:10, y:20, z:30}]);
+  assert.deepEqual(r.stateAt(47628).players[1].inventory, []);
+});
 
 const DEFUSING = 256;
+test('roster slots do not move with active weapon and preserve duplicate utility', () => {
+  const inventory = ['Flashbang', 'USP-S', 'AK-47', 'Smoke Grenade', 'Flashbang', 'Knife', 'C4 Explosive'];
+  const expected = [['AK-47'], ['USP-S'], ['Smoke Grenade', 'Flashbang', 'Flashbang'], ['C4 Explosive']];
+  assert.deepEqual(rosterEquipment(inventory, 'AK-47', true, false), expected);
+  assert.deepEqual(rosterEquipment(inventory, 'Flashbang', true, false), expected);
+  assert.deepEqual(rosterEquipment(inventory, 'Knife', true, false), expected);
+  assert.deepEqual(rosterEquipment([], 'USP-S', false, true), [[], ['USP-S'], [], ['Defuse Kit']]);
+});
 function replay(frames, events) {
   return new Replay({
     schemaVersion: 3, tickRate: 64, step: 4, firstTick: frames[0].t,
@@ -108,6 +144,84 @@ test('sampled fire cells disappear and seeking restores their recorded state', (
   assert.deepEqual(r.stateAt(104).fireCells, [[10, 20, 30]]);
   assert.deepEqual(r.stateAt(108).fireCells, []);
   assert.equal(r.stateAt(100).fireCells.length, 2);
+});
+
+test('map names fit 110px including padding without splitting graphemes; focused names stay complete', () => {
+  const labels = [], backgrounds = [];
+  let measurements = 0;
+  const measure = text => { measurements++; return Array.from(text).length * 8; };
+  const ctx = new Proxy({}, { get(target, key) {
+    if (key in target) return target[key];
+    if (key === 'measureText') return text => ({width:measure(text)});
+    return (...args) => {
+      if (key === 'fillText') labels.push(args[0]);
+      if (key === 'fillRect' && target.fillStyle === 'rgba(0,0,0,0.6)') backgrounds.push(args[2]);
+    };
+  }});
+  const names = ['A very long player display name', '這是一個很長很長很長很長的玩家名稱', '👩‍💻'.repeat(10), 'A very long focused player name', 'Short'];
+  const players = names.map((name,pid)=>({pid,name,x:100,y:100,z:0,yaw:0,hp:100,alive:true,team:'CT'}));
+  const map = {posX:0,posY:0,scale:1,layers:[{altitudeMin:-100,altitudeMax:100}]};
+  draw(ctx,500,500,map,[],{players,grenades:[],effects:[],shots:[],deaths:[]},{...DEFAULT_TOGGLES,sound:'off'},{zoom:1,panX:0,panY:0},3);
+  assert.ok(labels.slice(0,3).every(name=>name.endsWith('…')));
+  assert.match(labels[2], /^(?:👩‍💻)+…$/u);
+  assert.equal(labels[3],'Short');
+  assert.equal(labels[4],names[3]);
+  assert.ok(backgrounds.slice(0,4).every(width=>width<=110));
+  assert.ok(backgrounds[4]>110);
+  assert.deepEqual(players.map(p=>p.name),names,'Original names remain available in the roster');
+  const render = (focus = 3, size = 16) => draw(ctx,500,500,map,[],{players,grenades:[],effects:[],shots:[],deaths:[]},{...DEFAULT_TOGGLES,sound:'off'},{zoom:1,panX:0,panY:0},focus,size);
+  render();
+  measurements = 0;
+  render();
+  assert.equal(measurements,0,'Unchanged labels reuse both text and width');
+  players[0].name = 'Renamed';
+  render();
+  assert.equal(measurements,1,'Only a changed name is measured again');
+  measurements = 0;
+  render(3,18);
+  assert.ok(measurements > 0,'Font changes invalidate measurements');
+  measurements = 0;
+  render(0,18);
+  assert.ok(measurements > 0,'Changing focus refreshes full and truncated labels');
+});
+
+test('players on their own radar panel remain opaque regardless of panel altitude or order', () => {
+  const stack = [], fills = [], labels = [];
+  const ctx = new Proxy({globalAlpha:1}, {get(target,key) {
+    if (key in target) return target[key];
+    if (key === 'save') return () => stack.push({...target});
+    if (key === 'restore') return () => Object.assign(target,stack.pop());
+    if (key === 'measureText') return () => ({width:30});
+    if (key === 'fillRect') return () => { if (target.fillStyle === COLORS.ct) fills.push(target.globalAlpha); };
+    if (key === 'fillText') return name => { if (name === 'Upper' || name === 'Lower') labels.push([name,target.globalAlpha]); };
+    return () => {};
+  }});
+  const players = [150,50].map((z,pid)=>({pid,name:pid?'Lower':'Upper',x:100,y:100,z,yaw:0,hp:100,alive:true,team:'CT'}));
+  const state = {players,grenades:[],effects:[],shots:[],deaths:[]};
+  const layers = [{altitudeMin:100,altitudeMax:200},{altitudeMin:0,altitudeMax:100}];
+  const render = layers => draw(ctx,500,500,{posX:0,posY:0,scale:1,layers},[],state,{...DEFAULT_TOGGLES,sound:'off'},{zoom:1,panX:0,panY:0});
+  render(layers);
+  assert.deepEqual(fills,[1,1]);
+  assert.deepEqual(labels,[['Upper',1],['Lower',1]]);
+  assert.equal(ctx.globalAlpha,1,'Transparency does not leak to later drawing');
+  fills.length=labels.length=0;
+  render([...layers].reverse());
+  assert.deepEqual(fills,[1,1]);
+  fills.length=0;
+  render([{altitudeMin:0,altitudeMax:200}]);
+  assert.deepEqual(fills,[1,1],'Single-floor maps remain opaque');
+});
+
+test('death crosses use each player team color', () => {
+  const strokes = [];
+  const ctx = new Proxy({}, {get(target,key) {
+    if (key in target) return target[key];
+    return () => { if(key === 'stroke') strokes.push(target.strokeStyle); };
+  }});
+  const map = {posX:0,posY:0,scale:1,layers:[{altitudeMin:-100,altitudeMax:100}]};
+  const state = {players:[],grenades:[],effects:[],shots:[],deaths:[{x:10,y:20,z:0,team:'CT'},{x:30,y:40,z:0,team:'TERRORIST'}]};
+  draw(ctx,500,500,map,[],state,{...DEFAULT_TOGGLES,sound:'off'},{zoom:1,panX:0,panY:0});
+  assert.deepEqual(strokes,[COLORS.ct,COLORS.t]);
 });
 
 // Drawing coordinates use radar pixels so resize, pan and zoom preserve map positions.

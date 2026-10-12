@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 /// Bump when the layout below changes; older files are rebuilt.
-pub const REPLAY_SCHEMA_VERSION: u32 = 6;
+pub const REPLAY_SCHEMA_VERSION: u32 = 7;
 /// Ticks between frames: 64 tick / 4 = 16 frames per second, interpolated in the UI.
 pub const STEP: i32 = 4;
 
@@ -77,14 +77,17 @@ pub struct ReplayPlayer {
 }
 
 /// One sampled tick.
-/// `p` rows: `[pid, x, y, z, yaw, hp, armor, flags, weapon, money]` — pid indexes
+/// `p` rows: `[pid, x, y, z, yaw, hp, armor, flags, weapon, money, ...inventory]` — pid indexes
 /// [`ReplayData::players`], weapon indexes [`ReplayData::weapons`], flags are
 /// the `FLAG_*` bits. `g` rows: `[entityId, kind, x, y, z, pid]` for grenade
 /// projectiles in flight (kind indexes [`GRENADE_KINDS`]).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Frame {
     pub t: i32,
-    pub p: Vec<[i32; 10]>,
+    pub p: Vec<Vec<i32>>,
+    /// Dropped equipment: [entityId, weapon, x, y, z]. Weapon indexes the string table.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub d: Vec<[i32; 5]>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub g: Vec<[i32; 6]>,
     /// Active fire-cell world positions, sampled directly from CInferno.
@@ -249,12 +252,26 @@ pub fn build_replay(
     let mut players = Players::new(info);
     let mut weapons = Interner::new("");
     let mut frames = player_frames(parser, bytes, wanted.clone(), &mut players, &mut weapons)?;
-    add_grenades(parser, bytes, wanted, &mut players, &mut frames)?;
+    add_grenades(
+        parser,
+        bytes,
+        wanted,
+        &mut players,
+        &mut weapons,
+        &mut frames,
+    )?;
     let (events, blinds) = point_events(parser, bytes, first_tick, last_tick, &mut players)?;
     apply_blinds(&mut frames, &blinds, info.tick_rate);
     drop_detonated(&mut frames, &events);
 
-    let smoke = crate::smoke::source::replay(parser, bytes, first_tick, last_tick, info.tick_rate, &events)?;
+    let smoke = crate::smoke::source::replay(
+        parser,
+        bytes,
+        first_tick,
+        last_tick,
+        info.tick_rate,
+        &events,
+    )?;
     Ok(ReplayData {
         schema_version: REPLAY_SCHEMA_VERSION,
         tick_rate: info.tick_rate,
@@ -308,7 +325,7 @@ fn player_frames(
             .str("active_weapon_name")
             .map(|w| weapons.get(w))
             .unwrap_or(0);
-        let entry = [
+        let mut entry = vec![
             p,
             round(row.num("X")),
             round(row.num("Y")),
@@ -320,11 +337,18 @@ fn player_frames(
             weapon,
             round(row.num("balance")),
         ];
+        entry.extend(
+            row.strs("inventory")
+                .unwrap_or_default()
+                .iter()
+                .map(|w| weapons.get(w)),
+        );
         match frames.last_mut() {
             Some(f) if f.t == tick => f.p.push(entry),
             _ => frames.push(Frame {
                 t: tick,
                 p: vec![entry],
+                d: vec![],
                 g: vec![],
                 f: vec![],
             }),
@@ -340,12 +364,30 @@ fn add_grenades(
     bytes: &[u8],
     wanted: Vec<i32>,
     players: &mut Players,
+    weapons: &mut Interner,
     frames: &mut Vec<Frame>,
 ) -> Result<()> {
     let mut by_tick: HashMap<i32, usize> =
         frames.iter().enumerate().map(|(i, f)| (f.t, i)).collect();
     for row in parser.projectiles(bytes, wanted)?.iter() {
         let Some(tick) = row.tick() else { continue };
+        if let Some(weapon) = row
+            .str("grenade_type")
+            .and_then(|s| s.strip_prefix("dropped:"))
+        {
+            if let (Some(&idx), Some(x), Some(y), Some(z)) =
+                (by_tick.get(&tick), row.num("x"), row.num("y"), row.num("z"))
+            {
+                frames[idx].d.push([
+                    round(row.num("grenade_entity_id")),
+                    weapons.get(weapon),
+                    x.round() as i32,
+                    y.round() as i32,
+                    z.round() as i32,
+                ]);
+            }
+            continue;
+        }
         if row.str("grenade_type") == Some("CInferno") {
             if let Some(&idx) = by_tick.get(&tick) {
                 for cell in row.strs("m_firePositions").unwrap_or_default() {
@@ -376,6 +418,7 @@ fn add_grenades(
             frames.push(Frame {
                 t: tick,
                 p: vec![],
+                d: vec![],
                 g: vec![],
                 f: vec![],
             });
@@ -563,11 +606,12 @@ mod tests {
         let mut frames: Vec<Frame> = [96, 100, 164, 228, 240, 244, 248, 300]
             .into_iter()
             .map(|t| {
-                let mut p = [0; 10];
+                let mut p = vec![0; 10];
                 p[7] = if t == 244 { 0 } else { FLAG_ALIVE };
                 Frame {
                     t,
                     p: vec![p],
+                    d: vec![],
                     g: vec![],
                     f: vec![],
                 }

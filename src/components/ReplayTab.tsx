@@ -1,4 +1,5 @@
 import { displayPlayerName } from '../playerName.ts';
+import { EquipmentIcon } from './replay/EquipmentIcon.tsx';
 import { useAppTheme } from '../AppTheme.tsx';
 import { Spinner } from './Spinner.tsx';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -88,8 +89,8 @@ function Player({ loaded }: { loaded: Loaded }) {
   const { t } = useTranslation();
   const { replay, map, images } = loaded;
   const { typography } = useAppTheme();
-  const labelSizeRef = useRef(typography[3]);
-  useEffect(() => { labelSizeRef.current = typography[3]; }, [typography]);
+  const labelSizeRef = useRef((typography[3] ?? 16) * 0.85);
+  useEffect(() => { labelSizeRef.current = (typography[3] ?? 16) * 0.85; }, [typography]);
   const rounds = replay.parsed.rounds;
   const tr = replay.data.tickRate;
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -371,7 +372,7 @@ function Player({ loaded }: { loaded: Loaded }) {
                   {kv.attacker && <span style={{ color: teamColor(kv.attacker.team) }}>{displayPlayerName(kv.attacker.name)}</span>}
                   <span className="dim">
                     {' '}
-                    {kv.weapon}
+                    <EquipmentIcon name={kv.weapon} />
                     {kv.headshot && <i aria-hidden="true" className="bi bi-crosshair app-icon" />}{' '}
                   </span>
                   <span style={{ color: teamColor(kv.victim.team) }}>{displayPlayerName(kv.victim.name)}</span>

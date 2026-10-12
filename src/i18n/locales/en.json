@@ -438,6 +438,8 @@
       "weapon": "Weapon",
       "view": "View direction",
       "grenades": "Utility",
+      "groundWeapons": "Ground weapons",
+      "groundUtility": "Ground utility",
       "shots": "Shots",
       "bomb": "Bomb",
       "deaths": "Death positions",

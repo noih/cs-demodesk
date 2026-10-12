@@ -4,7 +4,7 @@ import type { DrawToggles } from '../../replay/draw.ts';
 
 type BoolToggle = Exclude<keyof DrawToggles, 'sound'>;
 /** One switch per thing on screen, in display order. */
-const TOGGLES: BoolToggle[] = ['names', 'hp', 'weapon', 'view', 'grenades', 'shots', 'bomb', 'deaths', 'killFeed', 'clock'];
+const TOGGLES: BoolToggle[] = ['names', 'hp', 'weapon', 'view', 'grenades', 'groundWeapons', 'groundUtility', 'shots', 'bomb', 'deaths', 'killFeed', 'clock'];
 
 export function ReplayOptions({ toggles, onChange }: { toggles: DrawToggles; onChange: (t: DrawToggles) => void }) {
   const { t } = useTranslation();

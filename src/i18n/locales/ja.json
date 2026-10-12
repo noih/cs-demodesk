@@ -434,6 +434,8 @@
       "weapon": "武器",
       "view": "視線方向",
       "grenades": "ユーティリティ",
+      "groundWeapons": "地面の武器",
+      "groundUtility": "地面のユーティリティ",
       "shots": "射撃",
       "bomb": "爆弾",
       "deaths": "デス位置",

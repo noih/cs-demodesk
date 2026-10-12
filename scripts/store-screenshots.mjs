@@ -35,7 +35,7 @@ for (const source of sources) for (const file of (await readdir(source)).filter(
     data.info.serverName = 'Community match';
     try {
       const replay = JSON.parse(await readFile(path.join(source, file.replace('.json', '.replay.json')), 'utf8'));
-      if (replay.schemaVersion === 6 && replay.smoke?.some(frame => frame.cells.length)) {
+      if (replay.schemaVersion >= 6 && replay.smoke?.some(frame => frame.cells.length)) {
         replays.set(data.info.path, anonymize({...data, replay}).replay);
         const radarDir = path.join(source, '../radar', data.info.mapName);
         const radar = JSON.parse(await readFile(path.join(radarDir, 'overview.json'), 'utf8'));

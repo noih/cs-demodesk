@@ -12,6 +12,8 @@ reported round-9 fake defuses, normal kit/no-kit defuses, explicit aborts,
 death, and seeking. Current CS2 demos can omit `bomb_abortdefuse`; sampled
 `is_defusing` state is therefore checked even when no abort event arrives.
 Replay schema 3 rebuilds earlier cached streams to include that state.
+Replay schema 7 also preserves carried inventory and sampled ownerless equipment.
+Replay tests cover inventory counts, pickup/seek state, local equipment icons and team-colored death markers.
 
 See [Recoil calibration SOP](../docs/recoil-calibration.md) for the one-command, hidden CS2 capture and fixed reference update:
 
@@ -26,6 +28,8 @@ and Playwright; set `PLAYWRIGHT_MODULE` if the package is outside Node's normal
 module path. Set `UI_SCREENSHOT_DIR` to an existing folder to save screenshots.
 It tests the production build with mocked Tauri IPC; native dialogs, filesystem
 operations and CS2/FFmpeg recording require a separate installed-app check.
+Set `TEST_UI_DEV=1` to run the same checks against Vite development mode, including
+dependency preprocessing and source loading. This uses an isolated cache under `out/`.
 
 ## Documentation screenshots
 

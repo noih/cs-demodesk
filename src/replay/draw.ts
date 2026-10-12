@@ -1,5 +1,6 @@
 import { drawAnnotations, type Annotation } from './annotations.ts';
 import { displayPlayerName } from '../playerName.ts';
+import { equipmentId, equipmentImage, isUtility } from './equipment.ts';
 // Canvas drawing for the 2D replay. One radar image per vertical layer, laid out
 // side by side; every marker lands on the layer its z belongs to.
 import { GRENADE_KINDS, type MapAssets } from '../api.ts';
@@ -12,6 +13,8 @@ export interface DrawToggles {
   weapon: boolean;
   view: boolean;
   grenades: boolean;
+  groundWeapons: boolean;
+  groundUtility: boolean;
   shots: boolean;
   bomb: boolean;
   deaths: boolean;
@@ -21,7 +24,7 @@ export interface DrawToggles {
   /** hearing radius (footsteps while running, gunshots): everyone, only the focused player, or nobody */
   sound: 'all' | 'focus' | 'off';
 }
-export const DEFAULT_TOGGLES: DrawToggles = { names: true, hp: true, weapon: false, view: true, grenades: true, shots: true, bomb: true, deaths: true, killFeed: true, clock: true, sound: 'focus' };
+export const DEFAULT_TOGGLES: DrawToggles = { names: true, hp: true, weapon: false, view: true, grenades: true, groundWeapons: true, groundUtility: true, shots: true, bomb: true, deaths: true, killFeed: true, clock: true, sound: 'focus' };
 
 // Sound ranges in world units — approximations of how far CS2 lets you hear
 // footsteps and gunfire, not measured values.
@@ -57,6 +60,29 @@ export const teamColor = (team: Team): string => (team === 'CT' ? COLORS.ct : CO
 
 const IMG = 1024;
 const GAP = 12;
+const NAME_SEGMENTS = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
+const NAME_LABELS = new WeakMap<CanvasRenderingContext2D, Map<number, { name: string; font: string; full: boolean; text: string; width: number }>>();
+
+function playerLabel(ctx: CanvasRenderingContext2D, pid: number, name: string, full: boolean) {
+  let cache = NAME_LABELS.get(ctx);
+  if (!cache) { cache = new Map(); NAME_LABELS.set(ctx, cache); }
+  const cached = cache.get(pid);
+  if (cached && cached.name === name && cached.font === ctx.font && cached.full === full) return cached;
+  // Leave 8px for label padding; preserve emoji and combining characters when trimming.
+  let text = name;
+  let width = ctx.measureText(text).width;
+  if (!full && width > 102) {
+    const characters = Array.from(NAME_SEGMENTS.segment(name), part => part.segment);
+    do {
+      characters.pop();
+      text = characters.join('') + '…';
+      width = ctx.measureText(text).width;
+    } while (characters.length && width > 102);
+  }
+  const label = { name, font: ctx.font, full, text, width };
+  cache.set(pid, label);
+  return label;
+}
 
 export interface Layout {
   /** square side of one layer in canvas px */
@@ -220,6 +246,7 @@ export function draw(ctx: CanvasRenderingContext2D, width: number, height: numbe
     ctx.strokeStyle = COLORS.dead;
     ctx.lineWidth = 2;
     for (const d of state.deaths) {
+      ctx.strokeStyle = d.team ? teamColor(d.team) : COLORS.dead;
       const [x, y] = place(m, lay, d.x, d.y, d.z);
       const s = r * 0.8;
       ctx.beginPath();
@@ -230,6 +257,16 @@ export function draw(ctx: CanvasRenderingContext2D, width: number, height: numbe
       ctx.stroke();
     }
   }
+
+  // Sampled ownerless entities disappear as soon as they are picked up.
+  ctx.save();
+  ctx.globalAlpha = 0.45;
+  for (const item of state.dropped ?? []) {
+    if (!(isUtility(item.weapon) ? tg.groundUtility : tg.groundWeapons)) continue;
+    const [x, y] = place(m, lay, item.x, item.y, item.z);
+    drawEquipment(ctx, item.weapon, x, y, 27, isUtility(item.weapon) ? 14 : 15);
+  }
+  ctx.restore();
 
   // bomb on the ground
   if (tg.bomb && state.bomb && state.bomb.x !== undefined && state.bomb.state !== 'carried') {
@@ -310,6 +347,7 @@ export function draw(ctx: CanvasRenderingContext2D, width: number, height: numbe
   const orderedPlayers = [...state.players].sort((a, b) => Number(a.pid === focus) - Number(b.pid === focus));
   for (const p of orderedPlayers) {
     if (!p.alive) continue;
+    ctx.save();
     const [x, y] = place(m, lay, p.x, p.y, p.z);
     const color = p.pid === focus ? '#b995ff' : teamColor(p.team);
     // Fill health from the bottom over a dark backing that contrasts with the map.
@@ -348,28 +386,44 @@ export function draw(ctx: CanvasRenderingContext2D, width: number, height: numbe
       ctx.lineWidth = 1;
       ctx.stroke();
     }
+    ctx.restore();
   }
   // Labels are drawn above every player marker; the focused label is last.
   for (const p of orderedPlayers) {
     if (!p.alive) continue;
+    ctx.save();
     const [x, y] = place(m, lay, p.x, p.y, p.z);
-    const lines: string[] = [];
-    if (tg.names) lines.push(displayPlayerName(p.name));
-    if (tg.weapon && p.weapon) lines.push(p.weapon);
-    if (lines.length) {
+    if (tg.weapon && p.weapon) {
+      const utility = isUtility(p.weapon);
+      const width = equipmentId(p.weapon) === 'knife' ? 27 : utility ? 18 : 36;
+      drawEquipment(ctx, p.weapon, x + r + 5 + width / 2, y, width, utility ? 14 : 19);
+    }
+    if (tg.names) {
+      const label = playerLabel(ctx, p.pid, displayPlayerName(p.name), p.pid === focus);
       // small dark label above the disc, like the in-game spectator tag
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       const lh = labelSize + 2;
-      const w = Math.max(...lines.map((t) => ctx.measureText(t).width)) + 8;
-      const h = lh * lines.length + 3;
+      const w = label.width + 8;
+      const h = lh + 3;
       const top = y - r - 4 - h;
       ctx.fillStyle = 'rgba(0,0,0,0.6)';
       ctx.fillRect(x - w / 2, top, w, h);
-      lines.forEach((text, i) => {
-        ctx.fillStyle = i === 0 && tg.names ? COLORS.text : 'rgba(232,234,238,0.75)';
-        ctx.fillText(text, x, top + 2 + lh * i + lh / 2);
-      });
+      ctx.fillStyle = COLORS.text;
+      ctx.fillText(label.text, x, top + 2 + lh / 2);
     }
+    ctx.restore();
   }
+}
+
+function drawEquipment(ctx: CanvasRenderingContext2D, weapon: string, x: number, y: number, width: number, height: number): void {
+  const image = equipmentImage(weapon);
+  if (!image) return;
+  const scale = Math.min(width / image.naturalWidth, height / image.naturalHeight);
+  const w = image.naturalWidth * scale, h = image.naturalHeight * scale;
+  ctx.save();
+  ctx.shadowColor = '#000';
+  ctx.shadowBlur = 3;
+  ctx.drawImage(image, x - w / 2, y - h / 2, w, h);
+  ctx.restore();
 }

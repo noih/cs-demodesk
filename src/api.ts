@@ -138,11 +138,13 @@ export interface ReplayPlayer {
   steamid: string;
   name: string;
 }
-/** `p` rows: [pid, x, y, z, yaw, hp, armor, flags, weapon, money]; `g` rows: [entityId, kind, x, y, z, pid] */
+/** `p` rows: [pid, x, y, z, yaw, hp, armor, flags, weapon, money, ...inventory]; weapon/inventory index ReplayData.weapons. */
 export interface ReplayFrame {
   t: number;
   p: number[][];
   g?: number[][];
+  /** Dropped equipment: [entityId, weapon, x, y, z], replay schema 7+. */
+  d?: number[][];
   /** Active fire-cell world coordinates, replay schema 5+. */
   f?: number[][];
 }

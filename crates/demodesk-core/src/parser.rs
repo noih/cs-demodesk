@@ -303,8 +303,9 @@ impl DemoParser {
         Ok(Rows::from_output(out))
     }
 
-    /// One row per (tick, grenade projectile) with `grenade_type`, `grenade_entity_id`,
+    /// One row per (tick, projectile or dropped equipment) with `grenade_type`, `grenade_entity_id`,
     /// `x`, `y`, `z`, `tick`, `steamid` (thrower), `name`.
+    /// Dropped items use `dropped:<weapon name>` as their grenade_type.
     pub fn projectiles(&self, bytes: &[u8], wanted_ticks: Vec<i32>) -> Result<Rows> {
         let inputs = self.inputs_ex(
             &[

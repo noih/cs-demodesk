@@ -5,7 +5,11 @@ export async function checkReplayDrawing(page) {
   await page.evaluate(() => {
     const original = window.__TAURI_INTERNALS__.invoke;
     const rounds = [1, 2].map((round, i) => ({round, startTick:i * 6400, freezeEndTick:i * 6400 + 128, endTick:i * 6400 + 6200, officiallyEndedTick:(i + 1) * 6400 - 1, roster:{}}));
-    const data = {schemaVersion:3,tickRate:64,step:4,firstTick:0,lastTick:12799,players:[],weapons:[''],events:[],frames:[{t:0,p:[],g:[]},{t:12799,p:[],g:[]}]};
+    const players = Array.from({length:10}, (_,i) => ({steamid:`replay-${i}`,name:`Player ${i + 1}`}));
+    players[0].name = 'Player with a very long display name';
+    rounds.forEach(r => { r.roster = Object.fromEntries(players.map((p,i)=>[p.steamid,i < 5 ? 'CT' : 'TERRORIST'])); });
+    const rows = players.map((_,i) => [i,200+i*55,-240,50,0,100,100,i===5?19:3,i===5?5:1,2650,1,2,3,3,4,...(i===5?[5]:[])]);
+    const data = {schemaVersion:7,tickRate:64,step:4,firstTick:0,lastTick:12799,players,weapons:['','AK-47','USP-S','Flashbang','Smoke Grenade','C4 Explosive'],events:[],frames:[{t:0,p:rows,g:[],d:[[90,4,400,-500,50],[91,1,600,-500,50]]},{t:12799,p:rows,g:[],d:[]}]};
     const radar = document.createElement('canvas');
     radar.width = radar.height = 1024;
     radar.getContext('2d').fillStyle = '#263440';
@@ -27,6 +31,64 @@ export async function checkReplayDrawing(page) {
   const canvas = page.locator('.replay-box canvas');
   await canvas.waitFor();
   const button = name => page.getByRole('button',{name,exact:true});
+  await page.locator('.player-loadout').first().waitFor();
+  assert.equal(await page.locator('.player-loadout').count(),10);
+  assert.equal(await page.locator('.player-row').first().locator('img[alt="Flashbang"]').count(),2,'Both held flashbangs remain visible');
+  await page.waitForFunction(()=>Array.from(document.querySelectorAll('.player-loadout img')).every(img=>img.complete && img.naturalWidth>0));
+  assert.ok(await page.locator('.player-loadout .utility').evaluateAll(icons => icons.every(icon => icon.getBoundingClientRect().height === 14)), 'Utility icons share a visible height');
+  assert.equal(await page.locator('.player-equipment').first().innerText(),'$2650','Weapon names no longer crowd money');
+  assert.equal(await page.locator('.player-loadout img[alt="C4 Explosive"]').count(),1,'C4 appears once in the central equipment row');
+  assert.equal(await page.locator('.player-name').filter({hasText:'C4'}).count(),0,'No duplicate C4 badge beside the name');
+  assert.ok(!(await page.locator('.team-panel').allTextContents()).join('').includes('C4 Explosive'));
+  const slotPositions = await page.locator('.player-loadout').evaluateAll(rows => rows.map(row => Array.from(row.children, slot => Math.round(slot.getBoundingClientRect().x))));
+  assert.ok(slotPositions.every(positions => positions.join() === slotPositions[0].join()),'Equipment columns stay aligned across both teams');
+  const originalViewport = page.viewportSize();
+  for (const width of [900,1360]) {
+    await page.setViewportSize({width,height:940});
+    for (const size of [14,16,18]) {
+      const fontOverride = await page.addStyleTag({content:`.radix-themes { --app-font-caption:${size}px; }`});
+      assert.ok(await page.locator('.player-meta').evaluateAll(rows => rows.every(row => {
+        const loadout = row.querySelector('.player-loadout').getBoundingClientRect();
+        const money = row.querySelector('.player-equipment').getBoundingClientRect();
+        const hp = row.querySelector('.player-vitals').getBoundingClientRect();
+        return Array.from(row.querySelectorAll('.equipment-icon')).every(icon => {
+          const rect = icon.getBoundingClientRect();
+          return rect.left >= money.right + 3 && rect.left >= loadout.left && rect.right <= loadout.right + 1 && rect.right <= hp.left - 3 && rect.top >= loadout.top && rect.bottom <= loadout.bottom + 1;
+        });
+      })),`Equipment stays within its column at ${width}px / ${size}px text`);
+      assert.ok(await page.locator('.player-name').evaluateAll(rows => rows.every(row => {
+        const name = row.querySelector('strong').getBoundingClientRect();
+        const kda = row.querySelector('.player-kda').getBoundingClientRect();
+        return name.right <= kda.left && kda.right <= row.getBoundingClientRect().right + 1;
+      })), 'Name and K/D/A stay on the first row without overlap');
+      const heights = await page.locator('.player-row').evaluateAll(rows=>rows.map(row=>row.getBoundingClientRect().height));
+      assert.ok(Math.max(...heights)-Math.min(...heights)<1,'All ten players have equal row heights');
+      await fontOverride.evaluate(el=>el.remove());
+    }
+  }
+  await page.setViewportSize(originalViewport);
+  await page.waitForTimeout(50);
+  const groundVisible = await canvas.evaluate(el => el.toDataURL());
+  await button('Options').click();
+  const groundSwitch = page.getByRole('switch', {name:'Ground utility', exact:true});
+  const weaponSwitch = page.getByRole('switch', {name:'Ground weapons', exact:true});
+  assert.equal(await groundSwitch.getAttribute('aria-checked'),'true','Ground utility defaults to on');
+  assert.equal(await weaponSwitch.getAttribute('aria-checked'),'true','Ground weapons default to on');
+  await groundSwitch.click();
+  await page.waitForFunction(before => document.querySelector('.replay-box canvas').toDataURL() !== before, groundVisible);
+  const weaponsOnly = await canvas.evaluate(el => el.toDataURL());
+  await weaponSwitch.click();
+  await page.waitForFunction(before => document.querySelector('.replay-box canvas').toDataURL() !== before, weaponsOnly);
+  const neither = await canvas.evaluate(el => el.toDataURL());
+  await groundSwitch.click();
+  await page.waitForFunction(before => document.querySelector('.replay-box canvas').toDataURL() !== before, neither);
+  const utilityOnly = await canvas.evaluate(el => el.toDataURL());
+  assert.equal(new Set([groundVisible, weaponsOnly, neither, utilityOnly]).size, 4, 'Ground weapon and utility visibility are independent');
+  await weaponSwitch.click();
+  await page.waitForFunction(before => document.querySelector('.replay-box canvas').toDataURL() === before, groundVisible);
+  await page.keyboard.press('Escape');
+  await groundSwitch.waitFor({state:'hidden'});
+  if (process.env.UI_SCREENSHOT_DIR) await page.screenshot({path:`${process.env.UI_SCREENSHOT_DIR}/replay-equipment.png`});
   const drawLine = async (layer=0) => {
     const box = await canvas.boundingBox();
     const lay = layout(box.width,box.height,2,{zoom:1,panX:0,panY:0});
