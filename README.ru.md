@@ -60,9 +60,11 @@
 | Инструмент | Назначение | Источник |
 | --- | --- | --- |
 | HLAE | Запись (mirv_streams) | [advancedfx/advancedfx](https://github.com/advancedfx/advancedfx) |
-| FFmpeg | Кодирование, объединение, ограничение размера | [BtbN/FFmpeg-Builds](https://github.com/BtbN/FFmpeg-Builds) (GPL) |
+| FFmpeg | Кодирование, объединение, ограничение размера | [noih/cs-demodesk-ffmpeg](https://github.com/noih/cs-demodesk-ffmpeg) (GPL) |
 | Source 2 Viewer CLI | Извлечение изображений радара из vpk | [ValveResourceFormat](https://github.com/ValveResourceFormat/ValveResourceFormat) (MIT) |
 | demoparser | Разбор демо (vendored) | [LaihoE/demoparser](https://github.com/LaihoE/demoparser) (MIT) |
+
+DemoDesk использует собственную компактную сборку FFmpeg на основе [BtbN/FFmpeg-Builds](https://github.com/BtbN/FFmpeg-Builds), включающую только необходимые приложению библиотеки и функции.
 
 ### Хранение в файлах
 

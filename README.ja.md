@@ -60,9 +60,11 @@ Counter-Strike 2 向けの Windows 用 Demo 管理・分析ツールです。プ
 | ツール | 用途 | 入手元 |
 | --- | --- | --- |
 | HLAE | 録画（mirv_streams） | [advancedfx/advancedfx](https://github.com/advancedfx/advancedfx) |
-| FFmpeg | エンコード、結合、サイズ上限 | [BtbN/FFmpeg-Builds](https://github.com/BtbN/FFmpeg-Builds)（GPL） |
+| FFmpeg | エンコード、結合、サイズ上限 | [noih/cs-demodesk-ffmpeg](https://github.com/noih/cs-demodesk-ffmpeg)（GPL） |
 | Source 2 Viewer CLI | vpk からのレーダー画像抽出 | [ValveResourceFormat](https://github.com/ValveResourceFormat/ValveResourceFormat)（MIT） |
 | demoparser | デモ解析（vendored） | [LaihoE/demoparser](https://github.com/LaihoE/demoparser)（MIT） |
+
+DemoDesk は [BtbN/FFmpeg-Builds](https://github.com/BtbN/FFmpeg-Builds) をベースに独自ビルドした軽量版 FFmpeg を使用し、アプリに必要なライブラリと機能のみを含めています。
 
 ### ファイルベースの保存
 

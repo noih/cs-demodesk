@@ -60,9 +60,11 @@ Nothing is written into the game folder: no plugin, script, or cfg, and no game 
 | Tool | Purpose | Source |
 | --- | --- | --- |
 | HLAE | Recording (mirv_streams) | [advancedfx/advancedfx](https://github.com/advancedfx/advancedfx) |
-| FFmpeg | Encoding, merging, size limit | [BtbN/FFmpeg-Builds](https://github.com/BtbN/FFmpeg-Builds) (GPL) |
+| FFmpeg | Encoding, merging, size limit | [noih/cs-demodesk-ffmpeg](https://github.com/noih/cs-demodesk-ffmpeg) (GPL) |
 | Source 2 Viewer CLI | Radar image extraction from vpk | [ValveResourceFormat](https://github.com/ValveResourceFormat/ValveResourceFormat) (MIT) |
 | demoparser | Demo parsing (vendored) | [LaihoE/demoparser](https://github.com/LaihoE/demoparser) (MIT) |
+
+DemoDesk uses a minimal custom FFmpeg build based on [BtbN/FFmpeg-Builds](https://github.com/BtbN/FFmpeg-Builds), retaining only the libraries and features the app needs.
 
 ### File-based storage
 
