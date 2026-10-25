@@ -767,6 +767,7 @@ mod tests {
             recoil_reference: Default::default(),
             damage: Default::default(),
             damage_ticks: Default::default(),
+            combat_ticks: Default::default(),
         }
     }
 

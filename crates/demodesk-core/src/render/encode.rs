@@ -11,6 +11,8 @@ use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
+mod combat;
+
 pub struct Control<'a> {
     cancel: &'a AtomicBool,
     log: &'a mut dyn FnMut(String),
@@ -197,7 +199,11 @@ pub fn ffprobe_exe(ffmpeg_exe: &Path) -> PathBuf {
     })
 }
 
-fn probe_media(ffmpeg_exe: &Path, file: &Path, control: &mut Control<'_>) -> Result<(f64, bool)> {
+pub(super) fn probe_media(
+    ffmpeg_exe: &Path,
+    file: &Path,
+    control: &mut Control<'_>,
+) -> Result<(f64, bool)> {
     control.check_cancelled()?;
     let mut cmd = Command::new(ffprobe_exe(ffmpeg_exe));
     cmd.args([
@@ -328,7 +334,9 @@ pub struct SizeResult {
 }
 
 /// Video codecs we know how to drive: (ffmpeg encoder name, label).
-pub const CODECS: [(&str, &str); 4] = [
+pub const CODECS: [(&str, &str); 6] = [
+    ("libsvtav1", "AV1 CPU"),
+    ("av1_nvenc", "AV1 NVIDIA"),
     ("libx264", "H.264 CPU"),
     ("libx265", "H.265 CPU"),
     ("h264_nvenc", "H.264 NVIDIA"),
@@ -337,6 +345,28 @@ pub const CODECS: [(&str, &str); 4] = [
 
 fn is_hevc(codec: &str) -> bool {
     codec == "libx265" || codec == "hevc_nvenc"
+}
+
+fn is_av1(codec: &str) -> bool {
+    matches!(codec, "libsvtav1" | "av1_nvenc")
+}
+
+const AV1_PARAMS: &str = "tune=0:enable-tf=1:lp=6";
+
+fn pixel_format(codec: &str) -> &'static str {
+    match codec {
+        "libsvtav1" => "yuv420p10le",
+        "av1_nvenc" => "p010le",
+        _ => "yuv420p",
+    }
+}
+
+fn cpu_size_preset(codec: &str) -> &'static str {
+    match codec {
+        "libsvtav1" => "3",
+        "libx265" => "slow",
+        _ => "veryslow",
+    }
 }
 
 /// `hvc1` tag so HEVC-in-mp4 plays in QuickTime / iOS / Windows Media Player.
@@ -350,6 +380,10 @@ fn tag_args(codec: &str) -> Vec<String> {
 
 const NVENC_RECORDING: &str =
     "-preset p5 -tune hq -multipass qres -rc-lookahead 0 -spatial-aq 1 -bf 2";
+
+// Offline FPS compression benefits from preserving texture and looking ahead across motion.
+const NVENC_SIZE: &str =
+    "-preset p7 -tune hq -multipass fullres -rc-lookahead 32 -spatial-aq 0 -temporal-aq 1 -bf 4";
 
 const NVENC_COMPATIBLE: &str = "-preset p4 -tune hq -multipass disabled -rc-lookahead 0 -spatial-aq 0 -temporal-aq 0 -bf 0 -b_ref_mode disabled";
 
@@ -378,11 +412,11 @@ pub fn checked_record_preset(
     cancel: &AtomicBool,
 ) -> Result<(String, bool)> {
     let preset = record_preset(&options.codec, options.crf, options.fps);
-    if !options.codec.contains("nvenc") {
+    if !options.codec.contains("nvenc") && options.codec != "libsvtav1" {
         return Ok((preset, false));
     }
     let mut compatible = false;
-    let selected = with_nvenc_fallback(&mut compatible, |fallback| {
+    let mut check = |fallback| {
         let selected = if fallback {
             preset
                 .replace(NVENC_RECORDING, NVENC_COMPATIBLE)
@@ -415,7 +449,12 @@ pub fn checked_record_preset(
             &mut Control::new(cancel, log),
         )?;
         Ok(selected)
-    })?;
+    };
+    let selected = if options.codec.contains("nvenc") {
+        with_nvenc_fallback(&mut compatible, check)?
+    } else {
+        check(false)?
+    };
     if compatible {
         log("NVENC: using compatibility settings (B-frames, AQ and multipass disabled)".into());
     }
@@ -425,15 +464,25 @@ pub fn checked_record_preset(
 /// Quality-targeted arguments HLAE hands to ffmpeg while recording (`crf` ≈ quality, lower = better).
 /// NVENC uses constant QP for capture; size fitting uses VBR separately.
 pub fn record_preset(codec: &str, crf: u32, fps: u32) -> String {
-    let mut parts = vec![format!("-c:v {codec}"), s("-pix_fmt yuv420p")];
-    if codec.contains("nvenc") {
+    let mut parts = vec![
+        format!("-c:v {codec}"),
+        format!("-pix_fmt {}", pixel_format(codec)),
+    ];
+    if codec == "libsvtav1" {
         parts.push(format!(
-            "-rc constqp -qp {crf} -b:v 0 {NVENC_RECORDING} -g {} -profile:v {}",
+            "-crf {crf} -preset 8 -svtav1-params {AV1_PARAMS} -g {}",
+            u64::from(fps) * 2
+        ));
+    } else if codec.contains("nvenc") {
+        parts.push(format!(
+            "-rc constqp -qp {crf} -b:v 0 {NVENC_RECORDING} -g {} {}",
             u64::from(fps) * 2,
-            if is_hevc(codec) {
-                "main -b_ref_mode middle"
+            if is_av1(codec) {
+                ""
+            } else if is_hevc(codec) {
+                "-profile:v main -b_ref_mode middle"
             } else {
-                "high"
+                "-profile:v high"
             }
         ));
     } else {
@@ -463,6 +512,7 @@ pub fn encode_to_size(
         input,
         output,
         SizeOptions {
+            combat_windows: &[],
             max_size_mb,
             codec,
             audio_kbps,
@@ -474,6 +524,7 @@ pub fn encode_to_size(
 }
 
 pub struct SizeOptions<'a> {
+    pub combat_windows: &'a [[f64; 2]],
     pub max_size_mb: f64,
     pub codec: &'a str,
     pub audio_kbps: u32,
@@ -488,7 +539,18 @@ pub fn encode_to_size_with_progress(
     progress: &mut dyn FnMut(f64),
     control: &mut Control<'_>,
 ) -> Result<SizeResult> {
+    if !options.combat_windows.is_empty() {
+        if let Some(result) = combat::encode(
+            ffmpeg_exe, input, output, &options, compatible, progress, control,
+        )? {
+            return Ok(result);
+        }
+        (control.log)(
+            "combat quality priority: no usable frame allocation; using normal size fitting".into(),
+        );
+    }
     let SizeOptions {
+        combat_windows: _,
         max_size_mb,
         codec,
         audio_kbps,
@@ -548,11 +610,13 @@ pub fn encode_to_size_with_progress(
             s("-movflags"),
             s("+faststart"),
             s("-pix_fmt"),
-            s("yuv420p"),
+            s(pixel_format(codec)),
             s("-fps_mode"),
             s("passthrough"),
         ];
         common.extend(tag_args(codec));
+        // Keep analysis only across size retries; a stall restart gets a new directory.
+        let pass_dir = tempfile::tempdir()?;
         for attempt in 0..4 {
             control.check_cancelled()?;
             (control.log)(format!(
@@ -573,7 +637,15 @@ pub fn encode_to_size_with_progress(
                         s("-b:v"),
                         format!("{bitrate}k"),
                         s("-maxrate"),
-                        format!("{bitrate}k"),
+                        format!(
+                            "{}k",
+                            u64::from(bitrate)
+                                * if (is_hevc(codec) || is_av1(codec)) && !fallback {
+                                    2
+                                } else {
+                                    1
+                                }
+                        ),
                         s("-bufsize"),
                         format!("{}k", u64::from(bitrate) * 2),
                     ]);
@@ -581,18 +653,19 @@ pub fn encode_to_size_with_progress(
                         if fallback {
                             NVENC_COMPATIBLE
                         } else {
-                            NVENC_RECORDING
+                            NVENC_SIZE
                         }
                         .split_whitespace()
                         .map(s),
                     );
-                    args.extend([
-                        s("-force_key_frames"),
-                        s("expr:gte(t,n_forced*2)"),
-                        s("-profile:v"),
-                        s(if is_hevc(codec) { "main" } else { "high" }),
-                    ]);
-                    if is_hevc(codec) && !fallback {
+                    args.extend([s("-force_key_frames"), s("expr:gte(t,n_forced*2)")]);
+                    if !is_av1(codec) {
+                        args.extend([
+                            s("-profile:v"),
+                            s(if is_hevc(codec) { "main" } else { "high" }),
+                        ]);
+                    }
+                    if !fallback {
                         args.extend([s("-b_ref_mode"), s("middle")]);
                     }
                     args.push(output_s.clone());
@@ -608,29 +681,38 @@ pub fn encode_to_size_with_progress(
                     )
                 })?;
             } else {
-                let tmp = tempfile::tempdir()?;
-                let passlog = tmp
+                let passlog = pass_dir
                     .path()
                     .join("ffmpeg2pass")
                     .to_string_lossy()
                     .replace('\\', "/");
                 let null_sink = if cfg!(windows) { "NUL" } else { "/dev/null" };
-                let rate = [
+                let mut rate = vec![
                     s("-c:v"),
                     s(codec),
                     s("-b:v"),
                     format!("{bitrate}k"),
-                    s("-maxrate"),
-                    format!("{}k", (bitrate as f64 * 1.3) as u32),
-                    s("-bufsize"),
-                    format!("{}k", u64::from(bitrate) * 2),
                     s("-preset"),
-                    s("medium"),
+                    s(cpu_size_preset(codec)),
                     s("-pix_fmt"),
-                    s("yuv420p"),
+                    s(pixel_format(codec)),
                     s("-fps_mode"),
                     s("passthrough"),
                 ];
+                if codec == "libsvtav1" {
+                    rate.extend([s("-svtav1-params"), s(AV1_PARAMS)]);
+                } else {
+                    rate.extend([
+                        s("-maxrate"),
+                        format!("{}k", u64::from(bitrate) * 2),
+                        s("-bufsize"),
+                        format!("{}k", u64::from(bitrate) * 2),
+                    ]);
+                }
+                if codec == "libx264" {
+                    // Keep 1080p60 at High Level 4.2 rather than veryslow's 16-reference Level 5.1.
+                    rate.extend([s("-refs"), s("4")]);
+                }
                 let pass_args = |n: u32| -> Vec<String> {
                     if codec == "libx265" {
                         vec![
@@ -650,17 +732,21 @@ pub fn encode_to_size_with_progress(
                 pass1.extend(rate.iter().cloned());
                 pass1.extend(pass_args(1));
                 pass1.extend([s("-an"), s("-f"), s("null"), s(null_sink)]);
-                (control.log)("size fitting: CPU pass 1/2".into());
-                run_progress(
-                    ffmpeg_exe,
-                    &pass1,
-                    seconds,
-                    &mut |p| {
-                        reported = reported.max(start + span * p / 2.0);
-                        progress(reported)
-                    },
-                    control,
-                )?;
+                if codec == "libsvtav1" && attempt > 0 {
+                    (control.log)("size fitting: reusing AV1 first-pass analysis".into());
+                } else {
+                    (control.log)("size fitting: CPU pass 1/2".into());
+                    run_progress(
+                        ffmpeg_exe,
+                        &pass1,
+                        seconds,
+                        &mut |p| {
+                            reported = reported.max(start + span * p / 2.0);
+                            progress(reported)
+                        },
+                        control,
+                    )?;
+                }
                 let mut pass2 = common.clone();
                 pass2.extend(rate.iter().cloned());
                 pass2.extend(pass_args(2));
@@ -992,6 +1078,10 @@ mod tests {
                 assert!(preset.contains("-g 180"));
                 assert!(!preset.contains("-cq "));
                 assert!(record_preset(codec, 20, 60).contains("-g 120"));
+            } else if codec == "libsvtav1" {
+                assert!(preset.contains("-preset 8"));
+                assert!(preset.contains("-pix_fmt yuv420p10le"));
+                assert!(preset.contains(AV1_PARAMS));
             } else {
                 assert!(preset.contains(if is_hevc(codec) {
                     "-preset fast -profile:v main"
@@ -1003,6 +1093,63 @@ mod tests {
             }
         }
     }
+    #[test]
+    #[ignore = "requires FFMPEG with libsvtav1"]
+    fn real_av1_analysis_reuse_cancellation_preserves_files() {
+        let ffmpeg = PathBuf::from(std::env::var("FFMPEG").expect("FFMPEG"));
+        let dir = tempfile::tempdir().unwrap();
+        let input = dir.path().join("source.mp4");
+        run(
+            &ffmpeg,
+            &[
+                s("-y"),
+                s("-f"),
+                s("lavfi"),
+                s("-i"),
+                s("testsrc2=size=320x180:rate=60:duration=3"),
+                s("-c:v"),
+                s("libx264"),
+                s("-crf"),
+                s("0"),
+                input.to_string_lossy().into_owned(),
+            ],
+        )
+        .unwrap();
+        let original = std::fs::read(&input).unwrap();
+        for windows in [&[][..], &[[0.317, 0.91], [1.117, 2.15]][..]] {
+            let output = dir.path().join("keep.mp4");
+            std::fs::write(&output, b"existing destination").unwrap();
+            let cancel = AtomicBool::new(false);
+            let mut reused = false;
+            let error = encode_to_size_with_progress(
+                &ffmpeg,
+                &input,
+                &output,
+                SizeOptions {
+                    combat_windows: windows,
+                    max_size_mb: 0.005,
+                    codec: "libsvtav1",
+                    audio_kbps: 96,
+                },
+                &mut false,
+                &mut |_| {},
+                &mut Control::new(&cancel, &mut |line| {
+                    println!("{line}");
+                    if line.contains("reusing AV1 first-pass analysis") {
+                        reused = true;
+                        cancel.store(true, Ordering::Relaxed);
+                    }
+                }),
+            )
+            .unwrap_err();
+            assert!(reused, "fixture must reach an AV1 capacity retry: {error}");
+            assert_eq!(error.to_string(), "cancelled");
+            assert_eq!(std::fs::read(&output).unwrap(), b"existing destination");
+            assert_eq!(std::fs::read(&input).unwrap(), original);
+            assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 2);
+        }
+    }
+
     #[test]
     #[ignore = "requires FFMPEG; set TEST_NVENC=1 to include NVIDIA encoders"]
     fn real_encoding_preserves_format_and_never_publishes_oversized_files() {
@@ -1071,6 +1218,7 @@ mod tests {
             &input,
             &cancelled_output,
             SizeOptions {
+                combat_windows: &[],
                 max_size_mb: 0.5,
                 codec: "libx264",
                 audio_kbps: 192,
@@ -1121,20 +1269,47 @@ mod tests {
             args.extend(preset.split_whitespace().map(s));
             args.extend([s("-c:a"), s("aac"), capture.to_string_lossy().into_owned()]);
             run(&ffmpeg, &args).unwrap();
+            let mut fit_logs = Vec::new();
             let result = encode_to_size_with_progress(
                 &ffmpeg,
                 &capture,
                 &output,
                 SizeOptions {
+                    combat_windows: &[],
                     max_size_mb: 0.5,
                     codec: codec,
                     audio_kbps: 192,
                 },
                 &mut false,
                 &mut |p| updates.push(p),
-                &mut Control::new(&AtomicBool::new(false), &mut |_| {}),
+                &mut Control::new(&AtomicBool::new(false), &mut |line| fit_logs.push(line)),
             )
             .unwrap();
+            let attempts = fit_logs
+                .iter()
+                .filter(|line| line.starts_with("size fitting attempt "))
+                .count();
+            let reuses = fit_logs
+                .iter()
+                .filter(|line| line.contains("reusing AV1 first-pass analysis"))
+                .count();
+            assert_eq!(
+                reuses,
+                if codec == "libsvtav1" {
+                    attempts - 1
+                } else {
+                    0
+                }
+            );
+            if codec == "libsvtav1" {
+                assert_eq!(
+                    fit_logs
+                        .iter()
+                        .filter(|line| line.as_str() == "size fitting: CPU pass 1/2")
+                        .count(),
+                    1
+                );
+            }
             assert_eq!(updates.last(), Some(&1.0));
             // Fast hardware encodes may first report at pass completion (0.9), before verification.
             assert!(updates.iter().any(|p| *p > 0.0 && *p < 1.0));
@@ -1149,7 +1324,7 @@ mod tests {
                     "-v",
                     "error",
                     "-show_entries",
-                    "stream=codec_type,width,height,avg_frame_rate,sample_rate,channels",
+                    "stream=codec_type,codec_name,width,height,avg_frame_rate,nb_frames,sample_rate,channels",
                     "-of",
                     "json",
                 ])
@@ -1159,10 +1334,21 @@ mod tests {
             let streams = info["streams"].as_array().unwrap();
             let video = streams.iter().find(|v| v["codec_type"] == "video").unwrap();
             assert_eq!(
+                video["codec_name"],
+                if is_av1(codec) {
+                    "av1"
+                } else if is_hevc(codec) {
+                    "hevc"
+                } else {
+                    "h264"
+                }
+            );
+            assert_eq!(
                 (video["width"].as_u64(), video["height"].as_u64()),
                 (Some(960), Some(540))
             );
             assert_eq!(video["avg_frame_rate"], "90/1");
+            assert_eq!(video["nb_frames"], "360");
             let audio = streams.iter().find(|v| v["codec_type"] == "audio").unwrap();
             assert_eq!(audio["sample_rate"], "48000");
             assert_eq!(audio["channels"], 2);
@@ -1188,6 +1374,7 @@ mod tests {
                     &compatible_capture,
                     &fitted,
                     SizeOptions {
+                        combat_windows: &[],
                         max_size_mb: 0.5,
                         codec: codec,
                         audio_kbps: 192,

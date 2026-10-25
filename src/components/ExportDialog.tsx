@@ -64,8 +64,16 @@ export function ExportDialog({open,onOpenChange,count,seconds,status,onSetup,onS
                   <SegmentedControl.Item value="10">10 MB</SegmentedControl.Item>
                   <SegmentedControl.Item value="20">20 MB</SegmentedControl.Item>
                   <SegmentedControl.Item value="50">50 MB</SegmentedControl.Item>
+                  <SegmentedControl.Item value="100">100 MB</SegmentedControl.Item>
                   <SegmentedControl.Item value="null">{t('highlights.unlimited')}</SegmentedControl.Item>
                 </SegmentedControl.Root>
+                {opts.maxSizeMb != null && <Box mt="2">
+                  <Text as="label" size="2"><Flex gap="2" align="center">
+                    <Switch size="1" checked={opts.combatQualityPriority} onCheckedChange={combatQualityPriority=>setOpts({...opts,combatQualityPriority})} />
+                    {t('highlights.combatQualityPriority')}
+                  </Flex></Text>
+                  <Text as="p" size="1" color="gray" mt="1">{t('highlights.combatQualityPriorityHint')}</Text>
+                </Box>}
               </Box>
               <Box>
                 <Text as="div" size="1" color="gray" mb="1">
@@ -104,12 +112,15 @@ export function ExportDialog({open,onOpenChange,count,seconds,status,onSetup,onS
                 <Select.Root value={opts.codec} onValueChange={(v) => setOpts({ ...opts, codec: v, crf: RENDER_QUALITY[v] ?? DEFAULT_RENDER_OPTIONS.crf })} size="1">
                   <Select.Trigger style={{ width: '100%' }} />
                   <Select.Content>
+                    <Select.Item value="libsvtav1">AV1 · CPU（libsvtav1）</Select.Item>
+                    <Select.Item value="av1_nvenc">AV1 · NVIDIA（av1_nvenc）</Select.Item>
                     <Select.Item value="libx264">H.264 · CPU（libx264）</Select.Item>
                     <Select.Item value="libx265">H.265 · CPU（libx265）</Select.Item>
                     <Select.Item value="h264_nvenc">H.264 · NVIDIA（h264_nvenc）</Select.Item>
                     <Select.Item value="hevc_nvenc">H.265 · NVIDIA（hevc_nvenc）</Select.Item>
                   </Select.Content>
                 </Select.Root>
+                {(opts.codec === 'libsvtav1' || opts.codec === 'av1_nvenc') && <Text as="p" size="1" color="gray" mt="1">{t('highlights.av1Hint')}</Text>}
               </Box>
             </Flex>
             <Flex direction="column" gap="3">

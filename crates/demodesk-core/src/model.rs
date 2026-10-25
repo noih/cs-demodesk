@@ -147,6 +147,8 @@ pub struct DemoData {
     #[serde(default)]
     pub damage_ticks: BTreeMap<SteamId, Vec<i32>>,
     #[serde(default)]
+    pub combat_ticks: BTreeMap<SteamId, Vec<i32>>,
+    #[serde(default)]
     pub activity: BTreeMap<SteamId, ActivityStats>,
     #[serde(default)]
     pub aim: BTreeMap<SteamId, BTreeMap<String, crate::aim::AimStats>>,

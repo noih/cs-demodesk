@@ -1988,7 +1988,18 @@ impl Engine {
                         .cloned()
                         .collect()
                 };
+                let combat_ticks = if job.options.combat_quality_priority && job.options.max_size_mb.is_some() {
+                    parsed.combat_ticks.clone().or_else(|| {
+                        self.store.replay_is_current(&job.demo_id).then(|| {
+                            crate::render::combat::cached_ticks(&self.store.replay_path(&job.demo_id), parsed.info.tick_rate).ok()
+                        }).flatten()
+                    })
+                } else { None };
+                if job.options.combat_quality_priority && job.options.max_size_mb.is_some() && combat_ticks.is_none() {
+                    log("combat quality priority: event data unavailable; using normal size fitting (reparse the demo to enable)".into());
+                }
                 render_highlights(RenderJobInput {
+                    combat_ticks: combat_ticks.as_ref(),
                     demo: &parsed.info,
                     demo_path: PathBuf::from(&meta.path),
                     highlights,

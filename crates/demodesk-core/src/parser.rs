@@ -455,7 +455,9 @@ impl DemoParser {
                 (r.round, metrics)
             })
             .collect();
+        let combat_ticks = combat_ticks_from_events(&out.game_events, &kills, &damage_ticks);
         Ok(DemoData {
+            combat_ticks,
             round_metrics,
             info: DemoInfo {
                 path: path.to_string_lossy().to_string(),
@@ -663,6 +665,41 @@ impl<'a> Fields<'a> {
             t => t,
         }
     }
+}
+
+fn combat_ticks_from_events(
+    events: &[GameEvent],
+    kills: &[KillEvent],
+    damage_ticks: &BTreeMap<SteamId, Vec<i32>>,
+) -> BTreeMap<SteamId, Vec<i32>> {
+    let mut combat_ticks = damage_ticks.clone();
+    for event in events {
+        let f = Fields(event);
+        if event.name == "weapon_fire"
+            && crate::aim::group(f.str("weapon").trim_start_matches("weapon_")).is_some()
+        {
+            combat_ticks
+                .entry(f.str("user_steamid"))
+                .or_default()
+                .push(f.tick());
+        }
+    }
+    for kill in kills {
+        for id in kill
+            .attacker
+            .iter()
+            .map(|a| &a.steamid)
+            .chain(std::iter::once(&kill.victim.steamid))
+        {
+            combat_ticks.entry(id.clone()).or_default().push(kill.tick);
+        }
+    }
+    combat_ticks.retain(|id, ticks| {
+        ticks.sort_unstable();
+        ticks.dedup();
+        !id.is_empty() && id != "0"
+    });
+    combat_ticks
 }
 
 fn kills_from_events(events: &[&GameEvent]) -> Vec<KillEvent> {
@@ -895,6 +932,45 @@ fn rounds_from_events(
 mod round_tests {
     use super::*;
     use parser::second_pass::game_events::EventField;
+
+    #[test]
+    fn combat_events_combine_shots_damage_and_both_sides_of_deaths() {
+        let shot = |id: &str, weapon: &str, tick| GameEvent {
+            name: "weapon_fire".into(),
+            tick,
+            fields: vec![
+                EventField {
+                    name: "user_steamid".into(),
+                    data: Some(Variant::String(id.into())),
+                },
+                EventField {
+                    name: "weapon".into(),
+                    data: Some(Variant::String(weapon.into())),
+                },
+            ],
+        };
+        let kill: KillEvent = serde_json::from_value(serde_json::json!({
+            "tick":30,"round":1,"attacker":{"steamid":"a","name":"a","team":"TERRORIST","health":100,"weaponName":"ak47"},
+            "victim":{"steamid":"b","name":"b","team":"CT","weaponName":"m4a1"},
+            "weapon":"ak47","headshot":false,"noscope":false,"penetrated":0,"thruSmoke":false,
+            "attackerBlind":false,"attackerInAir":false,"assistedFlash":false,"distance":10,"hitgroup":"chest","isFreezePeriod":false
+        })).unwrap();
+        let damage = BTreeMap::from([("a".into(), vec![20]), ("b".into(), vec![20])]);
+        let ticks = combat_ticks_from_events(
+            &[
+                shot("a", "weapon_ak47", 10),
+                shot("a", "ak47", 10),
+                shot("a", "smokegrenade", 15),
+                shot("0", "ak47", 25),
+            ],
+            &[kill],
+            &damage,
+        );
+        assert_eq!(
+            ticks,
+            BTreeMap::from([("a".into(), vec![10, 20, 30]), ("b".into(), vec![20, 30])])
+        );
+    }
 
     fn event(name: &str, tick: i32) -> GameEvent {
         GameEvent {

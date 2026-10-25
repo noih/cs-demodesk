@@ -5,6 +5,7 @@
 pub mod actions;
 #[cfg(windows)]
 mod audio;
+pub(crate) mod combat;
 pub mod diagnostics;
 pub mod encode;
 mod leftovers;
@@ -173,7 +174,7 @@ pub struct RenderOptions {
     pub fps: u32,
     pub width: u32,
     pub height: u32,
-    /// one of encode::CODECS: libx264 | libx265 | h264_nvenc | hevc_nvenc
+    /// One of encode::CODECS.
     pub codec: String,
     pub crf: u32,
     pub container: String,
@@ -205,6 +206,7 @@ pub struct RenderOptions {
     pub round_result_label: String,
     /// Re-encode so each output file — the merged video, or every clip — is at most this many MB
     pub max_size_mb: Option<f64>,
+    pub combat_quality_priority: bool,
     pub audio_kbps: u32,
     pub extra_launch_options: Vec<String>,
 }
@@ -215,8 +217,8 @@ impl Default for RenderOptions {
             fps: 60,
             width: 1920,
             height: 1080,
-            codec: "libx264".into(),
-            crf: 19,
+            codec: "libsvtav1".into(),
+            crf: 20,
             container: "mp4".into(),
             camera: Camera::Slot,
             death_notice_seconds: 5,
@@ -238,6 +240,7 @@ impl Default for RenderOptions {
             key_moments_only: true,
             round_result_label: "Round result".into(),
             max_size_mb: Some(20.0),
+            combat_quality_priority: true,
             audio_kbps: 192,
             extra_launch_options: vec![],
         }
@@ -247,6 +250,8 @@ impl Default for RenderOptions {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RenderedClip {
+    #[serde(skip)]
+    pub combat_windows: Vec<[f64; 2]>,
     pub highlight_id: String,
     pub title: String,
     pub file: Option<PathBuf>,
@@ -392,6 +397,30 @@ fn recording_passes(clips: &[RenderClip], tick_rate: f64) -> Vec<Vec<usize>> {
     passes
 }
 
+fn joined_combat_windows(
+    ffmpeg: &Path,
+    parts: &[&RenderedClip],
+    control: &mut Control<'_>,
+) -> Result<Vec<[f64; 2]>> {
+    if parts.iter().all(|p| p.combat_windows.is_empty()) {
+        return Ok(vec![]);
+    }
+    let mut result = Vec::new();
+    let mut offset = 0.0;
+    for part in parts {
+        let Some(file) = &part.file else {
+            return Ok(vec![]);
+        };
+        result.extend(
+            part.combat_windows
+                .iter()
+                .map(|w| [w[0] + offset, w[1] + offset]),
+        );
+        offset += encode::probe_media(ffmpeg, file, control)?.0;
+    }
+    Ok(result)
+}
+
 fn join_highlight_parts(
     ffmpeg: &Path,
     highlights: &[Highlight],
@@ -406,6 +435,11 @@ fn join_highlight_parts(
         Control::new(cancel, log).check_cancelled()?;
         let group: Vec<_> = parts.iter().filter(|c| c.highlight_id == h.id).collect();
         let files: Vec<_> = group.iter().filter_map(|c| c.file.clone()).collect();
+        let combat_windows = if files.len() == group.len() {
+            joined_combat_windows(ffmpeg, &group, &mut Control::new(cancel, log))?
+        } else {
+            vec![]
+        };
         let file = if files.len() != group.len() || files.is_empty() {
             None
         } else if files.len() == 1 {
@@ -417,6 +451,7 @@ fn join_highlight_parts(
                 Control::new(cancel, log).check_cancelled()?;
                 log(format!("{}: {error:#}", h.title));
                 joined.push(RenderedClip {
+                    combat_windows: vec![],
                     highlight_id: h.id.clone(),
                     title: h.title.clone(),
                     file: None,
@@ -432,6 +467,7 @@ fn join_highlight_parts(
             Some(dest)
         };
         joined.push(RenderedClip {
+            combat_windows,
             highlight_id: h.id.clone(),
             title: h.title.clone(),
             file,
@@ -442,6 +478,7 @@ fn join_highlight_parts(
 }
 
 pub struct RenderJobInput<'a> {
+    pub combat_ticks: Option<&'a combat::CombatTicks>,
     pub demo: &'a DemoInfo,
     pub demo_path: PathBuf,
     pub highlights: Vec<Highlight>,
@@ -469,6 +506,7 @@ fn safe_name(s: &str) -> String {
 
 pub fn render_highlights(input: RenderJobInput) -> Result<RenderResult> {
     let RenderJobInput {
+        combat_ticks,
         demo,
         demo_path,
         mut highlights,
@@ -636,6 +674,7 @@ pub fn render_highlights(input: RenderJobInput) -> Result<RenderResult> {
     stage("encoding");
     progress(recording_end);
     let mut fit_to_size = |file: PathBuf,
+                           combat_windows: &[[f64; 2]],
                            log: &mut dyn FnMut(String),
                            report: &mut dyn FnMut(f64)|
      -> Result<PathBuf> {
@@ -654,6 +693,11 @@ pub fn render_highlights(input: RenderJobInput) -> Result<RenderResult> {
             &file,
             &small,
             encode::SizeOptions {
+                combat_windows: if o.combat_quality_priority {
+                    combat_windows
+                } else {
+                    &[]
+                },
                 max_size_mb: mb,
                 codec: &o.codec,
                 audio_kbps: o.audio_kbps,
@@ -709,6 +753,7 @@ pub fn render_highlights(input: RenderJobInput) -> Result<RenderResult> {
                 o.container
             ));
             result.clips.push(RenderedClip {
+                combat_windows: vec![],
                 highlight_id: h.id.clone(),
                 title: h.title.clone(),
                 file: None,
@@ -734,7 +779,18 @@ pub fn render_highlights(input: RenderJobInput) -> Result<RenderResult> {
             recording_end
                 + (muxing_end - recording_end) * (out.index + 1) as f64 / outputs.len() as f64,
         );
+        let combat_windows = if o.combat_quality_priority && o.max_size_mb.is_some() {
+            if let (Some(ticks), Some(path)) = (combat_ticks, file.as_ref()) {
+                let seconds = encode::probe_media(ffmpeg, path, &mut Control::new(&cancel, log))?.0;
+                combat::windows(h, ticks, demo.tick_rate, seconds)
+            } else {
+                vec![]
+            }
+        } else {
+            vec![]
+        };
         result.clips.push(RenderedClip {
+            combat_windows,
             highlight_id: h.id.clone(),
             title: h.title.clone(),
             file,
@@ -775,9 +831,15 @@ pub fn render_highlights(input: RenderJobInput) -> Result<RenderResult> {
                 })
                 .collect();
         }
+        let ordered: Vec<_> = muxed
+            .iter()
+            .filter_map(|path| result.clips.iter().find(|c| c.file.as_ref() == Some(path)))
+            .collect();
+        let combat_windows =
+            joined_combat_windows(ffmpeg, &ordered, &mut Control::new(&cancel, log))?;
         concat_clips(ffmpeg, &muxed, &merged, &mut Control::new(&cancel, log))?;
         stage("encoding: fitting");
-        let merged = fit_to_size(merged, log, &mut |p| {
+        let merged = fit_to_size(merged, &combat_windows, log, &mut |p| {
             progress(muxing_end + (0.99 - muxing_end) * p)
         })?;
         result.final_bytes = Some(std::fs::metadata(&merged)?.len());
@@ -799,7 +861,7 @@ pub fn render_highlights(input: RenderJobInput) -> Result<RenderResult> {
                 .sum();
             if let Some(file) = c.file.take() {
                 stage(&format!("encoding {}/{}: fitting", i + 1, highlights.len()));
-                let fitted = fit_to_size(file, log, &mut |p| {
+                let fitted = fit_to_size(file, &c.combat_windows, log, &mut |p| {
                     progress(
                         muxing_end
                             + (0.99 - muxing_end) * (completed_seconds + seconds * p)
@@ -1113,6 +1175,15 @@ mod tests {
     fn key_moment_setting_defaults_on_and_preserves_explicit_off() {
         let defaults: RenderOptions = serde_json::from_str("{}").unwrap();
         assert!(defaults.key_moments_only);
+        assert!(defaults.combat_quality_priority);
+        assert_eq!(defaults.codec, "libsvtav1");
+        let existing: RenderOptions =
+            serde_json::from_str(r#"{"codec":"hevc_nvenc","crf":22}"#).unwrap();
+        assert_eq!(existing.codec, "hevc_nvenc");
+        assert_eq!(existing.crf, 22);
+        let disabled: RenderOptions =
+            serde_json::from_str(r#"{"combatQualityPriority":false}"#).unwrap();
+        assert!(!disabled.combat_quality_priority);
         let off: RenderOptions = serde_json::from_str(r#"{"keyMomentsOnly":false}"#).unwrap();
         assert!(!off.key_moments_only);
     }
@@ -1122,12 +1193,14 @@ mod tests {
         let h = sample_highlight("a", "p", vec![]);
         let parts = vec![
             super::RenderedClip {
+                combat_windows: vec![],
                 highlight_id: "a".into(),
                 title: "a".into(),
                 file: Some("part1.mp4".into()),
                 bytes: None,
             },
             super::RenderedClip {
+                combat_windows: vec![],
                 highlight_id: "a".into(),
                 title: "a".into(),
                 file: None,
@@ -1181,6 +1254,7 @@ mod tests {
                 String::from_utf8_lossy(&output.stderr)
             );
             parts.push(super::RenderedClip {
+                combat_windows: vec![[0.25, 0.75]],
                 highlight_id: if index < 3 { "a" } else { "b" }.into(),
                 title: "test".into(),
                 file: Some(file),
@@ -1201,6 +1275,11 @@ mod tests {
         )
         .unwrap();
         assert_eq!(joined.len(), 2);
+        assert_eq!(
+            joined[0].combat_windows,
+            vec![[0.25, 0.75], [1.25, 1.75], [2.25, 2.75]]
+        );
+        assert_eq!(joined[1].combat_windows, vec![[0.25, 0.75]]);
         assert!(!dir.path().join("part0.mp4").exists());
         assert!(dir.path().join("part3.mp4").exists());
         let mut probe = std::process::Command::new(&ffmpeg);
