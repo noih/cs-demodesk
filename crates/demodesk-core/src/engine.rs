@@ -1724,12 +1724,12 @@ impl Engine {
         let _guard = self.data_lock.lock().unwrap();
         let (meta, parsed) = self
             .get_demo(demo_id)
-            .ok_or_else(|| anyhow!("demo not found"))?;
+            .ok_or_else(|| anyhow::Error::new(crate::ErrorCode::DemoMissing))?;
         if meta.status != DemoStatus::Parsed || parsed.is_none() {
-            return Err(anyhow!("demo not parsed"));
+            return Err(anyhow::Error::new(crate::ErrorCode::DemoNotReady));
         }
         if highlight_ids.is_empty() {
-            return Err(anyhow!("pick at least one highlight"));
+            return Err(crate::ErrorCode::NoHighlights.into());
         }
         check_ascii_path(Path::new(&meta.path))?;
         let job = self.store.new_job(demo_id, highlight_ids, options)?;
@@ -1749,8 +1749,8 @@ impl Engine {
     ) -> Result<Vec<crate::scoring::clips::RuleClips>> {
         let (_, parsed) = self
             .get_demo(demo_id)
-            .ok_or_else(|| anyhow!("demo not found"))?;
-        let parsed = parsed.ok_or_else(|| anyhow!("demo not parsed"))?;
+            .ok_or_else(|| anyhow::Error::new(crate::ErrorCode::DemoMissing))?;
+        let parsed = parsed.ok_or_else(|| anyhow::Error::new(crate::ErrorCode::DemoNotReady))?;
         let record = self
             .scoring_history(demo_id, &selection.player_id)?
             .into_iter()
@@ -1777,10 +1777,13 @@ impl Engine {
         mut options: RenderOptions,
     ) -> Result<Vec<RenderJob>> {
         let _guard = self.data_lock.lock().unwrap();
-        let groups = self.analysis_clips(demo_id, &selection, options.merge)?;
+        let groups = self
+            .analysis_clips(demo_id, &selection, options.merge)
+            .map_err(|e| crate::ErrorCode::DemoNotReady.wrap(e))?;
+        anyhow::ensure!(!groups.is_empty(), crate::ErrorCode::NoHighlights);
         let (meta, _) = self
             .get_demo(demo_id)
-            .ok_or_else(|| anyhow!("demo not found"))?;
+            .ok_or_else(|| anyhow::Error::new(crate::ErrorCode::DemoMissing))?;
         check_ascii_path(Path::new(&meta.path))?;
         options.merge = true;
         let mut jobs: Vec<RenderJob> = Vec::new();
@@ -1800,6 +1803,10 @@ impl Engine {
         if let Err(error) = result {
             for mut job in jobs {
                 job.status = JobStatus::Error;
+                job.error_code = Some(crate::ErrorCode::classify(
+                    &error,
+                    crate::ErrorCode::ExportFailed,
+                ));
                 job.error = Some(format!("Export batch was not queued: {error:#}"));
                 job.finished_at = Some(now());
                 self.persist(&job);
@@ -1826,6 +1833,7 @@ impl Engine {
                 q.remove(pos);
                 if let Some(mut job) = self.store.get_job(id) {
                     job.status = JobStatus::Cancelled;
+                    job.error_code = Some(crate::ErrorCode::ExportCancelled);
                     job.finished_at = Some(now());
                     self.persist(&job);
                 }
@@ -1890,6 +1898,7 @@ impl Engine {
             for id in ids {
                 if let Some(mut job) = self.store.get_job(&id) {
                     job.status = JobStatus::Error;
+                    job.error_code = Some(crate::ErrorCode::ExportFailed);
                     job.error = Some(format!("Cannot start render worker: {e}"));
                     job.finished_at = Some(now());
                     self.persist(&job);
@@ -1957,10 +1966,10 @@ impl Engine {
         };
         let outcome = self
             .get_demo(&job.demo_id)
-            .ok_or_else(|| anyhow!("demo not found"))
+            .ok_or_else(|| anyhow::Error::new(crate::ErrorCode::DemoMissing))
             .and_then(|(meta, parsed)| {
                 let parsed = parsed.ok_or_else(|| {
-                    anyhow!("demo not parsed (parse it again after restarting the app)")
+                    anyhow::Error::new(crate::ErrorCode::DemoNotReady)
                 })?;
                 let wanted: HashSet<&str> = job.highlight_ids.iter().map(|s| s.as_str()).collect();
                 let highlights = if let Some(clips) = &job.analysis_clips {
@@ -1977,7 +1986,7 @@ impl Engine {
                     }
                     anyhow::ensure!(
                         format!("sha1:{}", hash.digest()) == clips.demo_fingerprint,
-                        "demo content changed since analysis; analyze again before exporting"
+                        crate::ErrorCode::DemoNotReady
                     );
                     clips.highlights.clone()
                 } else {
@@ -2020,43 +2029,69 @@ impl Engine {
         let _guard = self.data_lock.lock().unwrap();
         job.finished_at = Some(now());
         job.stage = None;
-        match outcome {
-            Ok(result) => {
-                job.outputs = job_outputs(&result);
-                job.failed_highlights = result.failed_highlights;
-                if let Some(clips) = &job.analysis_clips {
-                    for output in &mut job.outputs {
-                        if output.is_final {
-                            output.title = clips.title.clone();
-                        }
-                    }
-                }
-                if !job.outputs.is_empty() {
-                    job.progress = Some(1.0);
-                }
-                job.status = if job.outputs.is_empty() {
-                    JobStatus::Error
-                } else if !job.failed_highlights.is_empty() {
-                    JobStatus::Partial
-                } else {
-                    JobStatus::Done
-                };
-                if job.outputs.is_empty() {
-                    job.error = Some("no clip was recorded".into());
-                }
-            }
-            Err(e) => {
-                let msg = format!("{e:#}");
-                job.status = if msg == "cancelled" {
-                    JobStatus::Cancelled
-                } else {
-                    JobStatus::Error
-                };
-                job.error = Some(msg);
-            }
-        }
+        apply_render_outcome(&mut job, outcome, cancel.load(Ordering::Relaxed));
         self.persist(&job);
         *self.active_job.lock().unwrap() = None;
+    }
+}
+
+fn apply_render_outcome(
+    job: &mut RenderJob,
+    outcome: Result<crate::render::RenderResult>,
+    cancelled: bool,
+) {
+    match outcome {
+        Ok(result) => {
+            job.outputs = job_outputs(&result);
+            job.failed_highlights = result.failed_highlights;
+            if let Some(failure) = result.failure {
+                job.error_code = Some(failure.error_code);
+                job.error = Some(failure.message);
+            }
+            if let Some(clips) = &job.analysis_clips {
+                for output in &mut job.outputs {
+                    if output.is_final {
+                        output.title = clips.title.clone();
+                    }
+                }
+            }
+            if !job.outputs.is_empty() {
+                job.progress = Some(1.0);
+            }
+            job.status = if job.outputs.is_empty() {
+                JobStatus::Error
+            } else if !job.failed_highlights.is_empty() || job.error_code.is_some() {
+                JobStatus::Partial
+            } else {
+                JobStatus::Done
+            };
+            if job.error_code.is_none()
+                && (job.outputs.is_empty() || !job.failed_highlights.is_empty())
+            {
+                job.error_code = Some(crate::ErrorCode::NoVideoRecorded);
+                job.error = Some("no clip was recorded for one or more highlights".into());
+            }
+        }
+        Err(e) => {
+            job.error_code = Some(crate::ErrorCode::classify(
+                &e,
+                crate::ErrorCode::ExportFailed,
+            ));
+            let msg = format!("{e:#}");
+            job.status = if cancelled || job.error_code == Some(crate::ErrorCode::ExportCancelled) {
+                job.error_code = Some(crate::ErrorCode::ExportCancelled);
+                JobStatus::Cancelled
+            } else {
+                JobStatus::Error
+            };
+            job.error = Some(msg);
+        }
+    }
+    if let Some(message) = &job.error {
+        job.log.push(message.clone());
+        if job.log.len() > 400 {
+            job.log.drain(..job.log.len() - 400);
+        }
     }
 }
 
@@ -2065,7 +2100,7 @@ fn check_ascii_path(path: &Path) -> Result<()> {
     if path.to_string_lossy().is_ascii() {
         Ok(())
     } else {
-        Err(anyhow!("CS2 can only play demos from an ASCII path (playdemo limitation) — move or rename it: {}", path.display()))
+        Err(anyhow!("CS2 can only play demos from an ASCII path (playdemo limitation) — move or rename it: {}", path.display()).context(crate::ErrorCode::DemoPathUnsupported))
     }
 }
 
@@ -2107,6 +2142,71 @@ mod tests {
         fn notify(&self, event: Event) {
             let _ = self.0.send(event);
         }
+    }
+
+    #[test]
+    fn export_outcomes_preserve_partial_outputs_codes_and_logs() {
+        use crate::{
+            error::ExportError,
+            render::{RenderResult, RenderedClip},
+            ErrorCode,
+        };
+        let root = tempfile::tempdir().unwrap();
+        let (send, _receive) = mpsc::channel();
+        let engine = Engine::new(root.path().join("data"), Arc::new(Events(send))).unwrap();
+        let mut job = engine
+            .store
+            .new_job("demo", vec![], RenderOptions::default())
+            .unwrap();
+        let result = RenderResult {
+            final_video: None,
+            final_bytes: None,
+            clips: vec![RenderedClip {
+                highlight_id: "a".into(),
+                title: "completed".into(),
+                file: Some(root.path().join("clip.mp4")),
+                bytes: Some(12),
+                combat_windows: vec![],
+            }],
+            failed_highlights: vec!["failed".into()],
+            failure: Some(ExportError::new(
+                &anyhow!("encoder diagnostic").context(ErrorCode::GpuUnavailable),
+                ErrorCode::ExportFailed,
+            )),
+        };
+        apply_render_outcome(&mut job, Ok(result), false);
+        assert_eq!(job.status, JobStatus::Partial);
+        assert_eq!(job.outputs.len(), 1);
+        assert_eq!(job.error_code, Some(ErrorCode::GpuUnavailable));
+        assert!(job.log.last().unwrap().contains("encoder diagnostic"));
+        engine.store.save_job(&job).unwrap();
+        assert_eq!(
+            engine.store.get_job(&job.id).unwrap().error_code,
+            Some(ErrorCode::GpuUnavailable)
+        );
+        apply_render_outcome(&mut job, Err(ErrorCode::ExportCancelled.into()), false);
+        assert_eq!(job.status, JobStatus::Cancelled);
+        assert_eq!(job.outputs.len(), 1);
+        apply_render_outcome(&mut job, Err(anyhow!("unexpected diagnostic")), false);
+        assert_eq!(job.status, JobStatus::Error);
+        assert_eq!(job.error_code, Some(ErrorCode::ExportFailed));
+        let mut job = engine
+            .store
+            .new_job("demo", vec![], RenderOptions::default())
+            .unwrap();
+        apply_render_outcome(
+            &mut job,
+            Ok(RenderResult {
+                final_video: None,
+                final_bytes: None,
+                clips: vec![],
+                failed_highlights: vec![],
+                failure: None,
+            }),
+            false,
+        );
+        assert_eq!(job.error_code, Some(ErrorCode::NoVideoRecorded));
+        assert_eq!(job.status, JobStatus::Error);
     }
 
     #[test]

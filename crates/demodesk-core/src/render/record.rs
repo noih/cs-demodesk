@@ -9,7 +9,8 @@
 use super::actions::{mirv_cmd_xml, sequence_folder_name, Scheduled, MARK};
 use super::hide;
 use super::setup::register_ffmpeg_with_hlae;
-use anyhow::{anyhow, Result};
+use crate::ErrorCode;
+use anyhow::{anyhow, Context, Result};
 use std::io::{BufRead, BufReader, Write};
 use std::net::TcpStream;
 use std::path::{Path, PathBuf};
@@ -269,9 +270,13 @@ impl Netcon {
         Ok(Self { stream, lines: rx })
     }
     fn send(&mut self, cmd: &str) -> Result<()> {
-        self.stream.write_all(cmd.as_bytes())?;
-        self.stream.write_all(b"\n")?;
-        self.stream.flush()?;
+        self.stream
+            .write_all(cmd.as_bytes())
+            .context(ErrorCode::ConsoleUnavailable)?;
+        self.stream
+            .write_all(b"\n")
+            .context(ErrorCode::ConsoleUnavailable)?;
+        self.stream.flush().context(ErrorCode::ConsoleUnavailable)?;
         Ok(())
     }
     /// Drain everything received so far.
@@ -291,7 +296,9 @@ impl Netcon {
                 Ok(l) if l.contains(token) => return Ok(true),
                 Ok(_) => {}
                 Err(mpsc::RecvTimeoutError::Timeout) => {}
-                Err(mpsc::RecvTimeoutError::Disconnected) => return Err(anyhow!("netcon closed")),
+                Err(mpsc::RecvTimeoutError::Disconnected) => {
+                    return Err(ErrorCode::ConsoleUnavailable.into())
+                }
             }
         }
         Ok(false)
@@ -460,11 +467,11 @@ impl RecordSession<'_> {
         std::fs::create_dir_all(&self.cfg_dir)?;
         let launcher = &self.hlae_exe;
         if self.cancelled() {
-            return Err(anyhow!("cancelled"));
+            return Err(ErrorCode::ExportCancelled.into());
         }
         let hook = if !self.show_game {
             std::fs::write(self.output_dir.join("window-hook.log"), "")?;
-            Some(super::startup::prepare_hook(&self.cfg_dir)?)
+            Some(super::startup::prepare_hook(&self.cfg_dir).context(ErrorCode::WindowHookFailed)?)
         } else {
             None
         };
@@ -494,7 +501,9 @@ impl RecordSession<'_> {
                 self.output_dir.join("window-hook.log"),
             );
         }
-        let mut hlae = processes.spawn(&mut cmd)?;
+        let mut hlae = processes
+            .spawn(&mut cmd)
+            .map_err(|e| ErrorCode::GameLaunchFailed.wrap(e.into()))?;
 
         // HLAE is only a loader; it returns quickly once cs2.exe has been injected.
         let deadline = Instant::now() + Duration::from_secs(60);
@@ -509,11 +518,12 @@ impl RecordSession<'_> {
             }
             if Instant::now() > deadline {
                 let _ = hlae.kill();
-                return Err(anyhow!("cs2.exe did not start within 60 s"));
+                return Err(anyhow!("cs2.exe did not start within 60 s")
+                    .context(ErrorCode::GameLaunchFailed));
             }
             if self.cancelled() {
                 let _ = hlae.kill();
-                return Err(anyhow!("cancelled"));
+                return Err(ErrorCode::ExportCancelled.into());
             }
             std::thread::sleep(Duration::from_millis(250));
         };
@@ -525,9 +535,10 @@ impl RecordSession<'_> {
         };
         std::thread::sleep(Duration::from_secs(3));
         if tasklist("cs2.exe", true).contains("Error - AfxHookSource") {
-            return Err(anyhow!(
-                "HLAE injection failed (AfxHookSource error window)"
-            ));
+            return Err(
+                anyhow!("HLAE injection failed (AfxHookSource error window)")
+                    .context(ErrorCode::HlaeUnavailable),
+            );
         }
         if let Ok(Some(status)) = hlae.try_wait() {
             if !status.success() {
@@ -545,13 +556,14 @@ impl RecordSession<'_> {
         let deadline = Instant::now() + Duration::from_secs(120);
         let con = loop {
             if !is_process_running("cs2.exe")? {
-                return Err(anyhow!("cs2.exe exited before the console came up"));
+                return Err(anyhow!("cs2.exe exited before the console came up")
+                    .context(ErrorCode::GameExited));
             }
             if self.cancelled() {
-                return Err(anyhow!("cancelled"));
+                return Err(ErrorCode::ExportCancelled.into());
             }
             if Instant::now() > deadline {
-                return Err(anyhow!("netcon did not come up within 120 s (-netconport {NETCON_PORT} / -afxFixNetCon)"));
+                return Err(anyhow!("netcon did not come up within 120 s (-netconport {NETCON_PORT} / -afxFixNetCon)").context(ErrorCode::ConsoleUnavailable));
             }
             if let Ok(mut c) = Netcon::connect(NETCON_PORT) {
                 if c.ping("demodesk_hello", Duration::from_secs(5))? {
@@ -587,7 +599,8 @@ impl RecordSession<'_> {
             .iter()
             .find(|l| l.to_lowercase().contains("unknown command") && l.contains("mirv_cmd"))
         {
-            return Err(anyhow!("HLAE is not active in this game process ({err})"));
+            return Err(anyhow!("HLAE is not active in this game process ({err})")
+                .context(ErrorCode::HlaeUnavailable));
         }
         (self.log)(format!(
             "schedule loaded ({} commands)",
@@ -615,7 +628,7 @@ impl RecordSession<'_> {
             if self.cancelled() {
                 let _ = con.send("quit");
                 std::thread::sleep(Duration::from_secs(2));
-                return Err(anyhow!("cancelled"));
+                return Err(ErrorCode::ExportCancelled.into());
             }
             for line in con.drain() {
                 self.handle_console_line(&line, &mut progress)?;
@@ -624,17 +637,18 @@ impl RecordSession<'_> {
                 if replayed {
                     return Err(anyhow!(
                         "the demo did not reach the first clip within 4 minutes — see the log"
-                    ));
+                    )
+                    .context(ErrorCode::DemoStartFailed));
                 }
                 replayed = true;
                 (self.log)("no marker yet — sending playdemo again".into());
                 self.playdemo(con)?;
             }
             if Instant::now() > timeout_at {
-                return Err(anyhow!(
-                    "recording timed out after {} s",
-                    self.timeout_seconds
-                ));
+                return Err(
+                    anyhow!("recording timed out after {} s", self.timeout_seconds)
+                        .context(ErrorCode::RecordingTimeout),
+                );
             }
             if let Some(command) = progress.take_recording_due(Instant::now()) {
                 con.send(&command)?;
@@ -660,7 +674,7 @@ impl RecordSession<'_> {
             // A stalled frame can cross an entire very short clip before pause takes effect.
             // Fail instead of starting a recording whose scheduled end has already passed.
             if progress.pending_recording.is_some() && matches!(what, "end" | "seek" | "start") {
-                return Err(anyhow!("clip {i}/{n}: demo advanced past the recording boundary while waiting for audio"));
+                return Err(anyhow!("clip {i}/{n}: demo advanced past the recording boundary while waiting for audio").context(ErrorCode::RecordingFailed));
             }
             progress.seen_marker = true;
             match what {
@@ -709,24 +723,28 @@ impl RecordSession<'_> {
     ) -> Result<()> {
         let mut hider = self.launch(processes)?;
         let result = (|| {
-            let mut con = self.connect_netcon(hider.as_ref())?;
+            let mut con = self
+                .connect_netcon(hider.as_ref())
+                .map_err(|e| ErrorCode::ConsoleUnavailable.wrap(e))?;
             if !self.show_game {
                 let evidence = std::fs::read_to_string(self.output_dir.join("window-hook.log"))
                     .unwrap_or_default();
                 if !evidence.lines().any(|line| line == "installed") {
-                    return Err(anyhow!("Synchronous window hook did not report successful installation; see window-hook.log."));
+                    return Err(anyhow!("Synchronous window hook did not report successful installation; see window-hook.log.").context(ErrorCode::WindowHookFailed));
                 }
                 (self.log)("synchronous window hook installed".into());
             }
-            self.start_demo(&mut con, schedule_file)?;
-            if !self.follow_markers(&mut con)? {
-                (self.log)("game exited before the schedule finished".into());
-            }
+            self.start_demo(&mut con, schedule_file)
+                .map_err(|e| ErrorCode::DemoStartFailed.wrap(e))?;
+            let followed = self.follow_markers(&mut con);
             if let Some(dump) = newest_crash_dump(&self.cs2_exe, started_at) {
                 (self.log)(format!(
                     "warning: CS2 wrote a crash dump ({}) — HLAE may be out of date",
                     dump.file_name().unwrap().to_string_lossy()
                 ));
+            }
+            if !followed? {
+                return Err(ErrorCode::GameExited.into());
             }
             Ok(())
         })();
@@ -747,7 +765,7 @@ impl RecordSession<'_> {
 
 pub fn run_recording_session(s: &mut RecordSession) -> Result<()> {
     if is_process_running("cs2.exe")? {
-        return Err(anyhow!("cs2.exe is already running — close the game first"));
+        return Err(crate::ErrorCode::Cs2AlreadyRunning.into());
     }
     std::fs::create_dir_all(&s.output_dir)?;
     let schedule_file = s.output_dir.join("commands.xml");

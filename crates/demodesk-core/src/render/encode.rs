@@ -5,7 +5,8 @@
 use super::paths::to_forward_slashes;
 use super::process::ProcessTree;
 use super::record::ClipOutput;
-use anyhow::{anyhow, Result};
+use crate::ErrorCode;
+use anyhow::{anyhow, Context, Result};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -30,7 +31,7 @@ impl<'a> Control<'a> {
 
     pub fn check_cancelled(&self) -> Result<()> {
         if self.cancel.load(Ordering::Relaxed) {
-            return Err(anyhow!("cancelled"));
+            return Err(ErrorCode::ExportCancelled.into());
         }
         Ok(())
     }
@@ -54,9 +55,9 @@ fn retry_stalled<T>(
             Err(error) if stalled(&error) => {
                 (control.log)(format!("encoding stalled: {error:#}"));
                 if retry == 3 {
-                    return Err(
-                        error.context("encoding stalled after 3 retries; source video retained")
-                    );
+                    return Err(error
+                        .context("encoding stalled after 3 retries; source video retained")
+                        .context(ErrorCode::EncodingStalled));
                 }
                 (control.log)(format!(
                     "restarting this video's encoding from source: retry {}/3",
@@ -98,7 +99,9 @@ fn run_progress(
         .last()
         .map(Path::new)
         .filter(|p| *p != Path::new("NUL") && *p != Path::new("/dev/null"));
-    let out = monitored_output(&mut cmd, seconds, progress, control, output)?;
+    let result = monitored_output(&mut cmd, seconds, progress, control, output);
+    control.check_cancelled()?;
+    let out = result.map_err(|e| ErrorCode::EncodingFailed.wrap(e))?;
     if !out.status.success() {
         let err = String::from_utf8_lossy(&out.stderr);
         let tail: Vec<&str> = err.lines().rev().take(5).collect();
@@ -106,7 +109,8 @@ fn run_progress(
             "{} failed: {}",
             exe.file_name().unwrap().to_string_lossy(),
             tail.into_iter().rev().collect::<Vec<_>>().join(" | ")
-        ));
+        )
+        .context(ErrorCode::ffmpeg(&err)));
     }
     Ok(())
 }
@@ -217,14 +221,21 @@ pub(super) fn probe_media(
     .arg(file);
     let out = monitored_output(&mut cmd, 1.0, &mut |_| {}, control, None)?;
     if !out.status.success() {
-        return Err(anyhow!("cannot probe input video"));
+        return Err(anyhow!(
+            "cannot probe input video: {}",
+            String::from_utf8_lossy(&out.stderr)
+        )
+        .context(ErrorCode::InvalidMedia));
     }
-    let info: serde_json::Value = serde_json::from_slice(&out.stdout)?;
+    let info: serde_json::Value =
+        serde_json::from_slice(&out.stdout).context(ErrorCode::InvalidMedia)?;
     let seconds = info["format"]["duration"]
         .as_str()
         .and_then(|v| v.parse::<f64>().ok())
         .filter(|v| v.is_finite() && *v > 0.0)
-        .ok_or_else(|| anyhow!("input video has no valid duration"))?;
+        .ok_or_else(|| {
+            anyhow!("input video has no valid duration").context(ErrorCode::InvalidMedia)
+        })?;
     let audio = info["streams"]
         .as_array()
         .is_some_and(|streams| streams.iter().any(|stream| stream["codec_type"] == "audio"));
@@ -247,10 +258,9 @@ pub fn mux_clip(
     audio_kbps: u32,
     control: &mut Control<'_>,
 ) -> Result<()> {
-    let video = clip
-        .video
-        .as_ref()
-        .ok_or_else(|| anyhow!("clip {}: no video file", clip.index + 1))?;
+    let video = clip.video.as_ref().ok_or_else(|| {
+        anyhow!("clip {}: no video file", clip.index + 1).context(ErrorCode::NoVideoRecorded)
+    })?;
     let mut args = vec![s("-y"), s("-i"), video.to_string_lossy().to_string()];
     if let Some(audio) = &clip.audio {
         args.extend([
@@ -393,11 +403,19 @@ fn with_nvenc_fallback<T>(
 ) -> Result<T> {
     match encode(*compatible) {
         Ok(value) => Ok(value),
-        Err(first) if !*compatible && !stalled(&first) && first.to_string() != "cancelled" => {
+        Err(first)
+            if !*compatible
+                && !stalled(&first)
+                && ErrorCode::classify(&first, ErrorCode::EncodingFailed)
+                    != ErrorCode::ExportCancelled
+                && first.to_string() != "cancelled" =>
+        {
             *compatible = true;
             eprintln!("NVENC failed; retrying with compatibility settings: {first:#}");
             encode(true).map_err(|last| {
-                anyhow!("NVENC failed: {first:#}; compatibility retry failed: {last:#}")
+                last.context(format!(
+                    "NVENC failed: {first:#}; compatibility retry failed"
+                ))
             })
         }
         Err(error) => Err(error),
@@ -558,13 +576,15 @@ pub fn encode_to_size_with_progress(
     let mut reported = 0.0_f64;
     retry_stalled(control, |control| {
         if !CODECS.iter().any(|(name, _)| *name == codec) {
-            return Err(anyhow!("unsupported video encoder: {codec}"));
+            return Err(anyhow!("unsupported video encoder: {codec}")
+                .context(ErrorCode::InvalidExportOptions));
         }
         if !max_size_mb.is_finite() || max_size_mb <= 0.0 {
-            return Err(anyhow!("invalid file size limit"));
+            return Err(ErrorCode::InvalidExportOptions.into());
         }
         if input == output {
-            return Err(anyhow!("input and output must be different files"));
+            return Err(anyhow!("input and output must be different files")
+                .context(ErrorCode::InvalidExportOptions));
         }
         (control.log)(format!(
             "size fitting: {} ({codec}, limit {max_size_mb} MB)",
@@ -575,9 +595,10 @@ pub fn encode_to_size_with_progress(
         let limit = (max_size_mb * 1_000_000.0).floor() as u64;
         let mut bitrate = video_bitrate_for_size(max_size_mb, seconds, audio_kbps);
         if bitrate == 0 {
-            return Err(anyhow!(
-                "size limit is too small for this duration and audio bitrate"
-            ));
+            return Err(
+                anyhow!("size limit is too small for this duration and audio bitrate")
+                    .context(ErrorCode::SizeLimitTooSmall),
+            );
         }
         let temp = tempfile::Builder::new()
             .prefix("encode-")
@@ -785,7 +806,7 @@ pub fn encode_to_size_with_progress(
                 break;
             }
         }
-        Err(anyhow!("could not meet {max_size_mb} MB without changing resolution, FPS or encoder; source video was retained"))
+        Err(anyhow!("could not meet {max_size_mb} MB without changing resolution, FPS or encoder; source video was retained").context(ErrorCode::SizeLimitUnreachable))
     })
 }
 
@@ -1038,8 +1059,8 @@ mod tests {
                 "primary error"
             }))
         })
-        .unwrap_err()
-        .to_string();
+        .unwrap_err();
+        let error = format!("{error:#}");
         assert_eq!(calls, [false, true]);
         assert!(error.contains("primary error") && error.contains("fallback error"));
         calls.clear();

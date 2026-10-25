@@ -13,9 +13,9 @@ use tauri::{AppHandle, Emitter, Manager, State};
 
 mod data_directory;
 #[cfg(windows)]
-mod webview_runtime;
-#[cfg(windows)]
 mod store_updates;
+#[cfg(windows)]
+mod webview_runtime;
 use data_directory::DataDirectory;
 type Directory = Arc<DataDirectory>;
 
@@ -110,7 +110,9 @@ async fn blocking<T: Send + 'static>(
 }
 
 #[tauri::command]
-async fn check_for_updates(window: tauri::WebviewWindow) -> CmdResult<demodesk_core::updates::Update> {
+async fn check_for_updates(
+    window: tauri::WebviewWindow,
+) -> CmdResult<demodesk_core::updates::Update> {
     #[cfg(windows)]
     if demodesk_core::updates::is_packaged().map_err(err)? {
         return store_updates::check(window).await;
@@ -492,16 +494,32 @@ async fn analysis_clips(
     })
     .await
 }
+async fn render_blocking<T: Send + 'static>(
+    engine: &Eng,
+    f: impl FnOnce(&Eng) -> Result<T, demodesk_core::error::ExportError> + Send + 'static,
+) -> Result<T, demodesk_core::error::ExportError> {
+    use demodesk_core::{error::ExportError, ErrorCode};
+    let engine = engine.clone();
+    tauri::async_runtime::spawn_blocking(move || f(&engine))
+        .await
+        .map_err(|e| ExportError {
+            error_code: ErrorCode::ExportFailed,
+            message: e.to_string(),
+        })?
+}
+
 #[tauri::command]
 async fn start_analysis_render(
     engine: State<'_, Eng>,
     demo_id: String,
     selection: demodesk_core::scoring::clips::Selection,
     options: RenderOptions,
-) -> CmdResult<Vec<RenderJob>> {
-    blocking(&engine, move |e| {
+) -> Result<Vec<RenderJob>, demodesk_core::error::ExportError> {
+    render_blocking(&engine, move |e| {
         e.enqueue_analysis_render(&demo_id, selection, options)
-            .map_err(err)
+            .map_err(|e| {
+                demodesk_core::error::ExportError::new(&e, demodesk_core::ErrorCode::ExportFailed)
+            })
     })
     .await
 }
@@ -512,10 +530,12 @@ async fn start_render(
     demo_id: String,
     highlight_ids: Vec<String>,
     options: RenderOptions,
-) -> CmdResult<RenderJob> {
-    blocking(&engine, move |e| {
+) -> Result<RenderJob, demodesk_core::error::ExportError> {
+    render_blocking(&engine, move |e| {
         e.enqueue_render(&demo_id, highlight_ids, options)
-            .map_err(err)
+            .map_err(|e| {
+                demodesk_core::error::ExportError::new(&e, demodesk_core::ErrorCode::ExportFailed)
+            })
     })
     .await
 }

@@ -23,8 +23,15 @@ fn video(ffmpeg: &Path, input: &Path, control: &mut Control<'_>) -> Result<Optio
     ])
     .arg(input);
     let out = monitored_output(&mut cmd, 1.0, &mut |_| {}, control, None)?;
-    ensure!(out.status.success(), "cannot probe combat video");
-    let info: serde_json::Value = serde_json::from_slice(&out.stdout)?;
+    if !out.status.success() {
+        return Err(anyhow!(
+            "cannot probe combat video: {}",
+            String::from_utf8_lossy(&out.stderr)
+        )
+        .context(ErrorCode::InvalidMedia));
+    }
+    let info: serde_json::Value =
+        serde_json::from_slice(&out.stdout).context(ErrorCode::InvalidMedia)?;
     let v = &info["streams"][0];
     let Some(rate) = v["r_frame_rate"].as_str() else {
         return Ok(None);
@@ -117,14 +124,14 @@ pub(super) fn encode(
     progress: &mut dyn FnMut(f64),
     control: &mut Control<'_>,
 ) -> Result<Option<SizeResult>> {
-    ensure!(input != output, "input and output must be different files");
+    ensure!(input != output, ErrorCode::InvalidExportOptions);
     ensure!(
         options.max_size_mb.is_finite() && options.max_size_mb > 0.0,
-        "invalid file size limit"
+        ErrorCode::InvalidExportOptions
     );
     ensure!(
         CODECS.iter().any(|(name, _)| *name == options.codec),
-        "unsupported video encoder"
+        ErrorCode::InvalidExportOptions
     );
     let Some(info) = video(ffmpeg, input, control)? else {
         return Ok(None);
@@ -141,10 +148,7 @@ pub(super) fn encode(
     let mut reported = 0.0_f64;
     retry_stalled(control, |control| {
         let mut bitrate = video_bitrate_for_size(options.max_size_mb, seconds, audio);
-        ensure!(
-            bitrate > 0,
-            "size limit is too small for this duration and audio bitrate"
-        );
+        ensure!(bitrate > 0, ErrorCode::SizeLimitTooSmall);
         let parent = output
             .parent()
             .filter(|p| !p.as_os_str().is_empty())
@@ -365,17 +369,18 @@ pub(super) fn encode(
                 "combat quality priority result: {bytes} bytes (limit {limit})"
             ));
             if bytes > 0 && bytes <= limit {
-                let actual = video(ffmpeg, &temp, control)?
-                    .ok_or_else(|| anyhow!("combat output timing invalid"))?;
+                let actual = video(ffmpeg, &temp, control)?.ok_or_else(|| {
+                    anyhow!("combat output timing invalid").context(ErrorCode::InvalidMedia)
+                })?;
                 ensure!(
                     actual.constant_rate
                         && (actual.frames, actual.fps, actual.width, actual.height)
                             == (info.frames, info.fps, info.width, info.height),
-                    "combat output frame count or format mismatch"
+                    ErrorCode::InvalidMedia
                 );
                 ensure!(
                     probe_media(ffmpeg, &temp, control)?.1 == has_audio,
-                    "combat output audio mismatch"
+                    ErrorCode::InvalidMedia
                 );
                 control.check_cancelled()?;
                 temp.persist(output)?;
@@ -406,9 +411,10 @@ pub(super) fn encode(
                 break;
             }
         }
-        Err(anyhow!(
-            "combat quality priority could not meet the size limit; source retained"
-        ))
+        Err(
+            anyhow!("combat quality priority could not meet the size limit; source retained")
+                .context(ErrorCode::SizeLimitUnreachable),
+        )
     })
 }
 

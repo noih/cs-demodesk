@@ -1,3 +1,4 @@
+import { ERROR_CODES } from '../src/errorCodes.ts';
 import { checkReplayDrawing } from './check-replay-drawing.mjs';
 import assert from 'node:assert/strict';
 import { readdir, readFile } from 'node:fs/promises';
@@ -5,6 +6,13 @@ import { createRequire } from 'node:module';
 import { createServer, preview } from 'vite';
 import { initialAppearance, THEMES } from '../src/themes.ts';
 import { projectReference } from '../src/recoil.ts';
+const errorSource = await readFile(new URL('../crates/demodesk-core/src/error.rs', import.meta.url), 'utf8');
+const rustCodes = errorSource.match(/pub enum ErrorCode \{([^}]+)\}/s)[1].split(',').map(s=>s.trim()).filter(Boolean).map(s=>s.replace(/([a-z0-9])([A-Z])/g, '$1-$2').toLowerCase());
+assert.deepEqual([...Object.values(ERROR_CODES)].sort(), rustCodes.sort(), 'Frontend codes match backend wire values');
+for (const lang of ['en','zh-TW','zh-CN','ja','ko','ru']) {
+  const locale = JSON.parse(await readFile(new URL('../src/i18n/locales/' + lang + '.json', import.meta.url), 'utf8'));
+  for (const code of rustCodes) assert.ok(locale.errors[code]?.trim(), `${lang} translates ${code}`);
+}
 const calibration = JSON.parse(await readFile(new URL('../src/data/recoil-reference.json', import.meta.url), 'utf8'));
 const require = createRequire(import.meta.url);
 const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
@@ -238,8 +246,18 @@ try {
 
   await page.getByText('Job interrupted because the app was closed',{exact:true}).waitFor();
   assert.equal(await page.getByText('backend diagnostic changed',{exact:true}).count(),0,'Error code selects translation regardless of backend diagnostic wording');
-  await page.evaluate(async () => { const job = (await window.__TAURI_INTERNALS__.invoke('list_jobs')).find(j => j.id === 'job-3'); window.emitTestEvent({type:'job-changed',job:{...job,status:'error',error:'cs2.exe is already running — close the game first'}}); });
+  await page.evaluate(async () => { const job = (await window.__TAURI_INTERNALS__.invoke('list_jobs')).find(j => j.id === 'job-3'); window.emitTestEvent({type:'job-changed',job:{...job,status:'error',errorCode:'cs2-already-running',error:'recording startup diagnostic'}}); });
   await page.getByText('CS2 is running. Close the game first.', {exact:true}).waitFor();
+  assert.equal(await page.getByText('recording startup diagnostic',{exact:true}).count(),0,'CS2 error code selects translation without matching diagnostic text');
+  const errorLocale = JSON.parse(await readFile(new URL('../src/i18n/locales/en.json', import.meta.url), 'utf8'));
+  for (const code of [...Object.values(ERROR_CODES), 'future-error-code']) {
+    await page.evaluate(async code => {
+      const job = (await window.__TAURI_INTERNALS__.invoke('list_jobs')).find(j=>j.id==='job-3');
+      window.emitTestEvent({type:'job-changed',job:{...job,status:'error',errorCode:code,error:'private diagnostic'}});
+    }, code);
+    await page.locator('.job-card').filter({hasText:errorLocale.errors[code] || errorLocale.errors['export-failed']}).first().waitFor();
+    assert.equal(await page.getByText('private diagnostic',{exact:true}).count(),0);
+  }
   await page.evaluate(async () => { window.emitTestEvent({type:'job-changed',job:(await window.__TAURI_INTERNALS__.invoke('list_jobs')).find(j => j.id === 'job-3')}); });
   const progressBar = page.getByRole('progressbar', {name:'Overall progress (estimated)'});
   assert.equal(await progressBar.getAttribute('aria-valuenow'), '35');
@@ -1677,6 +1695,9 @@ try {
     await page.evaluate(() => { window.previewSettingsError = 'cs2.exe is already running — close the game first'; });
     await page.getByRole('button', {name:locale.common.save,exact:true}).click();
     await page.getByText(locale.errors['cs2-already-running'], {exact:true}).waitFor();
+    await page.evaluate(() => { window.previewSettingsError = {errorCode:'gpu-unavailable',message:'NVENC diagnostic'}; });
+    await page.getByRole('button', {name:locale.common.save,exact:true}).click();
+    await page.getByText(locale.errors['gpu-unavailable'], {exact:true}).waitFor();
     await page.evaluate(() => { delete window.previewSettingsError; });
     await page.getByLabel(locale.settings.dataDir, {exact:true}).fill('');
   }

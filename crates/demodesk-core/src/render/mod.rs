@@ -45,6 +45,7 @@ mod startup;
 mod window;
 
 use crate::model::{DemoInfo, Highlight};
+use crate::{error::ExportError, ErrorCode};
 use actions::{build_schedule, steamid_to_account_id, ActionsOptions, Camera, RenderClip};
 use anyhow::{anyhow, Result};
 use encode::{bytes_to_mb, concat_clips, encode_to_size_with_progress, mux_clip, Control};
@@ -267,15 +268,21 @@ pub struct RenderResult {
     pub clips: Vec<RenderedClip>,
     #[serde(default)]
     pub failed_highlights: Vec<String>,
+    #[serde(default)]
+    pub failure: Option<ExportError>,
 }
 
 impl RenderResult {
     fn require_complete_merge(&self, merge: bool) -> Result<()> {
         if merge && !self.failed_highlights.is_empty() {
+            if let Some(failure) = &self.failure {
+                return Err(anyhow!(failure.message.clone()).context(failure.error_code));
+            }
             return Err(anyhow!(
                 "merge aborted: incomplete highlights: {}",
                 self.failed_highlights.join(", ")
-            ));
+            )
+            .context(ErrorCode::MergeIncomplete));
         }
         Ok(())
     }
@@ -526,17 +533,19 @@ pub fn render_highlights(input: RenderJobInput) -> Result<RenderResult> {
         tools.hlae_dll,
         tools.ffmpeg_exe,
     ) else {
-        return Err(anyhow!("environment not ready — check the settings page"));
+        return Err(ErrorCode::ToolsMissing.into());
     };
     let ffmpeg = &ffmpeg_exe;
     if !demo_path.is_file() {
-        return Err(anyhow!("demo not found: {}", demo_path.display()));
+        return Err(
+            anyhow!("demo not found: {}", demo_path.display()).context(ErrorCode::DemoMissing)
+        );
     }
     if !demo_path.to_string_lossy().is_ascii() {
-        return Err(anyhow!("demo path must be ASCII only (CS2 +playdemo limitation) — copy the demo somewhere else"));
+        return Err(ErrorCode::DemoPathUnsupported.into());
     }
     if highlights.is_empty() {
-        return Err(anyhow!("nothing to render"));
+        return Err(ErrorCode::NoHighlights.into());
     }
     let merge_order: Vec<_> = if preserve_merge_order {
         highlights.iter().map(|h| h.id.clone()).collect()
@@ -556,7 +565,7 @@ pub fn render_highlights(input: RenderJobInput) -> Result<RenderResult> {
             .is_some_and(|v| v.from_tick < c.highlight.end_tick)
             && c.round_result_slot.is_none()
     }) {
-        return Err(anyhow!("round result camera target is unavailable"));
+        return Err(ErrorCode::CameraUnavailable.into());
     }
     let missing_slots: Vec<&str> = clips
         .iter()
@@ -571,7 +580,7 @@ pub fn render_highlights(input: RenderJobInput) -> Result<RenderResult> {
     }
 
     if cancel.load(std::sync::atomic::Ordering::Relaxed) {
-        return Err(anyhow!("cancelled"));
+        return Err(ErrorCode::ExportCancelled.into());
     }
     let (preset, mut compatible) = encode::checked_record_preset(ffmpeg, &o, log, &cancel)?;
     let total_seconds: f64 = recording
@@ -584,11 +593,12 @@ pub fn render_highlights(input: RenderJobInput) -> Result<RenderResult> {
     let muxing_end = if o.max_size_mb.is_some() { 0.75 } else { 0.98 };
     let passes = recording_passes(&clips, demo.tick_rate);
     let mut outputs = Vec::new();
+    let mut failure = None;
     let mut pass_dirs = Vec::new();
     let mut recorded_seconds = 0.0;
     for (pass_index, indices) in passes.iter().enumerate() {
         if cancel.load(std::sync::atomic::Ordering::Relaxed) {
-            return Err(anyhow!("cancelled"));
+            return Err(ErrorCode::ExportCancelled.into());
         }
         let pass_dir = output_dir.join(format!("pass-{}", pass_index + 1));
         let pass_clips: Vec<_> = indices.iter().map(|&i| clips[i].clone()).collect();
@@ -642,17 +652,23 @@ pub fn render_highlights(input: RenderJobInput) -> Result<RenderResult> {
             stage: &mut *stage,
             progress: &mut recording_progress,
         };
-        let recorded = run_recording_session(&mut session);
+        let recorded =
+            run_recording_session(&mut session).map_err(|e| ErrorCode::RecordingFailed.wrap(e));
         let completed = session.completed_clips.clone();
         drop(session);
         if cancel.load(std::sync::atomic::Ordering::Relaxed) {
-            return Err(anyhow!("cancelled"));
+            return Err(ErrorCode::ExportCancelled.into());
         }
         if let Err(error) = recorded {
+            failure.get_or_insert_with(|| ExportError::new(&error, ErrorCode::RecordingFailed));
             log(format!(
                 "recording pass {} failed: {error:#}",
                 pass_index + 1
             ));
+            // Preserve startup failures instead of reporting an empty recording result.
+            if completed.is_empty() && outputs.is_empty() {
+                return Err(error);
+            }
         }
         for mut out in collect_clip_outputs(&pass_dir, indices.len(), &o.container) {
             if !completed.contains(&out.index) {
@@ -660,10 +676,14 @@ pub fn render_highlights(input: RenderJobInput) -> Result<RenderResult> {
             }
             out.index = indices[out.index];
             if o.merge && out.video.is_none() {
+                if let Some(failure) = &failure {
+                    return Err(anyhow!(failure.message.clone()).context(failure.error_code));
+                }
                 return Err(anyhow!(
                     "merge aborted: incomplete highlight: {}",
                     recording[out.index].title
-                ));
+                )
+                .context(ErrorCode::MergeIncomplete));
             }
             outputs.push(out);
         }
@@ -722,6 +742,7 @@ pub fn render_highlights(input: RenderJobInput) -> Result<RenderResult> {
         final_bytes: None,
         clips: vec![],
         failed_highlights: vec![],
+        failure,
     };
     for out in &outputs {
         stage(&format!(
@@ -772,6 +793,9 @@ pub fn render_highlights(input: RenderJobInput) -> Result<RenderResult> {
             Err(error) => {
                 Control::new(&cancel, log).check_cancelled()?;
                 log(format!("clip {}: {error:#}", out.index + 1));
+                result
+                    .failure
+                    .get_or_insert_with(|| ExportError::new(&error, ErrorCode::EncodingFailed));
                 None
             }
         };
@@ -879,6 +903,9 @@ pub fn render_highlights(input: RenderJobInput) -> Result<RenderResult> {
                             return Err(error);
                         }
                         log(format!("{}: {error:#}", c.title));
+                        result.failure.get_or_insert_with(|| {
+                            ExportError::new(&error, ErrorCode::EncodingFailed)
+                        });
                         result.failed_highlights.push(c.title.clone());
                     }
                 }
@@ -907,6 +934,58 @@ pub fn render_highlights(input: RenderJobInput) -> Result<RenderResult> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn recording_start_failure_reaches_the_caller() {
+        let dir = tempfile::tempdir().unwrap();
+        let output = dir.path().join("output");
+        std::fs::create_dir(&output).unwrap();
+        // Prevent recording from starting without launching any external tools.
+        std::fs::write(output.join("pass-1"), b"blocked").unwrap();
+        let demo_path = dir.path().join("test.dem");
+        std::fs::write(&demo_path, []).unwrap();
+        let demo = super::DemoInfo {
+            path: demo_path.to_string_lossy().into_owned(),
+            map_name: "test".into(),
+            server_name: "test".into(),
+            tick_rate: 64.0,
+            players: vec![],
+        };
+        let mut log = Vec::new();
+        let result = super::render_highlights(super::RenderJobInput {
+            combat_ticks: None,
+            demo: &demo,
+            demo_path,
+            highlights: vec![sample_highlight("clip", "player", vec![])],
+            preserve_merge_order: false,
+            output_dir: output,
+            options: super::RenderOptions {
+                codec: "libx264".into(),
+                ..Default::default()
+            },
+            tools: super::ToolPaths {
+                tools_dir: dir.path().join("tools"),
+                cs2_dir: Some(dir.path().join("cs2")),
+                cs2_exe: Some(dir.path().join("cs2.exe")),
+                hlae_exe: Some(dir.path().join("HLAE.exe")),
+                hlae_dll: Some(dir.path().join("hook.dll")),
+                ffmpeg_exe: Some(dir.path().join("ffmpeg.exe")),
+                ..Default::default()
+            },
+            cancel: Default::default(),
+            log: &mut |line| log.push(line),
+            stage: &mut |_| {},
+            progress: &mut |_| {},
+        });
+        let error = format!(
+            "{:#}",
+            result.expect_err("recording failure must not become an empty success")
+        );
+        assert!(log
+            .iter()
+            .any(|line| line == &format!("recording pass 1 failed: {error}")));
+        assert!(!log.iter().any(|line| line.contains("missing video.mp4")));
+    }
+
     #[test]
     fn setup_only_selected_tool() {
         let dir = tempfile::tempdir().unwrap();
@@ -1127,9 +1206,21 @@ mod tests {
             final_bytes: None,
             clips: vec![],
             failed_highlights: vec!["missing".into()],
+            failure: None,
         };
         assert!(result.require_complete_merge(true).is_err());
         assert!(result.require_complete_merge(false).is_ok());
+        result.failure = Some(crate::error::ExportError::new(
+            &anyhow::anyhow!("specific diagnostic").context(crate::ErrorCode::DiskFull),
+            crate::ErrorCode::ExportFailed,
+        ));
+        assert_eq!(
+            result
+                .require_complete_merge(true)
+                .unwrap_err()
+                .downcast_ref::<crate::ErrorCode>(),
+            Some(&crate::ErrorCode::DiskFull)
+        );
         result.failed_highlights.clear();
         assert!(result.require_complete_merge(true).is_ok());
     }

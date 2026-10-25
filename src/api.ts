@@ -497,4 +497,9 @@ export const mmss = (seconds: number): string => {
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 };
 export const clock = (ticks: number, tickRate: number): string => mmss(ticks / tickRate);
-export const errorText = (e: unknown): string => translateError(e instanceof Error ? e.message : typeof e === 'string' ? e : JSON.stringify(e));
+export const errorText = (e: unknown): string => {
+  if (typeof e === 'object' && e !== null && 'errorCode' in e && typeof e.errorCode === 'string') {
+    return translateError('message' in e && typeof e.message === 'string' ? e.message : undefined, e.errorCode);
+  }
+  return translateError(e instanceof Error ? e.message : typeof e === 'string' ? e : JSON.stringify(e));
+};
