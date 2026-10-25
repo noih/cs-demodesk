@@ -19,6 +19,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Test release flow
+        shell: pwsh
+        run: ./scripts/test-release.ps1
+
+      - name: Verify draft release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_COMMIT: ${{ github.sha }}
+        run: ./scripts/publish-release.ps1 -Tag $env:RELEASE_TAG -Repository $env:GITHUB_REPOSITORY -Commit $env:RELEASE_COMMIT -CheckOnly
+
       - uses: actions/setup-node@v4
         with:
           node-version-file: .nvmrc
@@ -59,13 +71,10 @@ jobs:
           if-no-files-found: error
           retention-days: 90
 
-      - uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            dist-portable/*.exe
-            dist-portable/SHA256SUMS
-          generate_release_notes: true
-          fail_on_unmatched_files: true
-          body: |
-            The .exe is the standalone download.
-            Microsoft Store: https://apps.microsoft.com/detail/9N5G4VXSDGS5
+      - name: Publish prepared release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_COMMIT: ${{ github.sha }}
+        run: ./scripts/publish-release.ps1 -Tag $env:RELEASE_TAG -Repository $env:GITHUB_REPOSITORY -Commit $env:RELEASE_COMMIT

@@ -81,8 +81,45 @@ CS2/HLAE for offline recording and FFmpeg for export. Explain that recording
 uses -insecure and that third-party tools are downloaded on demand.
 
 Run npm run app:release to build both artifacts locally from one x64 compilation.
-scripts/release.ps1 keeps the existing version/tag/push flow; the release workflow
-runs app:release and publishes the EXE and its SHA256SUMS to GitHub Releases.
+To release, prepare a UTF-8 Markdown file containing the version's What's New
+and run:
+
+```powershell
+.\scripts\release.ps1 1.3.0 -NotesFile out/release-notes/1.3.0.md
+```
+
+Keep notes in the ignored `out/` directory or outside the repository. They are
+read as local input and are never staged by the script. Missing or empty notes
+stop the release before any version changes. Relative paths are resolved from
+the directory where the command is run.
+
+The script requires [GitHub CLI](https://cli.github.com/) authenticated with
+repository write access (`gh auth login`), plus the existing Git signing setup.
+It keeps the version/checks/signed-commit/signed-tag flow, pushes the release
+commit, and creates a draft with the supplied notes, download links and a full
+changelog link. Only after draft creation succeeds does it push the signed tag.
+Actions verifies the draft's notes and target commit before building, then
+uploads the EXE and SHA256SUMS and publishes the draft without rewriting its
+description. A failed build or upload leaves the release unpublished.
+
+If draft creation fails after the commit was pushed, fix the reported issue and
+create the draft manually (include the download/changelog footer in the notes):
+
+```powershell
+$commit = git rev-parse HEAD
+gh release create v1.3.0 --repo noih/cs-demodesk --draft --target $commit --title v1.3.0 --notes-file out/release-notes/1.3.0.md
+git push origin v1.3.0
+```
+
+If the draft already exists, verify its notes and target commit before pushing
+the local signed tag; do not recreate the tag. After a workflow failure, rerun
+the failed jobs in Actions. Draft assets may be replaced on retry; an already
+published release is left unchanged. Do not rerun the full release script once
+the version commit/tag exists.
+
+Run `powershell -NoProfile -File scripts/test-release.ps1` for offline flow tests
+(all Git, GitHub, build and signing commands are mocked).
+
 The unsigned MSIX and its own SHA256SUMS are stored in the workflow run as
 store-msix-<tag> for 90 days. Download it from Actions, then extract the ZIP.
 Both binaries receive GitHub build-provenance attestations. This does not submit
