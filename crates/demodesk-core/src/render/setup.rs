@@ -1,6 +1,6 @@
 //! Downloads the third-party binaries into `<tools_dir>`:
 //!   hlae/     latest advancedfx release (github.com/advancedfx/advancedfx)
-//!   ffmpeg/   BtbN shared win64 build (github.com/BtbN/FFmpeg-Builds)
+//!   ffmpeg/   DemoDesk minimal shared win64 build (github.com/noih/cs-demodesk-ffmpeg)
 //!   vrf/      Source2Viewer-CLI (github.com/ValveResourceFormat), reads radar images out of the game's VPK
 
 use anyhow::{anyhow, Context, Result};
@@ -14,6 +14,8 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 mod transport;
+
+const FFMPEG_REPO: &str = "noih/cs-demodesk-ffmpeg";
 
 pub struct Progress<'a> {
     pub cancel: &'a Arc<AtomicBool>,
@@ -249,7 +251,7 @@ pub(crate) fn recover_installs(tools_dir: &Path, overrides: &super::paths::PathO
         (
             "ffmpeg",
             &overrides.ffmpeg_exe,
-            "BtbN/FFmpeg-Builds",
+            FFMPEG_REPO,
             ffmpeg_installed,
         ),
         (
@@ -410,7 +412,9 @@ fn finish_pending(
             if log.before_replace.is_some() {
                 let names: &[&str] = if pending.url.contains("/advancedfx/advancedfx/") {
                     &["HLAE.exe", "cs2.exe"]
-                } else if pending.url.contains("/BtbN/FFmpeg-Builds/") {
+                } else if pending.url.contains("/noih/cs-demodesk-ffmpeg/")
+                    || pending.url.contains("/BtbN/FFmpeg-Builds/")
+                {
                     &["ffmpeg.exe", "ffprobe.exe"]
                 } else {
                     &["Source2Viewer-CLI.exe"]
@@ -621,20 +625,20 @@ fn ffmpeg_installed(dir: &Path) -> bool {
 fn ffmpeg_asset(release: &GithubRelease) -> Result<&GithubAsset> {
     unique_asset(
         release,
-        |name| name.starts_with("ffmpeg-") && name.ends_with("-win64-gpl-shared.zip"),
-        "shared win64 GPL FFmpeg ZIP",
+        |name| name == "cs-demodesk-ffmpeg-win64-gpl-shared.zip",
+        "DemoDesk shared win64 GPL FFmpeg ZIP",
     )
 }
 
 pub fn install_ffmpeg(directory: &Path, force: bool, log: Log) -> Result<PathBuf> {
     let dir = directory.to_path_buf();
-    validate_install_directory(&dir, "BtbN/FFmpeg-Builds", ffmpeg_installed, force)?;
+    validate_install_directory(&dir, FFMPEG_REPO, ffmpeg_installed, force)?;
     if !force && ffmpeg_installed(&dir) {
         return Ok(dir);
     }
-    validate_install_directory(&dir, "BtbN/FFmpeg-Builds", ffmpeg_installed, true)?;
+    validate_install_directory(&dir, FFMPEG_REPO, ffmpeg_installed, true)?;
     install_release(
-        "BtbN/FFmpeg-Builds",
+        FFMPEG_REPO,
         &dir,
         ffmpeg_asset,
         ffmpeg_installed,
@@ -643,17 +647,13 @@ pub fn install_ffmpeg(directory: &Path, force: bool, log: Log) -> Result<PathBuf
     Ok(dir)
 }
 
-/// BtbN's rolling tag and GitHub's latest release are different publications.
+/// Resolve a compatible asset from the repository's latest published release.
 fn release_for_tool(
     repo: &str,
     select: fn(&GithubRelease) -> Result<&GithubAsset>,
     log: Log,
 ) -> Result<GithubRelease> {
-    let sources: &[&str] = if repo == "BtbN/FFmpeg-Builds" {
-        &["tags/latest", "latest"]
-    } else {
-        &["latest"]
-    };
+    let sources = &["latest"];
     let mut errors = Vec::new();
     for source in sources {
         log.check()?;
@@ -819,7 +819,8 @@ fn probe_stdout(exe: &Path, flag: &str) -> Option<String> {
 fn installed_version(tool: super::SetupTool, exe: &Path) -> Option<String> {
     match tool {
         super::SetupTool::Hlae => file_version(exe),
-        super::SetupTool::Ffmpeg => ffmpeg_banner_version(&probe_stdout(exe, "-version")?),
+        super::SetupTool::Ffmpeg => installed_release_tag(exe)
+            .or_else(|| ffmpeg_banner_version(&probe_stdout(exe, "-version")?)),
         super::SetupTool::Vrf => vrf_banner_version(&probe_stdout(exe, "--version")?),
     }
 }
@@ -833,27 +834,13 @@ pub struct ToolUpdate {
 }
 
 /// GitHub's website is not rate limited like its API (60 requests per hour per address):
-/// releases/latest redirects to the latest tag, and the Atom feed names the rolling BtbN build.
+/// releases/latest redirects to the latest published tag.
 fn latest_version(tool: super::SetupTool) -> Result<String> {
     let repo = match tool {
         super::SetupTool::Hlae => "advancedfx/advancedfx",
-        super::SetupTool::Ffmpeg => "BtbN/FFmpeg-Builds",
+        super::SetupTool::Ffmpeg => FFMPEG_REPO,
         super::SetupTool::Vrf => "ValveResourceFormat/ValveResourceFormat",
     };
-    if tool == super::SetupTool::Ffmpeg {
-        let url = format!("https://github.com/{repo}/releases.atom");
-        let feed = agent()
-            .get(&url)
-            .config()
-            .timeout_global(Some(Duration::from_secs(10)))
-            .build()
-            .call()
-            .with_context(|| format!("GET {url}"))?
-            .body_mut()
-            .read_to_string()?;
-        return rolling_release_title(&feed)
-            .ok_or_else(|| anyhow!("{url}: no release named for tag \"latest\""));
-    }
     let url = format!("https://github.com/{repo}/releases/latest");
     let response = agent()
         .get(&url)
@@ -876,13 +863,6 @@ fn latest_version(tool: super::SetupTool) -> Result<String> {
                 response.status()
             )
         })
-}
-
-/// Title of the feed entry linking to releases/tag/latest.
-fn rolling_release_title(feed: &str) -> Option<String> {
-    let entry = &feed[feed.find("/releases/tag/latest\"")?..];
-    let title = &entry[entry.find("<title>")? + "<title>".len()..];
-    Some(title[..title.find("</title>")?].trim().to_owned())
 }
 
 pub fn check_update(tool: super::SetupTool, exe: &Path) -> Result<ToolUpdate> {
@@ -984,13 +964,6 @@ mod tests {
             Some("20.0.6980")
         );
         assert!(vrf_banner_version("OS: Microsoft Windows").is_none());
-        let feed = r#"<feed><title>Release notes</title><entry><id>1</id><link href="https://github.com/BtbN/FFmpeg-Builds/releases/tag/latest"/><title>Latest Auto-Build (2026-09-23 14:55)</title></entry><entry><link href="https://github.com/BtbN/FFmpeg-Builds/releases/tag/autobuild-2026-09-23-14-55"/><title>Auto-Build 2026-09-23 14:55</title></entry></feed>"#;
-        assert_eq!(
-            rolling_release_title(feed).as_deref(),
-            Some("Latest Auto-Build (2026-09-23 14:55)")
-        );
-        assert!(rolling_release_title("<feed></feed>").is_none());
-
         let dir = tempfile::tempdir().unwrap();
         let bin = dir.path().join("ffmpeg-N-1-win64-gpl/bin");
         fs::create_dir_all(&bin).unwrap();
@@ -1028,23 +1001,36 @@ mod tests {
     }
 
     #[test]
-    fn ffmpeg_selection_accepts_versioned_names_and_rejects_other_builds() {
-        let name = "ffmpeg-N-126475-g35b7df64a0-win64-gpl-shared.zip";
-        let current = release(&[
-            "ffmpeg-N-126475-win64-gpl.zip",
-            "ffmpeg-N-126475-win64-lgpl.zip",
-            "ffmpeg-N-126475-winarm64-gpl.zip",
-            "ffmpeg-n9.0.1-win64-gpl-9.0.zip",
-            name,
-        ]);
+    fn ffmpeg_display_uses_installed_package_version() {
+        let dir = tempfile::tempdir().unwrap();
+        let bin = dir.path().join("bin");
+        fs::create_dir(&bin).unwrap();
+        let exe = bin.join("ffmpeg.exe");
+        fs::write(
+            dir.path().join("install-info.json"),
+            r#"{"tag":"build-test-release","url":"https://github.com/noih/cs-demodesk-ffmpeg/releases/download/build-test-release/cs-demodesk-ffmpeg-win64-gpl-shared.zip"}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            installed_version(super::super::SetupTool::Ffmpeg, &exe).as_deref(),
+            Some("build-test-release")
+        );
+    }
+
+    #[test]
+    fn ffmpeg_selection_requires_demodesk_shared_asset() {
+        let name = "cs-demodesk-ffmpeg-win64-gpl-shared.zip";
+        let current = release(&["sources.tar.xz", "SHA256SUMS", name]);
         assert_eq!(ffmpeg_asset(&current).unwrap().name, name);
-        assert!(ffmpeg_asset(&release(&["ffmpeg-master-latest-win64-gpl-shared.zip"])).is_ok());
-        assert!(ffmpeg_asset(&release(&["ffmpeg-master-latest-win64-lgpl.zip"])).is_err());
-        assert!(ffmpeg_asset(&release(&[
-            name,
-            "ffmpeg-master-latest-win64-gpl-shared.zip"
-        ]))
-        .is_err());
+        for rejected in [
+            "ffmpeg-master-latest-win64-gpl.zip",
+            "ffmpeg-master-latest-win64-gpl-shared.zip",
+            "cs-demodesk-ffmpeg-winarm64-gpl-shared.zip",
+            "sources.tar.xz",
+        ] {
+            assert!(ffmpeg_asset(&release(&[rejected])).is_err());
+        }
+        assert!(ffmpeg_asset(&release(&[name, name])).is_err());
     }
 
     #[test]
@@ -1067,7 +1053,7 @@ mod tests {
         zip.finish().unwrap();
         let error = install_archive(
             &dir, &work, "latest",
-            "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl-shared.zip",
+            "https://github.com/noih/cs-demodesk-ffmpeg/releases/download/build-test/cs-demodesk-ffmpeg-win64-gpl-shared.zip",
             ffmpeg_installed, &AtomicBool::new(false),
         ).unwrap_err();
         assert!(error.to_string().contains("Shared FFmpeg cannot start"));
@@ -1078,8 +1064,8 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "downloads shared FFmpeg into DEMODESK_TEST_FFMPEG_DIR"]
-    fn real_shared_ffmpeg_install() {
+    #[ignore = "downloads FFmpeg into DEMODESK_TEST_FFMPEG_DIR"]
+    fn real_ffmpeg_install() {
         let dir = PathBuf::from(
             std::env::var_os("DEMODESK_TEST_FFMPEG_DIR").expect("set test directory"),
         );

@@ -1,12 +1,14 @@
 # Tool downloads
 
 Resolve download URLs from GitHub release asset metadata rather than constructing
-URLs from version numbers. BtbN's rolling `latest` tag is preferred; GitHub's
-latest published release is the fallback. These are distinct endpoints:
-`releases/download/latest/<asset>` targets the rolling tag, whereas
-`releases/latest/download/<asset>` follows GitHub's latest release selection.
+URLs from version numbers. FFmpeg uses the latest published release of
+`noih/cs-demodesk-ffmpeg`, selecting exactly
+`cs-demodesk-ffmpeg-win64-gpl-shared.zip`. Version checks use the same repository.
+The installed FFmpeg version uses the recorded release tag so it can be compared
+directly with the online release tag. Manual installations without a recorded tag
+fall back to the executable's FFmpeg version banner.
 
-Choose exactly one compatible asset: FFmpeg win64 GPL shared, HLAE portable ZIP,
+Choose exactly one compatible asset: DemoDesk FFmpeg win64 GPL shared, HLAE portable ZIP,
 and Source 2 Viewer CLI for the target platform. Reject missing or ambiguous
 matches and report available asset names instead of guessing an architecture or
 variant. A download returning 404 or 410 refreshes metadata once. Other failures
@@ -75,11 +77,13 @@ apps on the affected machine to determine whether package context matters.
 Each tool downloads into one fixed `.installing` sibling directory. The ZIP must
 extract successfully and contain the required binaries before installation is
 replaced. HLAE needs HLAE.exe and x64/AfxHookSource2.dll; FFmpeg needs ffmpeg.exe
-and ffprobe.exe in the same directory, along with the shared build DLLs. Both
-FFmpeg executables must pass a startup check before replacement. Source 2 Viewer
+and ffprobe.exe in the same directory. For shared builds, retain their DLLs and
+require both executables to pass a startup check before replacement. Source 2 Viewer
 needs its CLI executable.
-ZIP extraction retains the complete shared build, including its DLLs. Existing
-static FFmpeg installations remain usable until the user downloads an update.
+ZIP extraction retains the complete build, including shared DLLs. Existing BtbN
+static or shared installations remain usable until the user downloads again;
+changing the source does not replace installed tools. Interrupted BtbN downloads
+can still be resumed safely.
 An incomplete directory does not count as an installed tool.
 
 Replacement moves the old directory to one `.previous` sibling. A failed move
@@ -92,11 +96,11 @@ are not automatically deleted.
 Verification: `cargo test -p demodesk-core render::setup::tests` covers asset
 selection, incomplete installs, corrupt ZIPs, rollback and interrupted swaps.
 
-Shared FFmpeg download/startup verification (uses a dedicated test directory):
+Selected FFmpeg download/startup verification (uses a dedicated test directory):
 
 ```powershell
-$env:DEMODESK_TEST_FFMPEG_DIR = "$PWD/target/ffmpeg-shared-check"
-cargo test -p demodesk-core --lib render::setup::tests::real_shared_ffmpeg_install -- --ignored --nocapture
+$env:DEMODESK_TEST_FFMPEG_DIR = "$PWD/target/ffmpeg-demodesk-check"
+cargo test -p demodesk-core --lib render::setup::tests::real_ffmpeg_install -- --ignored --nocapture
 ```
 
 DLL additions, changes and removals invalidate the cached FFmpeg startup check.
