@@ -322,7 +322,9 @@
     "av1Hint": "AV1 は変換が遅いですが、画質に優れています",
     "combatQualityPriority": "交戦シーンの画質を優先",
     "combatQualityPriorityHint": "交戦シーンの画質を優先し、他のシーンは少し下げます",
-    "keyMomentsOnly": "見どころだけを残す",
+    "keyMomentsOnlyHint": "待ち時間を省き、動画を短くします。",
+    "keyMomentsOnly": "交戦シーン",
+    "combatClipMode": {"normal": "通常", "short": "短め", "off": "オフ"},
     "fullLengthWarning": "全体を残すと動画が長くなります。同じファイルサイズ上限では、画質が低下する場合があります。",
     "posthumous": "死亡後のキル",
     "possibleNinja": "ニンジャ解除の可能性",
@@ -335,6 +337,7 @@
     "fps": "FPS",
     "encoder": "エンコーダー",
     "toggle": {
+      "playerAvatars": "プレイヤーのアバターを表示",
       "hud": "HUD（体力、弾薬、スコア）",
       "crosshair": "クロスヘア",
       "radar": "レーダー",
@@ -345,6 +348,7 @@
       "xray": "X-ray",
       "trueView": "TrueView（クライアント側の視点）"
     },
+    "playerKillFeedOnly": "主役に関係するキルのみ表示",
     "hudScale": "HUD サイズ {{n}}",
     "clips": "クリップ",
     "notReady": "レンダリング環境が未準備です。先に設定でツールをダウンロードしてください。",

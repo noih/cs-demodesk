@@ -1157,31 +1157,87 @@ try {
   await page.getByRole('button',{name:/^Export/}).click();
   const exportDialog = page.getByRole('dialog').filter({has:page.getByRole('button',{name:'Export',exact:true})});
   await exportDialog.waitFor();
+  await exportDialog.getByText('HUD scale 0.85',{exact:true}).waitFor();
+  const hudSlider = exportDialog.getByRole('slider',{name:/^HUD scale/});
+  assert.equal(await hudSlider.getAttribute('aria-valuenow'), '0.85');
+  assert.equal(await hudSlider.getAttribute('aria-valuemax'), '1');
+  await hudSlider.focus();
+  await hudSlider.press('ArrowLeft');
+  assert.equal(await hudSlider.getAttribute('aria-valuenow'), '0.8');
+  await hudSlider.press('End');
+  assert.equal(await hudSlider.getAttribute('aria-valuenow'), '1');
+  const exportViewport = page.viewportSize();
+  const sizeOptions = exportDialog.getByRole('radiogroup').filter({has:page.getByRole('radio',{name:'100 MB',exact:true})});
+  const unlimitedLabels = [];
+  for (const language of ['en','zh-TW','zh-CN','ja','ko','ru']) {
+    const locale = JSON.parse(await readFile(new URL('../src/i18n/locales/' + language + '.json', import.meta.url), 'utf8'));
+    unlimitedLabels.push(locale.highlights.unlimited);
+  }
+  // Exercise all translated size labels with the largest supported caption font.
+  await exportDialog.evaluate(el => el.style.setProperty('--app-font-caption', '18px'));
+  for (const width of [1100, 900, 760, 600]) {
+    await page.setViewportSize({width,height:940});
+    for (const label of unlimitedLabels) {
+      await sizeOptions.evaluate((el, label) => {
+        el.querySelectorAll('[role=radio]:last-of-type .rt-SegmentedControlItemLabelActive, [role=radio]:last-of-type .rt-SegmentedControlItemLabelInactive').forEach(span => span.textContent = label);
+      }, label);
+      assert.ok(await sizeOptions.evaluate(el => {
+        const parent = el.parentElement.getBoundingClientRect();
+        const group = el.getBoundingClientRect();
+        return group.left >= parent.left - 1 && group.right <= parent.right + 1 && el.scrollWidth <= el.clientWidth + 1;
+      }), `File size choices fit their column at ${width}px (${label})`);
+      assert.ok(await exportDialog.evaluate(el => {
+        const bounds = el.getBoundingClientRect();
+        return bounds.width <= 901 && bounds.left >= 0 && bounds.right <= innerWidth && el.scrollWidth <= el.clientWidth + 1;
+      }), `Dialog stays within viewport at ${width}px (${label})`);
+    }
+  }
+  await sizeOptions.evaluate(el => {
+    el.querySelectorAll('[role=radio]:last-of-type .rt-SegmentedControlItemLabelActive, [role=radio]:last-of-type .rt-SegmentedControlItemLabelInactive').forEach(span => span.textContent = 'Unlimited');
+  });
+  await exportDialog.evaluate(el => el.style.removeProperty('--app-font-caption'));
+  await page.setViewportSize(exportViewport);
+  const playerKillFeed = exportDialog.getByRole('switch',{name:'Only show player-related kills',exact:true});
+  const killFeed = exportDialog.getByRole('switch',{name:'Kill feed',exact:true});
+  assert.equal(await playerKillFeed.isChecked(),false);
+  await playerKillFeed.click();
+  await killFeed.click();
+  assert.ok(await playerKillFeed.isDisabled());
+  await killFeed.click();
+  assert.equal(await playerKillFeed.isChecked(),true);
+  const avatars = exportDialog.getByRole('switch',{name:'Show player avatars',exact:true});
+  assert.equal(await avatars.getAttribute('aria-checked'),'true');
+  await avatars.click();
+  assert.equal(await avatars.getAttribute('aria-checked'),'false');
+  assert.equal(await exportDialog.getByRole('slider').count(),1,'Only HUD scale is adjustable; no kill-feed duration control');
   const encoder = exportDialog.getByRole('combobox').filter({hasText:'AV1 · CPU'});
   await encoder.waitFor();
   await encoder.click();
   await page.getByRole('option',{name:'AV1 · NVIDIA（av1_nvenc）',exact:true}).click();
   await exportDialog.getByRole('combobox').filter({hasText:'AV1 · NVIDIA'}).click();
   await page.getByRole('option',{name:'AV1 · CPU（libsvtav1）',exact:true}).click();
-  const keyMoments = exportDialog.getByRole('switch',{name:'Only keep key moments',exact:true});
+  const keyMoments = exportDialog.getByRole('radiogroup',{name:'Combat clips',exact:true});
   const combatPriority = exportDialog.getByRole('switch',{name:'Prioritize combat quality',exact:true});
   assert.equal(await combatPriority.isChecked(),true);
   await combatPriority.click();
   assert.equal(await combatPriority.isChecked(),false);
-  assert.equal(await keyMoments.isChecked(),true);
+  assert.equal(await keyMoments.getByRole('radio',{name:'Normal',exact:true}).getAttribute('aria-checked'),'true');
   await exportDialog.getByText('1 clips - about 8 s',{exact:true}).waitFor();
   const fullWarning = exportDialog.getByRole('status').filter({hasText:'Keeping the full sequence'});
   assert.equal(await fullWarning.count(),0);
-  await keyMoments.click();
+  await keyMoments.getByRole('radio',{name:'Off',exact:true}).click();
   await fullWarning.waitFor();
-  await exportDialog.getByRole('radio',{name:'Unlimited',exact:true}).click();
+  await sizeOptions.getByRole('radio',{name:'Unlimited',exact:true}).click();
   assert.equal(await combatPriority.count(),0);
   assert.equal(await fullWarning.count(),0);
   await exportDialog.getByRole('radio',{name:'20 MB',exact:true}).click();
   assert.equal(await combatPriority.isChecked(),false,'Size selection retains the explicit opt-out');
   await combatPriority.click();
   await fullWarning.waitFor();
-  await keyMoments.click();
+  await keyMoments.getByRole('radio',{name:'Short',exact:true}).click();
+  await exportDialog.getByText('1 clips - about 8 s',{exact:true}).waitFor();
+  assert.equal(await keyMoments.getByRole('radio',{name:'Short',exact:true}).getAttribute('aria-checked'),'true');
+  await keyMoments.getByRole('radio',{name:'Normal',exact:true}).click();
   assert.equal(await fullWarning.count(),0);
 
   assert.equal(await exportDialog.getByRole("radio", {name:"90", exact:true}).count(), 0, "90 FPS is not offered for new exports");
@@ -1580,6 +1636,9 @@ try {
   await behaviorExport.getByText('2 clips - about 10 s', {exact:true}).waitFor();
   await mergeRules.click();
   await behaviorExport.getByText('1 clips - about 5 s', {exact:true}).waitFor();
+  const behaviorPlayerFilter = behaviorExport.getByRole('switch',{name:'Only show player-related kills',exact:true});
+  assert.equal(await behaviorPlayerFilter.isChecked(),false);
+  await behaviorPlayerFilter.click();
   await page.evaluate(()=>window.failExport=false);
   await behaviorExport.getByRole('button',{name:'Export',exact:true}).click();
   await behaviorExport.waitFor({state:'hidden'});
@@ -1587,6 +1646,10 @@ try {
   assert.equal(exportRequest.selection.playerId,'2');
   assert.deepEqual(exportRequest.selection.ruleIds,['aim-snap','aim-linear-acquisition']);
   assert.equal(exportRequest.options.merge,true);
+  assert.equal(exportRequest.options.playerAvatars,true);
+  assert.equal(exportRequest.options.playerKillFeedOnly,true);
+  assert.equal(exportRequest.options.deathNoticeSeconds,5);
+  assert.equal(exportRequest.options.hudScale,0.85);
   assert.equal(exportRequest.options.keyMomentsOnly,false,'Analysis exports preserve their original windows');
   await page.getByRole('tab',{name:'Match anomalies',exact:true}).click();
   await page.setViewportSize({width:760,height:940});

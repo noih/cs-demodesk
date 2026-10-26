@@ -326,7 +326,9 @@
     "av1Hint": "AV1 encodes slower but offers better quality",
     "combatQualityPriority": "Prioritize combat quality",
     "combatQualityPriorityHint": "Prioritize combat quality, slightly reduce quality elsewhere",
-    "keyMomentsOnly": "Only keep key moments",
+    "keyMomentsOnlyHint": "Skip downtime for a shorter video.",
+    "keyMomentsOnly": "Combat clips",
+    "combatClipMode": {"normal": "Normal", "short": "Short", "off": "Off"},
     "fullLengthWarning": "Keeping the full sequence makes the video longer. With the same file size limit, image quality may be lower.",
     "posthumous": "Posthumous kill",
     "possibleNinja": "Possible ninja defuse",
@@ -339,6 +341,7 @@
     "fps": "FPS",
     "encoder": "Encoder",
     "toggle": {
+      "playerAvatars": "Show player avatars",
       "hud": "HUD (health, ammo, score)",
       "crosshair": "Crosshair",
       "radar": "Radar",
@@ -349,6 +352,7 @@
       "xray": "X-ray",
       "trueView": "TrueView (client-side view)"
     },
+    "playerKillFeedOnly": "Only show player-related kills",
     "hudScale": "HUD scale {{n}}",
     "clips": "Clips",
     "notReady": "Rendering is not ready - download the tools in Settings first.",

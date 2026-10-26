@@ -10,7 +10,7 @@ const RESOLUTIONS = [
   { label: '4K', width: 3840, height: 2160 },
 ];
 /** HUD switches in the export dialog, in display order. */
-const HUD_TOGGLES = ['hud', 'crosshair', 'radar', 'killFeed', 'chat', 'viewmodel', 'tracers', 'xray', 'trueView'] as const;
+const HUD_TOGGLES = ['hud', 'playerAvatars', 'crosshair', 'radar', 'killFeed', 'chat', 'viewmodel', 'tracers', 'xray', 'trueView'] as const;
 
 export function ExportDialog({open,onOpenChange,count,seconds,status,onSetup,onSubmit,onSubmitted,forceMerge=false,disabled=false,children,highlights,tickRate}: {
   open:boolean;onOpenChange:(open:boolean)=>void;count:number;seconds:number;status?:Status;onSetup:()=>void;
@@ -21,7 +21,7 @@ export function ExportDialog({open,onOpenChange,count,seconds,status,onSetup,onS
   const [opts,setOpts]=useState<RenderOptions>(DEFAULT_RENDER_OPTIONS);
   const [submitting,setSubmitting]=useState(false);
   const [error,setError]=useState<string>();
-  const preview = highlights && tickRate ? summarizeHighlights(highlights, tickRate, opts.keyMomentsOnly) : undefined;
+  const preview = highlights && tickRate ? summarizeHighlights(highlights, tickRate, opts.keyMomentsOnly, opts.shortCombatClips) : undefined;
   const render=async()=>{
     if(submitting)return;setSubmitting(true);setError(undefined);
     try {await onSubmit({...opts,roundResultLabel:t('highlights.roundResult'),merge:forceMerge||opts.merge,keyMomentsOnly:!!highlights&&opts.keyMomentsOnly});onOpenChange(false);onSubmitted();}
@@ -29,24 +29,15 @@ export function ExportDialog({open,onOpenChange,count,seconds,status,onSetup,onS
   };
   return (
       <Dialog.Root open={open} onOpenChange={onOpenChange}>
-        <Dialog.Content maxWidth="860px">
+        <Dialog.Content width="100%" maxWidth="min(900px, calc(100vw - 32px))">
           <Dialog.Title>{t('highlights.dialogTitle')}</Dialog.Title>
           <Dialog.Description size="2" color="gray">
             {t('highlights.summary', { n: count, seconds: Math.round(preview?.seconds ?? seconds) })}
           </Dialog.Description>
           {error && <Text as="p" color="red" role="alert">{error}</Text>}
           {children}
-          <Grid columns={{ initial: '1', sm: 'minmax(0, 1fr) minmax(0, 1fr)' }} gap="5" mt="4" align="start">
+          <Grid columns={{ initial: '1', sm: 'minmax(min-content, 1fr) minmax(0, 1fr)' }} gap="5" mt="4" align="start">
             <Flex direction="column" gap="3">
-              {highlights && <Box>
-                <Text as="label" size="2"><Flex gap="2" align="center">
-                  <Switch size="1" checked={opts.keyMomentsOnly} onCheckedChange={keyMomentsOnly=>setOpts({...opts,keyMomentsOnly})} />
-                  {t('highlights.keyMomentsOnly')}
-                </Flex></Text>
-                {!opts.keyMomentsOnly && opts.maxSizeMb != null && <Text as="p" role="status" size="1" color="amber" mt="1">
-                  {t('highlights.fullLengthWarning')}
-                </Text>}
-              </Box>}
               {count > 1 && !forceMerge && (
                 <Text as="label" size="2">
                   <Flex gap="2" align="center">
@@ -60,13 +51,23 @@ export function ExportDialog({open,onOpenChange,count,seconds,status,onSetup,onS
                   {t('highlights.sizeLimit')}
                   {count > 1 && !forceMerge && (opts.merge ? t('highlights.sizeMerged') : t('highlights.sizeEach'))}
                 </Text>
-                <SegmentedControl.Root size="1" value={String(opts.maxSizeMb)} onValueChange={(v) => setOpts({ ...opts, maxSizeMb: v === 'null' ? null : Number(v) })} style={{ width: '100%' }}>
+                <SegmentedControl.Root size="1" value={String(opts.maxSizeMb)} onValueChange={(v) => setOpts({ ...opts, maxSizeMb: v === 'null' ? null : Number(v) })} style={{ width: '100%', minWidth: 0, gridAutoColumns: 'auto', whiteSpace: 'nowrap' }}>
                   <SegmentedControl.Item value="10">10 MB</SegmentedControl.Item>
                   <SegmentedControl.Item value="20">20 MB</SegmentedControl.Item>
                   <SegmentedControl.Item value="50">50 MB</SegmentedControl.Item>
                   <SegmentedControl.Item value="100">100 MB</SegmentedControl.Item>
                   <SegmentedControl.Item value="null">{t('highlights.unlimited')}</SegmentedControl.Item>
                 </SegmentedControl.Root>
+                {highlights && <Box mt="2">
+                  <Text as="div" size="1" color="gray" mb="1">{t('highlights.keyMomentsOnly')}</Text>
+                  <SegmentedControl.Root size="1" aria-label={t('highlights.keyMomentsOnly')} value={!opts.keyMomentsOnly?'off':opts.shortCombatClips?'short':'normal'} onValueChange={value=>setOpts({...opts,keyMomentsOnly:value!=='off',shortCombatClips:value==='short'})} style={{width:'100%'}}>
+                    {(['normal','short','off'] as const).map(mode=><SegmentedControl.Item key={mode} value={mode}>{t(`highlights.combatClipMode.${mode}`)}</SegmentedControl.Item>)}
+                  </SegmentedControl.Root>
+                  <Text as="p" size="1" color="gray" mt="1">{t('highlights.keyMomentsOnlyHint')}</Text>
+                  {!opts.keyMomentsOnly && opts.maxSizeMb != null && <Text as="p" role="status" size="1" color="amber" mt="1">
+                    {t('highlights.fullLengthWarning')}
+                  </Text>}
+                </Box>}
                 {opts.maxSizeMb != null && <Box mt="2">
                   <Text as="label" size="2"><Flex gap="2" align="center">
                     <Switch size="1" checked={opts.combatQualityPriority} onCheckedChange={combatQualityPriority=>setOpts({...opts,combatQualityPriority})} />
@@ -115,8 +116,8 @@ export function ExportDialog({open,onOpenChange,count,seconds,status,onSetup,onS
                     <Select.Item value="libsvtav1">AV1 · CPU（libsvtav1）</Select.Item>
                     <Select.Item value="av1_nvenc">AV1 · NVIDIA（av1_nvenc）</Select.Item>
                     <Select.Item value="libx264">H.264 · CPU（libx264）</Select.Item>
-                    <Select.Item value="libx265">H.265 · CPU（libx265）</Select.Item>
                     <Select.Item value="h264_nvenc">H.264 · NVIDIA（h264_nvenc）</Select.Item>
+                    <Select.Item value="libx265">H.265 · CPU（libx265）</Select.Item>
                     <Select.Item value="hevc_nvenc">H.265 · NVIDIA（hevc_nvenc）</Select.Item>
                   </Select.Content>
                 </Select.Root>
@@ -126,19 +127,27 @@ export function ExportDialog({open,onOpenChange,count,seconds,status,onSetup,onS
             <Flex direction="column" gap="3">
               <Flex direction="column" gap="3">
                 {HUD_TOGGLES.map((key) => (
-                  <Text as="label" size="1" key={key}>
-                    <Flex align="center" justify="between" gap="3">
-                      <Text color="gray">{t(`highlights.toggle.${key}`)}</Text>
-                      <Switch size="1" style={{ flexShrink: 0 }} checked={opts[key]} disabled={key === 'crosshair' && !opts.hud} onCheckedChange={(v) => setOpts({ ...opts, [key]: v })} />
-                    </Flex>
-                  </Text>
+                  <Box key={key}>
+                    <Text as="label" size="1">
+                      <Flex align="center" justify="between" gap="3">
+                        <Text color="gray">{t(`highlights.toggle.${key}`)}</Text>
+                        <Switch size="1" style={{ flexShrink: 0 }} checked={opts[key]} disabled={key === 'crosshair' && !opts.hud} onCheckedChange={(v) => setOpts({ ...opts, [key]: v })} />
+                      </Flex>
+                    </Text>
+                    {key === 'killFeed' && <Box mt="2">
+                      <Text as="label" size="1"><Flex align="center" justify="between" gap="3">
+                        <Text color="gray">{t('highlights.playerKillFeedOnly')}</Text>
+                        <Switch size="1" style={{flexShrink:0}} checked={opts.playerKillFeedOnly} disabled={!opts.killFeed} onCheckedChange={playerKillFeedOnly=>setOpts({...opts,playerKillFeedOnly})} />
+                      </Flex></Text>
+                    </Box>}
+                  </Box>
                 ))}
               </Flex>
               <Box>
                 <Text as="div" size="1" color="gray" mb="1">
                   {t('highlights.hudScale', { n: opts.hudScale.toFixed(2) })}
                 </Text>
-                <Slider min={0.5} max={0.95} step={0.05} value={[opts.hudScale]} onValueChange={([v]) => setOpts({ ...opts, hudScale: v ?? 0.85 })} />
+                <Slider ref={node=>{node?.querySelector('[role="slider"]')?.setAttribute('aria-label',t('highlights.hudScale',{n:opts.hudScale.toFixed(2)}));}} min={0.5} max={1} step={0.05} value={[opts.hudScale]} onValueChange={([v]) => setOpts({ ...opts, hudScale: v ?? DEFAULT_RENDER_OPTIONS.hudScale })} />
               </Box>
             </Flex>
           </Grid>

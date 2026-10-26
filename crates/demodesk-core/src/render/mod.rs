@@ -188,12 +188,14 @@ pub struct RenderOptions {
     /// Individual elements, each independent of `hud`
     pub radar: bool,
     pub kill_feed: bool,
+    pub player_kill_feed_only: bool,
+    pub player_avatars: bool,
     pub chat: bool,
     /// First-person weapon model
     pub viewmodel: bool,
     /// Bullet tracers
     pub tracers: bool,
-    /// hud_scaling (CS2 allows 0.5–0.95)
+    /// HUD size multiplier (hud_scaling).
     pub hud_scale: f64,
     pub true_view: bool,
     pub xray: bool,
@@ -204,6 +206,7 @@ pub struct RenderOptions {
     /// Join all clips into one video (`highlights.<container>`) instead of one file per clip
     pub merge: bool,
     pub key_moments_only: bool,
+    pub short_combat_clips: bool,
     pub round_result_label: String,
     /// Re-encode so each output file — the merged video, or every clip — is at most this many MB
     pub max_size_mb: Option<f64>,
@@ -227,6 +230,8 @@ impl Default for RenderOptions {
             crosshair: true,
             radar: true,
             kill_feed: true,
+            player_kill_feed_only: false,
+            player_avatars: true,
             chat: false,
             viewmodel: true,
             tracers: true,
@@ -239,6 +244,7 @@ impl Default for RenderOptions {
             keep_raw_files: false,
             merge: false,
             key_moments_only: true,
+            short_combat_clips: false,
             round_result_label: "Round result".into(),
             max_size_mb: Some(20.0),
             combat_quality_priority: true,
@@ -350,7 +356,12 @@ pub(crate) fn merge_nearby_clips(mut clips: Vec<Highlight>, tick_rate: f64) -> V
 }
 
 /// Expand event windows before recording; repeated IDs are joined into one highlight afterwards.
-fn recording_windows(highlights: &[Highlight], tick_rate: f64, key_only: bool) -> Vec<Highlight> {
+fn recording_windows(
+    highlights: &[Highlight],
+    tick_rate: f64,
+    key_only: bool,
+    short: bool,
+) -> Vec<Highlight> {
     let mut clips = Vec::new();
     for h in highlights {
         if !key_only || h.key_moments.is_empty() {
@@ -358,6 +369,13 @@ fn recording_windows(highlights: &[Highlight], tick_rate: f64, key_only: bool) -
             continue;
         }
         let mut windows = h.key_moments.clone();
+        if short {
+            // Keep the three-second aftermath and preserve shorter objective/result shots.
+            let max_ticks = (6.0 * tick_rate).round() as i32;
+            for window in &mut windows {
+                window[0] = window[0].max(window[1].saturating_sub(max_ticks));
+            }
+        }
         windows.sort_unstable();
         let mut merged: Vec<[i32; 2]> = Vec::new();
         for [start, end] in windows {
@@ -552,12 +570,26 @@ pub fn render_highlights(input: RenderJobInput) -> Result<RenderResult> {
     } else {
         vec![]
     };
-    highlights = merge_nearby_clips(highlights, demo.tick_rate);
     // Render in demo order so the game only seeks forward.
     highlights.sort_by_key(|h| h.start_tick);
     std::fs::create_dir_all(&output_dir)?;
-    let recording = recording_windows(&highlights, demo.tick_rate, o.key_moments_only);
+    let recording = recording_windows(
+        &highlights,
+        demo.tick_rate,
+        o.key_moments_only,
+        o.short_combat_clips,
+    );
+    let recording = merge_nearby_clips(recording, demo.tick_rate);
+    highlights.retain(|h| recording.iter().any(|clip| clip.id == h.id));
     let clips = to_render_clips(demo, &recording);
+    if o.kill_feed
+        && o.player_kill_feed_only
+        && clips
+            .iter()
+            .any(|clip| actions::death_notice_player(clip).is_none())
+    {
+        return Err(ErrorCode::CameraUnavailable.into());
+    }
     if clips.iter().any(|c| {
         c.highlight
             .round_result
@@ -1228,7 +1260,14 @@ mod tests {
     #[test]
     fn key_windows_merge_strictly_under_one_second_and_keep_owner() {
         let h = sample_highlight("a", "p", vec![[320, 832], [1280, 1792], [2496, 3008]]);
-        let clips = super::recording_windows(&[h.clone()], 64.0, true);
+        let clips = super::recording_windows(&[h.clone()], 64.0, true, false);
+        let short = super::recording_windows(&[h.clone()], 64.0, true, true);
+        assert!(short.iter().all(|c| c.end_tick - c.start_tick <= 384));
+        assert_eq!(
+            short.last().unwrap().end_tick,
+            clips.last().unwrap().end_tick
+        );
+
         assert_eq!(clips.len(), 3);
         assert_eq!(
             clips.iter().map(|h| h.end_tick - h.start_tick).sum::<i32>(),
@@ -1236,12 +1275,41 @@ mod tests {
         );
         assert!(clips.iter().all(|c| c.id == "a"));
         assert_eq!(
-            super::recording_windows(&[h], 64.0, false)[0].end_tick,
+            super::recording_windows(&[h], 64.0, false, false)[0].end_tick,
             3200
         );
         for (gap, count) in [(0, 1), (63, 1), (64, 2)] {
             let h = sample_highlight("b", "p", vec![[1000, 1256], [1256 + gap, 1512 + gap]]);
-            assert_eq!(super::recording_windows(&[h], 64.0, true).len(), count);
+            assert_eq!(
+                super::recording_windows(&[h], 64.0, true, false).len(),
+                count
+            );
+        }
+    }
+
+    #[test]
+    fn overlap_uses_selected_recording_windows_before_merging() {
+        let a = sample_highlight("a", "p", vec![[320, 832]]);
+        let b = sample_highlight("b", "p", vec![[800, 1312]]);
+        for (key_only, short, expected) in [
+            (true, false, vec![(320, 1312)]),
+            (true, true, vec![(448, 832), (928, 1312)]),
+            (false, false, vec![(0, 3200)]),
+        ] {
+            let recording =
+                super::recording_windows(&[a.clone(), b.clone()], 64.0, key_only, short);
+            let merged = super::merge_nearby_clips(recording, 64.0);
+            assert_eq!(
+                merged
+                    .iter()
+                    .map(|h| (h.start_tick, h.end_tick))
+                    .collect::<Vec<_>>(),
+                expected
+            );
+            assert_eq!(merged[0].id, "a");
+            if short {
+                assert_eq!(merged[1].id, "b");
+            }
         }
     }
 
@@ -1252,12 +1320,12 @@ mod tests {
         let c = sample_highlight("c", "p", vec![[850, 1100]]);
         let merged = super::merge_nearby_clips(vec![a, b, c], 64.0);
         assert_eq!(merged.len(), 2);
-        let windows = super::recording_windows(&merged, 64.0, true);
+        let windows = super::recording_windows(&merged, 64.0, true, false);
         assert_eq!(windows.len(), 2);
         assert_eq!((windows[0].start_tick, windows[0].end_tick), (320, 1100));
         let legacy = sample_highlight("old", "p", vec![]);
         assert_eq!(
-            super::recording_windows(&[legacy], 64.0, true)[0].end_tick,
+            super::recording_windows(&[legacy], 64.0, true, false)[0].end_tick,
             3200
         );
     }

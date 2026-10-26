@@ -226,6 +226,8 @@ export interface RenderOptions {
   crosshair: boolean;
   radar: boolean;
   killFeed: boolean;
+  playerKillFeedOnly: boolean;
+  playerAvatars: boolean;
   chat: boolean;
   viewmodel: boolean;
   tracers: boolean;
@@ -239,6 +241,7 @@ export interface RenderOptions {
   /** join all clips into one video; the size limit then applies to that file */
   merge: boolean;
   keyMomentsOnly: boolean;
+  shortCombatClips: boolean;
   roundResultLabel: string;
   maxSizeMb: number | null;
   combatQualityPriority: boolean;
@@ -260,6 +263,8 @@ export const DEFAULT_RENDER_OPTIONS: RenderOptions = {
   crosshair: true,
   radar: true,
   killFeed: true,
+  playerKillFeedOnly: false,
+  playerAvatars: true,
   chat: false,
   viewmodel: true,
   tracers: true,
@@ -272,6 +277,7 @@ export const DEFAULT_RENDER_OPTIONS: RenderOptions = {
   keepRawFiles: false,
   merge: false,
   keyMomentsOnly: true,
+  shortCombatClips: false,
   roundResultLabel: "Round result",
   maxSizeMb: 20,
   combatQualityPriority: true,

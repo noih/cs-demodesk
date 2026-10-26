@@ -1,13 +1,13 @@
 import type { Highlight } from './api.ts';
 
 /** Same-player windows use the recorder's strict <1s merge rule. */
-export function summarizeHighlights(highlights: Highlight[], tickRate: number, keyOnly: boolean) {
+export function summarizeHighlights(highlights: Highlight[], tickRate: number, keyOnly: boolean, short = false) {
   const groups = new Map<string, [number, number][]>();
   for (const h of highlights) {
     const key = `${h.round}:${h.player.steamid}`;
     const windows = keyOnly && h.keyMoments?.length ? h.keyMoments : [[h.startTick, h.endTick] as [number, number]];
     const group = groups.get(key) ?? [];
-    group.push(...windows);
+    group.push(...windows.map(([start,end]): [number,number] => [keyOnly && short && h.keyMoments?.length ? Math.max(start,end-Math.round(6*tickRate)) : start,end]));
     groups.set(key, group);
   }
   let ticks = 0;

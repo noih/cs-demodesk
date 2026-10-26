@@ -322,7 +322,9 @@
     "av1Hint": "AV1 轉檔較慢，但畫質較佳",
     "combatQualityPriority": "交戰畫質優先",
     "combatQualityPriorityHint": "優先保留交戰畫質，其他片段略降",
-    "keyMomentsOnly": "只保留精彩片段",
+    "keyMomentsOnlyHint": "略過空檔，縮短影片長度",
+    "keyMomentsOnly": "交戰片段",
+    "combatClipMode": {"normal": "正常", "short": "短", "off": "關閉"},
     "fullLengthWarning": "保留過程會增加片長，容量受限可能畫質降低",
     "posthumous": "死後擊殺",
     "possibleNinja": "疑似偷拆",
@@ -335,6 +337,7 @@
     "fps": "FPS",
     "encoder": "編碼器",
     "toggle": {
+      "playerAvatars": "顯示玩家頭像",
       "hud": "HUD（血量、彈藥、比分）",
       "crosshair": "準星",
       "radar": "雷達",
@@ -345,6 +348,7 @@
       "xray": "X-ray",
       "trueView": "TrueView（以 client 端畫面為準）"
     },
+    "playerKillFeedOnly": "只顯示自己相關擊殺",
     "hudScale": "HUD 大小 {{n}}",
     "clips": "片段",
     "notReady": "渲染環境未就緒，請先到設定完成工具下載。",

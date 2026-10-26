@@ -67,6 +67,15 @@ pub fn steamid_to_account_id(steamid64: &str) -> Option<String> {
         .map(|v| (v - 76561197960265728).to_string())
 }
 
+pub(super) fn death_notice_player(clip: &RenderClip) -> Option<u64> {
+    clip.highlight
+        .player
+        .steamid
+        .parse::<u64>()
+        .ok()
+        .filter(|id| *id != 0)
+}
+
 /// Commands for all clips, sorted by tick. Clips are visited in start-tick
 /// order; sequence folders are numbered in that order.
 pub fn build_schedule(clips: &[RenderClip], o: &ActionsOptions) -> Vec<Scheduled> {
@@ -190,7 +199,6 @@ pub fn build_schedule(clips: &[RenderClip], o: &ActionsOptions) -> Vec<Scheduled
             &mut slot,
             format!("cl_drawhud_force_deathnotices {}", force(r.kill_feed)),
         );
-        // teammate names / equipment over heads: never (clutter, and it is not the player's own view)
         push(
             setup_tick,
             &mut slot,
@@ -214,7 +222,15 @@ pub fn build_schedule(clips: &[RenderClip], o: &ActionsOptions) -> Vec<Scheduled
         push(
             setup_tick,
             &mut slot,
-            format!("hud_scaling {:.2}", r.hud_scale.clamp(0.5, 0.95)),
+            format!(
+                "cl_teamcounter_playercount_instead_of_avatars {}",
+                (!r.player_avatars) as u8
+            ),
+        );
+        push(
+            setup_tick,
+            &mut slot,
+            format!("hud_scaling {:.2}", r.hud_scale.clamp(0.5, 1.0)),
         );
         push(
             setup_tick,
@@ -222,6 +238,11 @@ pub fn build_schedule(clips: &[RenderClip], o: &ActionsOptions) -> Vec<Scheduled
             format!("mirv_deathmsg lifetime {}", r.death_notice_seconds),
         );
         push(setup_tick, &mut slot, "mirv_deathmsg filter clear".into());
+        if r.kill_feed && r.player_kill_feed_only {
+            if let Some(player) = death_notice_player(clip) {
+                push(setup_tick, &mut slot, format!("mirv_deathmsg filter add attackerMatch=!x{player} victimMatch=!x{player} assisterMatch=!x{player} block=1 lastRule=1"));
+            }
+        }
         push(setup_tick, &mut slot, "mirv_deathmsg clear".into());
         push(
             setup_tick,
@@ -460,6 +481,84 @@ mod tests {
             .iter()
             .position(|a| a.cmd == cmd || a.cmd.starts_with(&format!("{cmd} ")))
             .unwrap()
+    }
+
+    #[test]
+    fn player_kill_feed_resets_for_each_clip_and_matches_all_roles() {
+        let render = RenderOptions {
+            player_kill_feed_only: true,
+            ..Default::default()
+        };
+        let first = clip(1000, 2000, Some(3));
+        let mut second = clip(3000, 4000, Some(4));
+        second.highlight.player.steamid = "76561197960265852".into();
+        let schedule = build_schedule(&[first.clone(), second], &opts(&render));
+        let commands: Vec<_> = schedule
+            .iter()
+            .filter(|s| s.cmd.starts_with("mirv_deathmsg filter"))
+            .map(|s| s.cmd.as_str())
+            .collect();
+        assert_eq!(commands, [
+            "mirv_deathmsg filter clear",
+            "mirv_deathmsg filter add attackerMatch=!x76561197960265851 victimMatch=!x76561197960265851 assisterMatch=!x76561197960265851 block=1 lastRule=1",
+            "mirv_deathmsg filter clear",
+            "mirv_deathmsg filter add attackerMatch=!x76561197960265852 victimMatch=!x76561197960265852 assisterMatch=!x76561197960265852 block=1 lastRule=1",
+        ]);
+        for render in [
+            RenderOptions::default(),
+            RenderOptions {
+                kill_feed: false,
+                player_kill_feed_only: true,
+                ..Default::default()
+            },
+        ] {
+            let schedule = build_schedule(&[first.clone()], &opts(&render));
+            assert!(!schedule
+                .iter()
+                .any(|s| s.cmd.starts_with("mirv_deathmsg filter add")));
+            assert!(schedule.iter().any(|s| s.cmd == "mirv_deathmsg lifetime 5"));
+        }
+        let mut invalid = first;
+        for id in ["0", "", "123;quit", "18446744073709551616"] {
+            invalid.highlight.player.steamid = id.into();
+            assert_eq!(death_notice_player(&invalid), None);
+        }
+    }
+
+    #[test]
+    fn player_avatar_modes_and_legacy_defaults_are_explicit() {
+        let legacy: RenderOptions = serde_json::from_str(r#"{"hudScale":0.85}"#).unwrap();
+        assert!(!legacy.player_kill_feed_only);
+        assert!(legacy.player_avatars);
+        for avatars in [true, false] {
+            let render = RenderOptions {
+                player_avatars: avatars,
+                ..Default::default()
+            };
+            let schedule = build_schedule(&[clip(1000, 2000, Some(3))], &opts(&render));
+            assert!(schedule.iter().any(|s| s.cmd
+                == format!(
+                    "cl_teamcounter_playercount_instead_of_avatars {}",
+                    (!avatars) as u8
+                )));
+        }
+        assert_eq!(legacy.hud_scale, 0.85);
+    }
+
+    #[test]
+    fn hud_scale_defaults_to_point_eight_five_and_keeps_explicit_values() {
+        let mut render = RenderOptions::default();
+        assert_eq!(render.hud_scale, 0.85);
+        for (scale, command) in [
+            (1.0, "hud_scaling 1.00"),
+            (0.85, "hud_scaling 0.85"),
+            (2.0, "hud_scaling 1.00"),
+            (0.1, "hud_scaling 0.50"),
+        ] {
+            render.hud_scale = scale;
+            let schedule = build_schedule(&[clip(1000, 2000, Some(3))], &opts(&render));
+            assert!(schedule.iter().any(|entry| entry.cmd == command));
+        }
     }
 
     #[test]

@@ -13,3 +13,12 @@ assert.deepEqual(summarizeHighlights([h,{...h,player:{steamid:'q'}}],64,true),{s
 assert.deepEqual(summarizeHighlights([h,{...h,id:'b'}],64,true),{seconds:24,segments:3});
 assert.deepEqual(summarizeHighlights([{...h,keyMoments:[[2000,2256]]}],64,true),{seconds:4,segments:1});
 console.log('Highlight preview checks passed');
+
+assert.deepEqual(summarizeHighlights([h],64,true,true),{seconds:18,segments:3});
+assert.deepEqual(summarizeHighlights([h],64,false,true),{seconds:50,segments:1});
+assert.deepEqual(summarizeHighlights([{...h,keyMoments:[[2000,2256]]}],64,true,true),{seconds:4,segments:1});
+
+const overlapping = [{...h,id:'a',keyMoments:[[320,832]]},{...h,id:'b',keyMoments:[[800,1312]]}];
+assert.deepEqual(summarizeHighlights(overlapping,64,true),{seconds:15.5,segments:1});
+assert.deepEqual(summarizeHighlights(overlapping,64,true,true),{seconds:12,segments:2});
+assert.deepEqual(summarizeHighlights(overlapping,64,false),{seconds:50,segments:1});
