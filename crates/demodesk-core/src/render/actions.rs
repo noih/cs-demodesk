@@ -491,7 +491,9 @@ mod tests {
         };
         let first = clip(1000, 2000, Some(3));
         let mut second = clip(3000, 4000, Some(4));
-        second.highlight.player.steamid = "76561197960265852".into();
+        let first_id = 76561197960265728_u64 + 123;
+        let second_id = 76561197960265728_u64 + 124;
+        second.highlight.player.steamid = second_id.to_string();
         let schedule = build_schedule(&[first.clone(), second], &opts(&render));
         let commands: Vec<_> = schedule
             .iter()
@@ -499,10 +501,10 @@ mod tests {
             .map(|s| s.cmd.as_str())
             .collect();
         assert_eq!(commands, [
-            "mirv_deathmsg filter clear",
-            "mirv_deathmsg filter add attackerMatch=!x76561197960265851 victimMatch=!x76561197960265851 assisterMatch=!x76561197960265851 block=1 lastRule=1",
-            "mirv_deathmsg filter clear",
-            "mirv_deathmsg filter add attackerMatch=!x76561197960265852 victimMatch=!x76561197960265852 assisterMatch=!x76561197960265852 block=1 lastRule=1",
+            "mirv_deathmsg filter clear".to_string(),
+            format!("mirv_deathmsg filter add attackerMatch=!x{first_id} victimMatch=!x{first_id} assisterMatch=!x{first_id} block=1 lastRule=1"),
+            "mirv_deathmsg filter clear".to_string(),
+            format!("mirv_deathmsg filter add attackerMatch=!x{second_id} victimMatch=!x{second_id} assisterMatch=!x{second_id} block=1 lastRule=1"),
         ]);
         for render in [
             RenderOptions::default(),

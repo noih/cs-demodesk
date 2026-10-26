@@ -111,11 +111,31 @@ gh release create v1.3.0 --repo noih/cs-demodesk --draft --target $commit --titl
 git push origin v1.3.0
 ```
 
-If the draft already exists, verify its notes and target commit before pushing
-the local signed tag; do not recreate the tag. After a workflow failure, rerun
-the failed jobs in Actions. Draft assets may be replaced on retry; an already
-published release is left unchanged. Do not rerun the full release script once
-the version commit/tag exists.
+If the draft already exists but its tag was never pushed, verify its notes and
+target commit before pushing the local signed tag; do not recreate the tag.
+For a transient workflow failure with no code changes, rerun the failed jobs.
+
+If a failed draft build needs code fixes, commit and sign the fixes, push main,
+then retry the existing version:
+
+```powershell
+git push origin main
+.\scripts\release.ps1 1.0.31 -RetryDraft
+```
+
+Retry requires a clean main branch synced with origin, matching project versions,
+a signed HEAD, an existing remote tag, and an unpublished draft with notes.
+It runs the checks again, replaces the local tag with a signed tag at HEAD,
+updates the draft target while preserving its notes, and pushes the tag with
+an explicit force-with-lease against the previously observed remote tag ID.
+Published releases are rejected and the draft is checked again after the tests.
+Do not retry while an earlier release workflow is still running.
+
+If signing or draft update fails, the remote tag is unchanged. A rejected lease
+means the remote tag changed: inspect that change before retrying; never replace
+the lease with a plain force push. The draft target may already point at the new
+commit, and the local tag may already have been updated. Retry fetches without
+overwriting tags so it can recover after these partial failures.
 
 Run `powershell -NoProfile -File scripts/test-release.ps1` for offline flow tests
 (all Git, GitHub, build and signing commands are mocked).

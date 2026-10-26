@@ -18,6 +18,10 @@ function git {
     'describe *' { 'v1.0.29' }
     'rev-parse *' { 'abc123' }
     'cat-file *' { 'BEGIN SSH SIGNATURE' }
+    'ls-remote *' { if ($global:releaseFailure -ne 'missing-tag') { ('1' * 40) + "`trefs/tags/v1.3.0" } }
+    'verify-commit *' { if ($global:releaseFailure -eq 'unsigned') { $global:LASTEXITCODE = 1 } }
+    'tag -f -s *' { if ($global:releaseFailure -eq 'signing') { $global:LASTEXITCODE = 1 } }
+    'push --force-with-lease=*' { if ($global:releaseFailure -eq 'lease') { $global:LASTEXITCODE = 1 } }
   }
 }
 function gh {
@@ -30,13 +34,22 @@ function gh {
     if ($global:releaseFailure -eq 'create') { $global:LASTEXITCODE = 1 }
   } elseif ($call.StartsWith('release view ')) {
     if ($global:releaseFailure -eq 'view') { $global:LASTEXITCODE = 1; return }
-    @{ isDraft=$global:releaseDraft; body='Keep these notes'; targetCommitish=$global:releaseTarget } | ConvertTo-Json
+    $global:releaseViews++
+    $draft = $global:releaseDraft -and -not ($global:releaseFailure -eq 'published-during-checks' -and $global:releaseViews -gt 1)
+    @{ isDraft=$draft; body='Keep these notes'; targetCommitish=$global:releaseTarget } | ConvertTo-Json
+  } elseif ($call.StartsWith('release edit ') -and $global:releaseFailure -eq 'edit') {
+    $global:LASTEXITCODE = 1
   } elseif ($call.StartsWith('release upload ') -and $global:releaseFailure -eq 'upload') {
     $global:LASTEXITCODE = 1
   }
 }
 function cargo { $global:LASTEXITCODE = 0 }
-function npm { $global:LASTEXITCODE = 0 }
+function npm {
+  $global:LASTEXITCODE = 0
+  $call = $args -join ' '
+  $global:releaseCalls.Add("npm $call")
+  if ($call -eq 'run test:privacy' -and $global:releaseFailure -eq 'privacy') { $global:LASTEXITCODE = 1 }
+}
 try {
   New-Item -ItemType Directory -Path "$fixture/scripts", "$fixture/src-tauri", "$fixture/dist-portable" | Out-Null
   foreach ($file in @('release.ps1','validate-store-version.ps1','test-store-version.ps1','publish-release.ps1')) {
@@ -55,7 +68,7 @@ try {
   $draft = @($global:releaseCalls | Where-Object { $_ -like 'gh release create *' })[0]
   Assert ($global:releaseCalls.IndexOf($draft) -lt $global:releaseCalls.IndexOf('git push origin v1.3.0')) 'Tag pushed before draft.'
   Assert (-not ($global:releaseCalls | Where-Object { $_ -like 'git add *notes*' })) 'Notes staged in Git.'
-  foreach ($failure in @('missing','empty','create')) {
+  foreach ($failure in @('missing','empty','create','privacy')) {
     $global:releaseCalls.Clear()
     $global:releaseFailure = $failure
     $path = "$fixture/notes with spaces.md"
@@ -65,6 +78,31 @@ try {
     try { & "$fixture/scripts/release.ps1" 1.3.0 -NotesFile $path } catch { $rejected = $true }
     Assert $rejected "Accepted $failure notes/draft failure."
     Assert (-not $global:releaseCalls.Contains('git push origin v1.3.0')) 'Pushed tag after failure.'
+    if ($failure -eq 'privacy') {
+      Assert (-not ($global:releaseCalls | Where-Object { $_ -like 'npm version *' -or $_ -like 'git push *' -or $_ -like 'git commit *' -or $_ -like 'git tag -s *' })) 'Privacy failure changed the version or published a release.'
+    }
+  }
+  foreach ($scenario in @('retry','published','view','version','missing-tag','privacy','unsigned','signing','edit','lease','published-during-checks')) {
+    $global:releaseCalls.Clear()
+    $global:releaseFailure = $scenario
+    $global:releaseDraft = $scenario -ne 'published'
+    $global:releaseViews = 0
+    Set-Content "$fixture/package.json" ('{"version":"' + $(if ($scenario -eq 'version') { '1.0.29' } else { '1.3.0' }) + '"}')
+    Set-Content "$fixture/Cargo.toml" 'version = "1.3.0"'
+    Set-Content "$fixture/src-tauri/tauri.conf.json" '{"version":"1.3.0"}'
+    $rejected = $false
+    try { & "$fixture/scripts/release.ps1" 1.3.0 -RetryDraft } catch { $rejected = $true }
+    Assert ($rejected -eq ($scenario -ne 'retry')) "Unexpected retry outcome: $scenario"
+    Assert (-not ($global:releaseCalls | Where-Object { $_ -like 'npm version *' -or $_ -like 'git commit *' -or $_ -like 'git add *' -or $_ -eq 'git push origin main' -or $_ -like '*--notes*' -or $_ -like 'gh release create *' })) 'Retry bumped versions, committed, or replaced notes.'
+    $push = 'git push --force-with-lease=refs/tags/v1.3.0:' + ('1' * 40) + ' origin refs/tags/v1.3.0'
+    Assert ($global:releaseCalls.Contains($push) -eq ($scenario -in @('retry','lease'))) "Unsafe tag push: $scenario"
+    if ($scenario -eq 'retry') {
+      Assert ($global:releaseCalls.IndexOf('git verify-commit abc123') -lt $global:releaseCalls.IndexOf('git tag -f -s v1.3.0 -m 1.3.0')) 'Tag created before verifying commit.'
+      Assert ($global:releaseCalls.IndexOf('gh release edit v1.3.0 --repo owner/project --target abc123') -lt $global:releaseCalls.IndexOf($push)) 'Tag pushed before draft update.'
+    }
+    if ($scenario -in @('published','view','version','missing-tag','privacy','unsigned','published-during-checks')) {
+      Assert (-not ($global:releaseCalls | Where-Object { $_ -like 'git tag -f *' -or $_ -like 'gh release edit *' })) "Retry mutated a rejected release: $scenario"
+    }
   }
   foreach ($scenario in @('check','publish','upload','view','target','published')) {
     $global:releaseCalls.Clear()
