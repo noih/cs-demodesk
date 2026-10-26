@@ -740,3 +740,16 @@ video {
   .demo-tabs .rt-TabsTrigger { flex:1 1 0; min-width:0; padding-inline:8px; }
   .demo-tabs .app-icon { margin-right:0; }
 }
+
+/* Radix's moving indicator assumes equal widths; size labels need content-sized columns. */
+.export-size-options .rt-SegmentedControlIndicator { display:none; }
+.export-size-options .rt-SegmentedControlItem { position:relative; }
+.export-size-options .rt-SegmentedControlItem[data-state='on']::before {
+  content:'';
+  position:absolute;
+  inset:1px;
+  z-index:-1;
+  pointer-events:none;
+  border-radius:max(0.5px,calc(var(--segmented-control-border-radius) - 1px));
+  background-color:var(--segmented-control-indicator-background-color);
+}

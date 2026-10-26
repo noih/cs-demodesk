@@ -237,6 +237,17 @@ try {
   await videoTab.locator('.rt-TabsTriggerInner .bi-hourglass-split').waitFor({state:'detached'});
   await page.locator('.notification-viewport').getByRole('button',{name:'Close',exact:true}).click();
   await page.locator('.job-card').first().waitFor();
+  await page.getByRole('button',{name:'Settings',exact:true}).click();
+  await page.locator('.settings-page').waitFor();
+  await page.evaluate(()=>window.holdDemo=true);
+  await page.getByRole('button',{name:'Settings',exact:true}).click();
+  await page.locator('.main [aria-busy="true"]').waitFor();
+  await page.waitForFunction(()=>typeof window.releaseDemo==='function');
+  await page.evaluate(()=>{window.holdDemo=false;window.releaseDemo();delete window.releaseDemo;});
+  await page.getByRole('tab',{name:'Videos',exact:true}).waitFor();
+  assert.equal(await page.getByRole('tab',{name:'Videos',exact:true}).getAttribute('data-state'),'active');
+  await page.locator('.job-card').first().waitFor({timeout:5000});
+
   await page.evaluate(async () => {
     const job = (await window.__TAURI_INTERNALS__.invoke('list_jobs')).find(j => j.id === 'job-3');
     window.emitTestEvent({type:'job-changed', job:{...job,status:'partial',failedHighlights:['Missing highlight']}});
@@ -812,11 +823,17 @@ try {
   await page.getByRole('dialog').getByText('No jobs', {exact:true}).waitFor();
   await page.getByRole('dialog').getByRole('tab', {name:/^Video export/}).click();
   await page.locator('.queue-clips').getByText('Player — 3 kills · R8').first().waitFor();
+  await page.evaluate(()=>window.holdDemo=true);
   await page.getByRole('button',{name:'Open demo',exact:true}).last().click();
+  await page.locator('.main [aria-busy="true"]').waitFor();
+  await page.waitForFunction(()=>typeof window.releaseDemo==='function');
+  await page.evaluate(()=>{window.holdDemo=false;window.releaseDemo();delete window.releaseDemo;});
+  await page.locator('.demo-heading').waitFor();
   await page.locator('.demo-item.active').waitFor();
   assert.equal(await page.locator('.filter-trigger').getAttribute('data-filtered'), 'false', 'Queue navigation clears filter indicator');
   assert.match(await page.locator('.demo-heading').innerText(),/Inferno/);
   assert.equal(await page.getByRole('tab').filter({hasText:'Videos'}).getAttribute('data-state'),'active');
+  await page.locator('.job-card').first().waitFor({timeout:5000});
   assert.ok(await page.locator('.demo-item').count()<40);
   const headerButtonBounds = () => page.locator('.app-header button').evaluateAll(buttons => buttons.map(button => {
     const { x, y, width, height } = button.getBoundingClientRect();
@@ -1197,6 +1214,20 @@ try {
   });
   await exportDialog.evaluate(el => el.style.removeProperty('--app-font-caption'));
   await page.setViewportSize(exportViewport);
+  await sizeOptions.evaluate(el => el.style.setProperty('--segmented-control-transition-duration','0ms'));
+  for (const option of await sizeOptions.getByRole('radio').all()) {
+    await option.click();
+    assert.ok(await sizeOptions.evaluate(el => {
+      const selected = el.querySelector('[role=radio][aria-checked=true]');
+      const background = getComputedStyle(selected,'::before');
+      return getComputedStyle(el.querySelector('.rt-SegmentedControlIndicator')).display==='none'
+        && getComputedStyle(selected).position==='relative' && background.content!=='none'
+        && ['top','right','bottom','left'].every(side=>background[side]==='1px');
+    }), 'Selection background aligns with the selected size option');
+  }
+  await sizeOptions.getByRole('radio',{name:'20 MB',exact:true}).click();
+  if(process.env.UI_SCREENSHOT_DIR) await sizeOptions.screenshot({path:process.env.UI_SCREENSHOT_DIR+'/export-size-options.png'});
+  await sizeOptions.evaluate(el => el.style.removeProperty('--segmented-control-transition-duration'));
   const playerKillFeed = exportDialog.getByRole('switch',{name:'Only show player-related kills',exact:true});
   const killFeed = exportDialog.getByRole('switch',{name:'Kill feed',exact:true});
   assert.equal(await playerKillFeed.isChecked(),false);

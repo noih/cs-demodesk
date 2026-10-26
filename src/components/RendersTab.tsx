@@ -1,6 +1,6 @@
 import { useNotify, ConfirmDialog } from './Notifications.tsx';
 import { Spinner } from './Spinner.tsx';
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { Badge, Box, Button, Callout, Card, DataList, Dialog, DropdownMenu, Flex, Heading, IconButton, Link, Progress, Text } from '@radix-ui/themes';
 import { useTranslation } from 'react-i18next';
@@ -209,7 +209,7 @@ function JobCard({ job, parsed, onChanged }: { job: RenderJob; parsed: ParsedDem
   );
 }
 
-export function RendersTab({ jobs, parsed, onChanged, scrollRef }: { jobs: RenderJob[]; parsed: ParsedDemo; onChanged: () => Promise<void>; scrollRef: RefObject<HTMLDivElement | null> }) {
+export function RendersTab({ jobs, parsed, onChanged, scrollElement }: { jobs: RenderJob[]; parsed: ParsedDemo; onChanged: () => Promise<void>; scrollElement: HTMLDivElement | null }) {
   const { t } = useTranslation();
   const listRef = useRef<HTMLDivElement>(null);
   const [scrollMargin, setScrollMargin] = useState(0);
@@ -217,7 +217,7 @@ export function RendersTab({ jobs, parsed, onChanged, scrollRef }: { jobs: Rende
   const getItemKey = useCallback((index: number) => jobs[index]!.id, [jobs]);
   const virtualizer = useVirtualizer({
     count: jobs.length,
-    getScrollElement: () => scrollRef.current,
+    getScrollElement: () => scrollElement,
     getItemKey,
     estimateSize: (index) => jobs[index]!.outputs.length > 0 ? 320 : 110,
     overscan: 3,
@@ -226,7 +226,7 @@ export function RendersTab({ jobs, parsed, onChanged, scrollRef }: { jobs: Rende
   });
 
   useLayoutEffect(() => {
-    const scroll = scrollRef.current;
+    const scroll = scrollElement;
     const list = listRef.current;
     if (!scroll || !list) return;
     let width = scroll.clientWidth;
@@ -243,7 +243,7 @@ export function RendersTab({ jobs, parsed, onChanged, scrollRef }: { jobs: Rende
     const observer = new ResizeObserver(measureLayout);
     observer.observe(scroll);
     return () => observer.disconnect();
-  }, [hasJobs, scrollRef, virtualizer]);
+  }, [hasJobs, scrollElement, virtualizer]);
 
   if (!hasJobs) {
     return <Text as="p" size="2" color="gray">{t('renders.empty')}</Text>;

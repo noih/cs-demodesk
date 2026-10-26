@@ -1,6 +1,6 @@
 import { useNotify, ConfirmDialog } from './Notifications.tsx';
 import { Spinner } from './Spinner.tsx';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Badge, Box, Button, Callout, DropdownMenu, Flex, Heading, IconButton, Tabs, Text, Tooltip } from '@radix-ui/themes';
 import { Trans, useTranslation } from 'react-i18next';
 import { api, errorText, mb, type AnalysisJob, type Assessment, type DemoMeta, type ParsedDemo, type RenderJob, type Status } from '../api.ts';
@@ -19,7 +19,7 @@ export function DemoView({ analysisJobs, meta, jobs, status, onChanged, onRemove
   const [loading, setLoading] = useState(true);
   const [parseRequested, setParseRequested] = useState(false);
   const parsing = parseRequested || meta.status === 'queued' || meta.status === 'validating' || meta.status === 'parsing';
-  const tabScrollRef = useRef<HTMLDivElement>(null);
+  const [tabScrollElement, setTabScrollElement] = useState<HTMLDivElement | null>(null);
   const [confirmRemove, setConfirmRemove] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [dataRevision, setDataRevision] = useState(0);
@@ -234,7 +234,7 @@ export function DemoView({ analysisJobs, meta, jobs, status, onChanged, onRemove
             </Tabs.Trigger>
             <Tabs.Trigger value="2d" title={t('demoView.tabs.replay')} aria-label={t('demoView.tabs.replay')}><i aria-hidden="true" className="bi bi-map app-icon" /><span className="demo-tab-label">{t('demoView.tabs.replay')}</span></Tabs.Trigger>
           </Tabs.List></div>
-          <Box ref={tabScrollRef} className="tab-body">
+          <Box ref={setTabScrollElement} className="tab-body">
             <Tabs.Content value="highlights">
               <HighlightsTab onSetup={() => onSetup('render')} meta={meta} parsed={parsed} status={status} onRendered={() => setTab('renders')} />
             </Tabs.Content>
@@ -246,7 +246,7 @@ export function DemoView({ analysisJobs, meta, jobs, status, onChanged, onRemove
               <ChartsTab parsed={parsed} />
             </Tabs.Content>
             <Tabs.Content value="renders">
-              <RendersTab jobs={jobs} parsed={parsed} onChanged={onChanged} scrollRef={tabScrollRef} />
+              <RendersTab jobs={jobs} parsed={parsed} onChanged={onChanged} scrollElement={tabScrollElement} />
             </Tabs.Content>
             <Tabs.Content value="2d" style={{ height: '100%' }}>
               <ReplayTab onSetup={() => onSetup('replay')} meta={meta} parsed={parsed} />
