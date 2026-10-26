@@ -81,7 +81,7 @@ CS2/HLAE for offline recording and FFmpeg for export. Explain that recording
 uses -insecure and that third-party tools are downloaded on demand.
 
 Run npm run app:release to build both artifacts locally from one x64 compilation.
-To release, prepare a UTF-8 Markdown file containing the version's What's New
+To release, prepare a UTF-8 Markdown file containing concise English release notes without a heading
 and run:
 
 ```powershell
