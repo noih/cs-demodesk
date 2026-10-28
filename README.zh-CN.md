@@ -62,6 +62,7 @@
 | HLAE | 录制（mirv_streams） | [advancedfx/advancedfx](https://github.com/advancedfx/advancedfx) |
 | FFmpeg | 编码、合并、大小上限 | [noih/cs-demodesk-ffmpeg](https://github.com/noih/cs-demodesk-ffmpeg)（GPL） |
 | Source 2 Viewer CLI | 从 vpk 提取雷达图 | [ValveResourceFormat](https://github.com/ValveResourceFormat/ValveResourceFormat)（MIT） |
+| FidelityFX CAS | 2D 雷达图锐化（改写实现） | [GPUOpen-Effects/FidelityFX-CAS](https://github.com/GPUOpen-Effects/FidelityFX-CAS) (MIT) |
 | demoparser | 解析 demo（vendored） | [LaihoE/demoparser](https://github.com/LaihoE/demoparser)（MIT） |
 
 DemoDesk 使用基于 [BtbN/FFmpeg-Builds](https://github.com/BtbN/FFmpeg-Builds) 自行编译的精简版 FFmpeg，仅保留程序所需的库与功能。

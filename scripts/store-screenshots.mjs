@@ -25,6 +25,8 @@ for (const source of sources) for (const file of (await readdir(source)).filter(
   if (data.stats?.length === 10 && data.roundSummaries?.length) {
     let sourceStat;
     try { sourceStat = await stat(data.info.path); } catch (error) { if (error.code === 'ENOENT') continue; throw error; }
+    if (seenPaths.has(data.info.path)) continue;
+    seenPaths.add(data.info.path);
     const matchKey = createHash('sha1').update(file.slice(0, -5)).digest('hex');
     try {
       data.screenshotAssessments = JSON.parse(await readFile(path.join(source, '../behavior-analysis/matches', matchKey, 'latest.json'), 'utf8'));
@@ -56,7 +58,7 @@ for (const source of sources) for (const file of (await readdir(source)).filter(
         const outputs = [];
         for (const [index, item] of job.outputs.entries()) {
           try {
-            const body = await readFile(item.file);
+            const body = await readFile(path.resolve(renderDir, entry, item.file));
             const file = `D:/DemoDesk/clips/${job.id}/clip-${index+1}.mp4`;
             assets.set(file, {body, contentType:'video/mp4'});
             outputs.push({...item, file, title:'Highlight'});
@@ -66,8 +68,6 @@ for (const source of sources) for (const file of (await readdir(source)).filter(
       }
       renderJobs.set(data.info.path,jobs);
     } catch (error) { if (error.code !== 'ENOENT') throw error; }
-    if (seenPaths.has(data.info.path)) continue;
-    seenPaths.add(data.info.path);
     matches.push(data);
   }
 }

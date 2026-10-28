@@ -62,6 +62,7 @@ Nothing is written into the game folder: no plugin, script, or cfg, and no game 
 | HLAE | Recording (mirv_streams) | [advancedfx/advancedfx](https://github.com/advancedfx/advancedfx) |
 | FFmpeg | Encoding, merging, size limit | [noih/cs-demodesk-ffmpeg](https://github.com/noih/cs-demodesk-ffmpeg) (GPL) |
 | Source 2 Viewer CLI | Radar image extraction from vpk | [ValveResourceFormat](https://github.com/ValveResourceFormat/ValveResourceFormat) (MIT) |
+| FidelityFX CAS | 2D radar image sharpening (adapted implementation) | [GPUOpen-Effects/FidelityFX-CAS](https://github.com/GPUOpen-Effects/FidelityFX-CAS) (MIT) |
 | demoparser | Demo parsing (vendored) | [LaihoE/demoparser](https://github.com/LaihoE/demoparser) (MIT) |
 
 DemoDesk uses a minimal custom FFmpeg build based on [BtbN/FFmpeg-Builds](https://github.com/BtbN/FFmpeg-Builds), retaining only the libraries and features the app needs.

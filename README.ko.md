@@ -62,6 +62,7 @@ Counter-Strike 2를 위한 Windows용 Demo 관리·분석 도구입니다. 플�
 | HLAE | 녹화 (mirv_streams) | [advancedfx/advancedfx](https://github.com/advancedfx/advancedfx) |
 | FFmpeg | 인코딩, 합치기, 크기 제한 | [noih/cs-demodesk-ffmpeg](https://github.com/noih/cs-demodesk-ffmpeg) (GPL) |
 | Source 2 Viewer CLI | vpk 에서 레이더 이미지 추출 | [ValveResourceFormat](https://github.com/ValveResourceFormat/ValveResourceFormat) (MIT) |
+| FidelityFX CAS | 2D 레이더 이미지 선명화 (이식 구현) | [GPUOpen-Effects/FidelityFX-CAS](https://github.com/GPUOpen-Effects/FidelityFX-CAS) (MIT) |
 | demoparser | 데모 파싱 (vendored) | [LaihoE/demoparser](https://github.com/LaihoE/demoparser) (MIT) |
 
 DemoDesk는 [BtbN/FFmpeg-Builds](https://github.com/BtbN/FFmpeg-Builds)를 기반으로 직접 빌드한 경량 FFmpeg를 사용하며, 앱에 필요한 라이브러리와 기능만 포함합니다.
