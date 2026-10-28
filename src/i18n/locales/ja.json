@@ -403,7 +403,7 @@
     "sizeLimit": "≤ {{mb}} MB",
     "noSizeLimit": "サイズ無制限",
     "openFolder": "フォルダーを開く",
-    "viewLog": "ログを表示",
+    "viewLog": "ログ",
     "deleteJob": "この書き出しを削除（動画を含む）",
     "merged": "結合動画",
     "openInPlayer": "プレイヤーで開く",

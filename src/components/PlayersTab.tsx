@@ -1,5 +1,5 @@
 import { displayPlayerName } from '../playerName.ts';
-import { useCallback, useState, type ReactNode } from 'react';
+import { useCallback, useRef, useState, type ReactNode } from 'react';
 import { useAppTheme } from '../AppTheme.tsx';
 import { Badge, Button, Card, Flex, Heading, Table, Text, Tooltip } from '@radix-ui/themes';
 import { useTranslation } from 'react-i18next';
@@ -17,9 +17,16 @@ export function PlayersTab({ parsed }: { parsed: ParsedDemo }) {
   const { t } = useTranslation();
   const [group, setGroup] = useState<(typeof GROUPS)[number]>('general');
   const [weaponGroup, setWeaponGroup] = useState<(typeof WEAPON_GROUPS)[number]>('all');
+  const tableViewports = useRef(new Set<HTMLElement>());
   const tableRef = useCallback((element: HTMLDivElement | null) => {
     const viewport = element?.querySelector<HTMLElement>('[data-radix-scroll-area-viewport]');
     if (!viewport) return;
+    tableViewports.current.add(viewport);
+    const syncScroll = () => {
+      for (const other of tableViewports.current) {
+        if (other !== viewport && other.scrollLeft !== viewport.scrollLeft) other.scrollLeft = viewport.scrollLeft;
+      }
+    };
     let drag: { id: number; x: number; left: number } | undefined;
     const down = (event: PointerEvent) => {
       if (event.pointerType !== 'mouse' || event.button !== 0 || viewport.scrollWidth <= viewport.clientWidth) return;
@@ -57,7 +64,10 @@ export function PlayersTab({ parsed }: { parsed: ParsedDemo }) {
     viewport.addEventListener('pointercancel', stop);
     viewport.addEventListener('lostpointercapture', stop);
     viewport.addEventListener('dblclick', selectCell);
+    viewport.addEventListener('scroll', syncScroll, { passive: true });
     return () => {
+      tableViewports.current.delete(viewport);
+      viewport.removeEventListener('scroll', syncScroll);
       viewport.removeEventListener('pointerdown', down);
       viewport.removeEventListener('pointermove', move);
       viewport.removeEventListener('pointerup', stop);
@@ -175,6 +185,5 @@ export function PlayersTab({ parsed }: { parsed: ParsedDemo }) {
         </Table.Row>)}</Table.Body>
       </Table.Root>
     </Card>)}
-    <Text size="1" color="gray">{t(`players.${group}Note`)} {t('players.barNote')}</Text>
   </Flex>;
 }

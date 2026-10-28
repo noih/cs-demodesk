@@ -72,6 +72,7 @@ try {
       if(cmd==='check_for_updates'){if(window.holdUpdate)await new Promise(resolve=>window.releaseUpdate=resolve);if(window.failUpdate)throw new Error('offline');return window.updateStatus ?? {status:'available',version:'1.0.10'};}
       if(cmd==='open_url'){window.openedUrl=args.url;return;}
       if(cmd==='open_path'){window.openedPath=args.path;return;}
+      if(cmd==='reveal_path'){window.revealedPath=args.path;return;}
       if(cmd==='get_status')return window.missingTools ? {...status,ok:false,missingRenderTools:window.missingRenderTools ?? ['HLAE','ffmpeg']} : status;
       if(cmd==='get_storage_bytes'){if(window.holdStorage)await new Promise(resolve=>window.releaseStorage=resolve);return window.storageBytes ?? {parsedBytes:1048576,anomalyBytes:0,clipsBytes:0,radarBytes:0};}
       if(['clear_all_analysis','clear_anomaly_data','clear_all_clips','clear_radar'].includes(cmd))return new Promise((resolve,reject)=>{window.releaseClear=()=>resolve(1048576);window.rejectClear=()=>reject('Clear failed');});
@@ -312,6 +313,21 @@ try {
   });
   await page.locator('.header-tools .bi-arrow-clockwise').locator('..').click();
   await page.waitForFunction(() => document.querySelectorAll('.job-card').length === 2);
+  const locationLink = page.locator('.job-details a').first();
+  const revealFile = await page.evaluate(() => window.queueJobs[1].outputs[0].file);
+  assert.equal((await locationLink.innerText()).trim(), revealFile.replace(/[\\/][^\\/]+$/, ''));
+  assert.equal(await locationLink.locator('i').count(), 0, 'Location is a plain text link');
+  assert.equal(await page.locator('.job-header').getByRole('button', {name:'Open folder', exact:true}).count(), 0);
+  await locationLink.click();
+  assert.equal(await page.evaluate(() => window.revealedPath), revealFile, 'Location link reveals the same output file as the former folder button');
+  await page.evaluate(() => { window.revealedPath = null; });
+  await locationLink.focus();
+  await page.keyboard.press('Enter');
+  assert.equal(await page.evaluate(() => window.revealedPath), revealFile, 'Location link supports keyboard activation');
+  const playerLink = page.locator('.job-previews').getByRole('link', {name:'Open in player', exact:true}).first();
+  assert.equal(await playerLink.locator('i').count(), 0, 'Player action is a plain text link');
+  await playerLink.click();
+  assert.equal(await page.evaluate(() => window.openedPath), revealFile, 'Player link opens the output file');
   for (const height of [920, 924, 926, 930]) {
     await page.setViewportSize({width:1333, height});
     const widths = await page.evaluate(async () => {
@@ -466,7 +482,10 @@ try {
   await page.mouse.move(dragX - 120, dragY, {steps:5});
   await page.mouse.up();
   assert.ok(await tableScrollers.first().evaluate(el => el.scrollLeft > 0), 'Left-button dragging scrolls horizontally');
-  assert.equal(await tableScrollers.last().evaluate(el => el.scrollLeft), 0, 'Dragging affects only one team');
+  await page.waitForFunction(() => {
+    const [top, bottom] = document.querySelectorAll('.player-table [data-radix-scroll-area-viewport]');
+    return top.scrollLeft > 0 && top.scrollLeft === bottom.scrollLeft;
+  });
   const releasedLeft = await tableScrollers.first().evaluate(el => el.scrollLeft);
   await page.mouse.move(dragX - 180, dragY);
   assert.equal(await tableScrollers.first().evaluate(el => el.scrollLeft), releasedLeft, 'Releasing the mouse stops dragging');
@@ -481,7 +500,10 @@ try {
     el.dispatchEvent(event);
     return !event.defaultPrevented && el.scrollLeft === before;
   }), 'Vertical wheel keeps its native behavior');
+  await tableScrollers.last().evaluate(el => { el.scrollLeft = 80; });
+  await page.waitForFunction(() => [...document.querySelectorAll('.player-table [data-radix-scroll-area-viewport]')].every(el => el.scrollLeft === 80));
   await tableScrollers.first().evaluate(el => { el.scrollLeft = 0; });
+  await page.waitForFunction(() => [...document.querySelectorAll('.player-table [data-radix-scroll-area-viewport]')].every(el => el.scrollLeft === 0));
   for (const cell of [tables.first().locator('tbody th').first(), cells.first(), tables.first().getByRole('columnheader').first()]) {
     await cell.dblclick();
     assert.equal(await page.evaluate(() => getSelection().toString()), await cell.innerText(), 'Double-click selects the complete cell for copying');

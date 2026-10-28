@@ -403,7 +403,7 @@
     "sizeLimit": "≤ {{mb}} MB",
     "noSizeLimit": "大小不限",
     "openFolder": "打开目录",
-    "viewLog": "查看 log",
+    "viewLog": "日志",
     "deleteJob": "删除本次输出（含视频）",
     "merged": "合并视频",
     "openInPlayer": "在播放器中打开",

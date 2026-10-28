@@ -403,7 +403,7 @@
     "sizeLimit": "≤ {{mb}} MB",
     "noSizeLimit": "大小不限",
     "openFolder": "開啟目錄",
-    "viewLog": "檢視 log",
+    "viewLog": "日誌",
     "deleteJob": "刪除這次輸出（含影片）",
     "merged": "合併影片",
     "openInPlayer": "在播放器開啟",

@@ -403,7 +403,7 @@
     "sizeLimit": "≤ {{mb}} MB",
     "noSizeLimit": "크기 제한 없음",
     "openFolder": "폴더 열기",
-    "viewLog": "로그 보기",
+    "viewLog": "로그",
     "deleteJob": "이 내보내기 삭제 (동영상 포함)",
     "merged": "합친 동영상",
     "openInPlayer": "플레이어로 열기",

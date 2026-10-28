@@ -65,7 +65,7 @@ export function HighlightsTab({ meta, parsed, status, onRendered, onSetup }: { m
         </Button>
       </Flex>
 
-      <Table.Root className="nowrap-headers" variant="surface" size="1" layout="auto">
+      <Table.Root className="nowrap-headers highlights-table" variant="surface" size="1" layout="auto">
         <Table.Header>
           <Table.Row>
             <Table.ColumnHeaderCell width="36px" />
@@ -82,8 +82,8 @@ export function HighlightsTab({ meta, parsed, status, onRendered, onSetup }: { m
         <Table.Body>
           {visible.map((h) => (
             <Table.Row key={h.id} className={`row-click ${selected.has(h.id) ? 'row-selected' : ''}`} onClick={() => toggle(h.id)}>
-              <Table.Cell style={{ verticalAlign: 'middle' }}>
-                <Checkbox style={{ display: 'flex' }} checked={selected.has(h.id)} onCheckedChange={() => toggle(h.id)} onClick={(e) => e.stopPropagation()} />
+              <Table.Cell>
+                <div className="highlight-selection"><Checkbox style={{ display: 'flex' }} checked={selected.has(h.id)} onCheckedChange={() => toggle(h.id)} onClick={(e) => e.stopPropagation()} /></div>
               </Table.Cell>
               <Table.Cell align="right">
                 <Text weight="bold">{h.score.toFixed(1)}</Text>
@@ -98,7 +98,7 @@ export function HighlightsTab({ meta, parsed, status, onRendered, onSetup }: { m
               </Table.Cell>
               <Table.Cell style={{ whiteSpace: 'nowrap' }}>{summaryOf(h)}</Table.Cell>
               <Table.Cell>
-                <Flex gap="1" wrap="wrap">
+                <Flex gap="1" wrap="wrap" className="highlight-tags">
                   {h.tags.map((tag) => (
                     <Badge key={tag} size="1" color={HOT_TAGS.has(tag) ? 'amber' : 'gray'} variant={HOT_TAGS.has(tag) ? 'solid' : 'soft'}>
                       {t(TAG_LABELS[tag] ?? `highlights.tags.${tag}`, { defaultValue: tag })}

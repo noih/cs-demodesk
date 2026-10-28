@@ -407,7 +407,7 @@
     "sizeLimit": "≤ {{mb}} MB",
     "noSizeLimit": "No size limit",
     "openFolder": "Open folder",
-    "viewLog": "View log",
+    "viewLog": "Log",
     "deleteJob": "Delete this export (videos included)",
     "merged": "Merged video",
     "openInPlayer": "Open in player",

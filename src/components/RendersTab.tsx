@@ -56,11 +56,6 @@ function JobCard({ job, parsed, onChanged }: { job: RenderJob; parsed: ParsedDem
             {t('common.cancel')}
           </Button>
         )}
-        {revealTarget && (
-          <Button size="1" variant="soft" onClick={() => void api.reveal(revealTarget)}>
-            <i aria-hidden="true" className="bi bi-folder2-open app-icon"  /> {t('renders.openFolder')}
-          </Button>
-        )}
         <DropdownMenu.Root>
           <DropdownMenu.Trigger>
             <IconButton size="1" variant="soft" aria-label={t('common.more')}>
@@ -75,7 +70,7 @@ function JobCard({ job, parsed, onChanged }: { job: RenderJob; parsed: ParsedDem
               <>
                 <DropdownMenu.Separator />
                 <DropdownMenu.Item color="red" onSelect={() => setConfirmDelete(true)}>
-                  {t('renders.deleteJob')}
+                  {t('common.delete')}
                 </DropdownMenu.Item>
               </>
             )}
@@ -131,8 +126,8 @@ function JobCard({ job, parsed, onChanged }: { job: RenderJob; parsed: ParsedDem
                   </Text>
                   <Text as="div" size="1" color="gray">
                     {mb(o.bytes)} ·{' '}
-                    <Link size="1" href="#" onClick={(e) => (e.preventDefault(), void api.open(o.file))}>
-                      {t('renders.openInPlayer')} <i aria-hidden="true" className="bi bi-box-arrow-up-right app-icon" style={{ verticalAlign: '-2px' }} />
+                    <Link size="1" href="#" underline="none" style={{ color: 'var(--app-accent)' }} onClick={(e) => (e.preventDefault(), void api.open(o.file))}>
+                      {t('renders.openInPlayer')}
                     </Link>
                   </Text>
                 </Box>
@@ -178,9 +173,10 @@ function JobCard({ job, parsed, onChanged }: { job: RenderJob; parsed: ParsedDem
             <DataList.Item>
               <DataList.Label minWidth="0" style={{ flexBasis: 90 }}>{t('renders.location')}</DataList.Label>
               <DataList.Value>
-                <Text className="mono selectable" style={{ overflowWrap: 'anywhere' }}>
+                <Link href="#" underline="none" className="mono selectable" style={{ overflowWrap: 'anywhere', color: 'var(--app-accent)' }}
+                  onClick={(e) => { e.preventDefault(); if (revealTarget) void api.reveal(revealTarget); }}>
                   {job.outputs[0]?.file.replace(/[\\/][^\\/]+$/, '')}
-                </Text>
+                </Link>
               </DataList.Value>
             </DataList.Item>
           </DataList.Root>
