@@ -1278,7 +1278,7 @@ try {
   await exportDialog.getByText('1 clips - about 8 s',{exact:true}).waitFor();
   const fullWarning = exportDialog.getByRole('status').filter({hasText:'Keeping the full sequence'});
   assert.equal(await fullWarning.count(),0);
-  await keyMoments.getByRole('radio',{name:'Off',exact:true}).click();
+  await keyMoments.getByRole('radio',{name:'Full',exact:true}).click();
   await fullWarning.waitFor();
   await sizeOptions.getByRole('radio',{name:'Unlimited',exact:true}).click();
   assert.equal(await combatPriority.count(),0);
@@ -1756,7 +1756,7 @@ try {
   assert.equal(await scorePanel.getByRole('button',{name:'Delete data',exact:true}).count(),0,'Deletion is centralized in the demo menu');
 
   await page.locator('.demo-heading').getByRole('button',{name:'More',exact:true}).click();
-  assert.deepEqual(await page.getByRole('menuitem').allTextContents(),['Show in Explorer','Delete videos','Delete anomaly data','Delete all analysis data','Delete demo file'],'Demo menu follows the requested order');
+  assert.deepEqual(await page.getByRole('menuitem').allTextContents(),['Open folder','Delete videos','Delete anomaly data','Delete all analysis data','Delete demo file'],'Demo menu follows the requested order');
   assert.equal(await page.getByRole('menuitem',{name:'Delete videos',exact:true}).getAttribute('aria-disabled'),'true','Running videos cannot be deleted');
   await page.keyboard.press('Escape');
   await page.evaluate(async()=>{

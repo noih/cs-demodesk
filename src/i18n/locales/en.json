@@ -329,7 +329,7 @@
     "combatQualityPriorityHint": "Prioritize combat quality, slightly reduce quality elsewhere",
     "keyMomentsOnlyHint": "Skip downtime for a shorter video.",
     "keyMomentsOnly": "Combat clips",
-    "combatClipMode": {"normal": "Normal", "short": "Short", "off": "Off"},
+    "combatClipMode": {"normal": "Normal", "short": "Short", "off": "Full"},
     "fullLengthWarning": "Keeping the full sequence makes the video longer. With the same file size limit, image quality may be lower.",
     "posthumous": "Posthumous kill",
     "possibleNinja": "Possible ninja defuse",
@@ -426,7 +426,7 @@
       "voice": "Voice"
     },
     "location": "Location",
-    "logTitle": "Render log",
+    "logTitle": "Log",
     "logEmpty": "(no log yet)",
     "deleteTitle": "Delete this export?",
     "deleteBody": "Deletes the {{n}} video files and the record of this job; the demo and its analysis are kept.",

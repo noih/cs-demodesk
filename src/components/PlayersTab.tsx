@@ -168,8 +168,8 @@ export function PlayersTab({ parsed }: { parsed: ParsedDemo }) {
       {WEAPON_GROUPS.map(key => <Button key={key} size="1" color={weaponGroup === key ? 'amber' : 'gray'} variant={weaponGroup === key ? 'solid' : 'soft'} aria-pressed={weaponGroup === key} onClick={() => setWeaponGroup(key)}>{t(`players.weapon_${key}`)}</Button>)}
     </Flex>}
     {(['A', 'B'] as const).map(team => <Card key={team}>
-      <Flex align="center" gap="2" mb="2">
-        <Badge color={team === 'A' ? 'blue' : 'orange'}>{t(team === 'A' ? 'players.teamA' : 'players.teamB')}</Badge>
+      <Flex align="center" gap="2" mb="2" className="player-team-header">
+        <Badge color={team === 'A' ? 'blue' : 'orange'}>{team === 'A' ? 'CT' : 'T'}</Badge>
         <Heading data-text-role="subtitle" size="4">{parsed.score[team]}</Heading>
         {group === 'general' && <Text size="1" color="gray">{t('players.kills', { count: parsed.stats.filter(p => p.team === team).reduce((sum, p) => sum + p.kills, 0) })}</Text>}
       </Flex>

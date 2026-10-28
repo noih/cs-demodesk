@@ -16,9 +16,9 @@ function LinkIcon({ url, label }: { url: string; label: string }) {
 /** Small "about" dialog: name, version, author, third-party components. */
 export function AboutDialog() {
   const { t } = useTranslation();
-  const THIRD_PARTY: Array<{ name: string; repo: string; license: string; url: string }> = [
+  const THIRD_PARTY: Array<{ name: string; repo: string; license: string; licenseDescription?: string; url: string }> = [
     { name: 'HLAE', repo: 'advancedfx/advancedfx', license: 'custom', url: 'https://github.com/advancedfx/advancedfx' },
-    { name: 'FFmpeg', repo: 'noih/cs-demodesk-ffmpeg', license: t('about.ffmpegLicense'), url: 'https://github.com/noih/cs-demodesk-ffmpeg' },
+    { name: 'FFmpeg', repo: 'noih/cs-demodesk-ffmpeg', license: 'GPLv3 / MIT', licenseDescription: t('about.ffmpegLicense'), url: 'https://github.com/noih/cs-demodesk-ffmpeg' },
     { name: 'Source 2 Viewer', repo: 'ValveResourceFormat/ValveResourceFormat', license: 'MIT', url: 'https://github.com/ValveResourceFormat/ValveResourceFormat' },
     { name: 'FidelityFX CAS', repo: 'GPUOpen-Effects/FidelityFX-CAS', license: 'MIT', url: 'https://github.com/GPUOpen-Effects/FidelityFX-CAS' },
     { name: 'demoparser', repo: 'LaihoE/demoparser', license: 'MIT', url: 'https://github.com/LaihoE/demoparser' },
@@ -97,7 +97,7 @@ export function AboutDialog() {
               <Text size="1" color="gray" className="mono" truncate title={c.repo}>
                 {c.repo}
               </Text>
-              <Badge size="1" variant="soft" color="gray">
+              <Badge size="1" variant="soft" color="gray" title={c.licenseDescription}>
                 {c.license}
               </Badge>
               <LinkIcon url={c.url} label={t('about.openSite', { name: c.name })} />

@@ -126,7 +126,7 @@ export function DemoView({ analysisJobs, meta, jobs, status, onChanged, onRemove
           <Heading data-text-role="title" size="6" truncate style={{ minWidth: 0 }}>
             {parsed ? parsed.info.mapName : meta.name.replace(/\.dem$/i, '')}
           </Heading>
-          {parsed && <div className="match-score"><div className="team-a"><small>{t('common.teamA')}</small><strong>{parsed.score.A}</strong></div><div className="team-b"><small>{t('common.teamB')}</small><strong>{parsed.score.B}</strong></div></div>}
+          {parsed && <div className="match-score"><div className="team-a" aria-label={`${t('common.teamA')}: ${parsed.score.A}`}><strong>{parsed.score.A}</strong></div><div className="team-b" aria-label={`${t('common.teamB')}: ${parsed.score.B}`}><strong>{parsed.score.B}</strong></div></div>}
           <Flex gap="2" style={{ flex: 'none' }}>
             {(parsed || meta.status === 'parsed' || parsing) && (
               <Tooltip delayDuration={150} content={t('demoView.reparse')}>
@@ -142,7 +142,7 @@ export function DemoView({ analysisJobs, meta, jobs, status, onChanged, onRemove
                 </IconButton>
               </DropdownMenu.Trigger>
               <DropdownMenu.Content align="end">
-                <DropdownMenu.Item onSelect={() => void api.reveal(meta.path)}>{t('common.openInExplorer')}</DropdownMenu.Item>
+                <DropdownMenu.Item onSelect={() => void api.reveal(meta.path)}>{t('renders.openFolder')}</DropdownMenu.Item>
                 <DropdownMenu.Item disabled={deleting || jobs.length === 0 || runningJobs > 0 || queuedJobs > 0} onSelect={deleteData(async () => {
                   for (const job of jobs) await api.deleteJob(job.id);
                 }, false)}>{t('demoView.deleteVideos')}</DropdownMenu.Item>

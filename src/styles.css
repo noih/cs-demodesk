@@ -453,7 +453,6 @@ video {
 .match-score { display:flex; margin-left:auto; border:1px solid var(--app-border); border-radius:3px; overflow:hidden; background:var(--app-panel); flex:none; }
 .match-score>div { text-align:center; padding:8px 16px; border-bottom:3px solid currentColor; }
 .match-score>div+div { border-left:1px solid var(--app-border); }
-.match-score small { display:block; font:var(--app-font-caption) var(--code-font-family); text-transform:uppercase; letter-spacing:.12em; color:var(--app-subtle); }
 .match-score strong { font:700 var(--app-font-title) var(--code-font-family); }
 .demo-tabs-bar { container-type:inline-size; font-size:var(--app-font-body); flex-shrink:0; min-width:0; margin-top:12px; }
 .demo-tabs { width:100%; margin-top:0; padding-bottom:6px; gap:4px; border-bottom:1px solid var(--app-border); box-shadow:none; flex-shrink:0; }
@@ -496,7 +495,6 @@ video {
 .team-head { display:flex; justify-content:space-between; align-items:center; padding:10px 12px; background:var(--app-raised); border-bottom:1px solid var(--app-border); }
 .team-title { display:flex; align-items:baseline; gap:6px; white-space:nowrap; border-left:3px solid var(--team-color); padding-left:10px; min-width:0; }
 .team-title strong { min-width:0; overflow:hidden; text-overflow:ellipsis; display:block; font-size:var(--app-font-body); font-weight:600; }
-.team-title small { flex-shrink:0; font:var(--app-font-caption) var(--code-font-family); letter-spacing:.12em; color:var(--app-subtle); text-transform:uppercase; }
 .team-score { flex-shrink:0; margin-left:8px; font:700 var(--app-font-title) var(--code-font-family); color:var(--team-color); }
 .player-row { width:100%; grid-template-columns:minmax(0,1fr) auto; gap:8px; padding:5px 10px; border:0; border-bottom:1px solid var(--app-border); border-radius:0; background:transparent; color:var(--app-text); text-align:left; font:inherit; }
 .player-row:hover { background:var(--app-raised); }
@@ -617,6 +615,7 @@ video {
 .queue-demo-name { font-size:var(--app-font-body); font-weight:600; }
 .demo-heading { overflow-wrap:anywhere; }
 .team-title strong { font-size:var(--app-font-subtitle); }
+.player-team-header .rt-Badge,.player-team-header .rt-Heading,.player-team-header .rt-Text { font-size:var(--app-font-body); line-height:1.5; }
 .player-name strong,.player-kda strong { font-weight:500; }
 .rt-DataListLabel { font-size:var(--app-font-caption); color:var(--app-muted); }
 .rt-DataListValue { font-size:var(--app-font-body); }

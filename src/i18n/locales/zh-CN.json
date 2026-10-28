@@ -325,7 +325,7 @@
     "combatQualityPriorityHint": "优先保留交战画质，其他片段略降",
     "keyMomentsOnlyHint": "跳过空档，缩短视频长度",
     "keyMomentsOnly": "交战片段",
-    "combatClipMode": {"normal": "正常", "short": "短", "off": "关闭"},
+    "combatClipMode": {"normal": "正常", "short": "短", "off": "全程"},
     "fullLengthWarning": "保留完整过程会增加视频长度。在相同容量限制下，画质可能降低。",
     "posthumous": "死后击杀",
     "possibleNinja": "疑似偷拆",
@@ -422,7 +422,7 @@
       "voice": "语音"
     },
     "location": "位置",
-    "logTitle": "渲染 log",
+    "logTitle": "日志",
     "logEmpty": "（暂无 log）",
     "deleteTitle": "删除本次输出？",
     "deleteBody": "将删除本次任务的 {{n}} 个视频文件与记录；demo 与分析结果不受影响。",

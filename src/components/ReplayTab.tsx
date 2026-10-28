@@ -314,7 +314,6 @@ function Player({ loaded }: { loaded: Loaded }) {
     e.currentTarget.releasePointerCapture(e.pointerId);
   };
   const curRound = state.round;
-  const teamLabel = (side: Team) => (curRound && replay.ctKey(curRound) === (side === 'CT' ? 'B' : 'A') ? t('common.teamB') : t('common.teamA'));
 
   return (
     <Flex direction="column" gap="2" style={{ height: '100%', minHeight: 0 }}>
@@ -398,7 +397,7 @@ function Player({ loaded }: { loaded: Loaded }) {
         {panelOpen && (
           <Flex direction="column" gap="3" className="replay-side">
             {(['CT', 'TERRORIST'] as Team[]).map((side) => (
-              <TeamPanel key={side} side={side} label={teamLabel(side)} score={side === 'CT' ? state.score.ct : state.score.t} players={state.players.filter((p) => p.team === side)} focus={focus} onFocus={toggleFocus} />
+              <TeamPanel key={side} side={side} score={side === 'CT' ? state.score.ct : state.score.t} players={state.players.filter((p) => p.team === side)} focus={focus} onFocus={toggleFocus} />
             ))}
           </Flex>
         )}

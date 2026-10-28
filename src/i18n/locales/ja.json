@@ -325,7 +325,7 @@
     "combatQualityPriorityHint": "交戦シーンの画質を優先し、他のシーンは少し下げます",
     "keyMomentsOnlyHint": "待ち時間を省き、動画を短くします。",
     "keyMomentsOnly": "交戦シーン",
-    "combatClipMode": {"normal": "通常", "short": "短め", "off": "オフ"},
+    "combatClipMode": {"normal": "通常", "short": "短め", "off": "全編"},
     "fullLengthWarning": "全体を残すと動画が長くなります。同じファイルサイズ上限では、画質が低下する場合があります。",
     "posthumous": "死亡後のキル",
     "possibleNinja": "ニンジャ解除の可能性",
@@ -422,7 +422,7 @@
       "voice": "ボイス"
     },
     "location": "場所",
-    "logTitle": "レンダリングログ",
+    "logTitle": "ログ",
     "logEmpty": "（ログはまだありません）",
     "deleteTitle": "この書き出しを削除しますか？",
     "deleteBody": "このジョブの動画ファイル {{n}} 件と記録を削除します。デモと解析結果は残ります。",

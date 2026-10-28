@@ -7,13 +7,13 @@ import type { PlayerState } from '../../replay/engine.ts';
 import { EquipmentIcon } from './EquipmentIcon.tsx';
 import { equipmentId, rosterEquipment } from '../../replay/equipment.ts';
 
-export function TeamPanel({ side, label, score, players, focus, onFocus }: { side: Team; label: string; score: number; players: PlayerState[]; focus?: number; onFocus: (pid: number) => void }) {
+export function TeamPanel({ side, score, players, focus, onFocus }: { side: Team; score: number; players: PlayerState[]; focus?: number; onFocus: (pid: number) => void }) {
   const { t } = useTranslation();
   const style: CSSProperties & { '--team-color': string } = { '--team-color': side === 'CT' ? 'var(--app-teamA)' : 'var(--app-teamB)' };
   return (
-    <section className="team-panel" style={style} aria-label={label}>
+    <section className="team-panel" style={style} aria-label={side === 'CT' ? 'CT' : 'T'}>
       <div className="team-head">
-        <div className="team-title"><strong>{label}</strong><small title={side === 'CT' ? t('common.ct') : t('common.t')}>({side === 'CT' ? 'CT' : 'T'})</small></div>
+        <div className="team-title"><strong title={side === 'CT' ? t('common.ct') : t('common.t')}>{side === 'CT' ? 'CT' : 'T'}</strong></div>
         <strong className="team-score">{score}</strong>
       </div>
       {players.map(p => {
