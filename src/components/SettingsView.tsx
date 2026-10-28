@@ -138,7 +138,7 @@ const SOURCES = {
   steam: { site: 'official' as const, repo: 'Steam', url: 'https://store.steampowered.com/about/' },
   cs2: { site: 'steam' as const, repo: 'Counter-Strike 2', url: 'https://store.steampowered.com/app/730/' },
   hlae: { repo: 'advancedfx/advancedfx', url: 'https://github.com/advancedfx/advancedfx/releases' },
-  ffmpeg: { repo: 'BtbN/FFmpeg-Builds (win64 gpl-shared)', url: 'https://github.com/BtbN/FFmpeg-Builds/releases' },
+  ffmpeg: { repo: 'noih/cs-demodesk-ffmpeg (win64 gpl-shared)', url: 'https://github.com/noih/cs-demodesk-ffmpeg' },
   vrf: { repo: 'ValveResourceFormat/ValveResourceFormat', url: 'https://github.com/ValveResourceFormat/ValveResourceFormat/releases' },
 };
 
