@@ -19,6 +19,11 @@ export async function checkReplayDrawing(page) {
       ? 'data:application/json,' + encodeURIComponent(JSON.stringify(data))
       : radarUrl;
     window.__TAURI_INTERNALS__.invoke = async (cmd,args) => {
+      if (cmd === 'get_kills') return [false, true, undefined].map(flash => ({
+        tick: 0, round: 1, attacker: {...players[0], team:'CT'}, victim: {...players[5], team:'TERRORIST'},
+        assister: flash === undefined ? undefined : {...players[1], team:'CT'},
+        weapon:'ak47', headshot:flash === false, assistedFlash:flash ?? false,
+      }));
       if (cmd === 'get_replay') return {path:'drawing-replay',bytes:100};
       if (cmd === 'get_map_assets') return {posX:0,posY:0,scale:1,layers:['Upper','Lower'].map((name,i)=>({name,path:name,image:name,altitudeMin:i*100,altitudeMax:(i+1)*100}))};
       const result = await original(cmd,args);
@@ -32,6 +37,14 @@ export async function checkReplayDrawing(page) {
   await canvas.waitFor();
   const button = name => page.getByRole('button',{name,exact:true});
   await page.locator('.player-loadout').first().waitFor();
+  const feed = page.locator('.replay-feed > div');
+  assert.equal(await feed.count(), 3);
+  for (const i of [0, 1]) assert.match(await feed.nth(i).innerText(), /\+ Player 2/, 'Damage and flash assists show the assisting player');
+  assert.ok(!(await feed.nth(2).innerText()).includes('+'), 'Solo kills have no assist separator');
+  const headshot = feed.nth(0).getByRole('img', {name:'Headshot', exact:true});
+  assert.equal(await headshot.getAttribute('src'), '/weapons/headshot.svg');
+  await headshot.evaluate(img => img.decode());
+  assert.equal(await feed.nth(1).getByRole('img', {name:'Headshot', exact:true}).count(), 0, 'Non-headshots have no headshot icon');
   assert.equal(await page.locator('.player-loadout').count(),10);
   assert.equal(await page.locator('.player-row').first().locator('img[alt="Flashbang"]').count(),2,'Both held flashbangs remain visible');
   await page.waitForFunction(()=>Array.from(document.querySelectorAll('.player-loadout img')).every(img=>img.complete && img.naturalWidth>0));

@@ -370,10 +370,11 @@ function Player({ loaded }: { loaded: Loaded }) {
               {state.feed.map((kv, i) => (
                 <div key={`${kv.tick}-${i}`}>
                   {kv.attacker && <span style={{ color: teamColor(kv.attacker.team) }}>{displayPlayerName(kv.attacker.name)}</span>}
+                  {kv.assister && <><span className="dim"> + </span><span style={{ color: teamColor(kv.assister.team) }}>{displayPlayerName(kv.assister.name)}</span></>}
                   <span className="dim">
                     {' '}
                     <EquipmentIcon name={kv.weapon} />
-                    {kv.headshot && <i aria-hidden="true" className="bi bi-crosshair app-icon" />}{' '}
+                    {kv.headshot && <img src="/weapons/headshot.svg" width="20" height="20" style={{ verticalAlign: 'middle' }} alt={t('highlights.tags.headshot')} />}{' '}
                   </span>
                   <span style={{ color: teamColor(kv.victim.team) }}>{displayPlayerName(kv.victim.name)}</span>
                 </div>
