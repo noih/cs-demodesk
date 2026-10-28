@@ -27,12 +27,17 @@ export function TeamPanel({ side, label, score, players, focus, onFocus }: { sid
             <span>{t('replay.money')}<b>${p.money}</b></span>
             <span>{t('replay.toggle.weapon')}<b>{p.alive ? p.weapon : '—'}</b></span>
             <span>{t('common.kda')}<b>{p.kills} / {p.deaths} / {p.assists}</b></span>
+            <span>{t('replay.roundKills')}<b>{p.roundKills}</b></span>
             {p.alive && p.defuser && <span>{t('replay.defuseKit')}</span>}
             {p.alive && p.bomb && <span>{t('replay.hasC4')}</span>}
           </span>
         }><button type="button" style={{ '--health': `${hp}%` } as CSSProperties} className={`player-row ${p.alive ? '' : 'dead'} ${focus === p.pid ? 'focused' : ''}`} aria-pressed={focus === p.pid} aria-label={`${t('replay.follow')}: ${displayPlayerName(p.name)} · ${hp} HP${p.alive ? '' : ' · ' + t('common.dead')}`} onClick={() => onFocus(p.pid)}>
           <span className="player-main">
-            <span className="player-name"><strong title={displayPlayerName(p.name)}>{displayPlayerName(p.name)}</strong>
+            <span className="player-name">
+              {p.roundKills > 0 && <span className="player-round-kills" title={`${t('replay.roundKills')}: ${p.roundKills}`} aria-label={`${t('replay.roundKills')}: ${p.roundKills}`}>
+                <span style={{ transform: 'translateY(1px)' }}>{p.roundKills}</span><span aria-hidden="true" className={`player-kill-card${p.roundKills >= 5 ? ' ace' : ''}`} />
+              </span>}
+              <strong title={displayPlayerName(p.name)}>{displayPlayerName(p.name)}</strong>
               <span className="player-kda" aria-label={`${t('common.kda')}: ${p.kills}/${p.deaths}/${p.assists}`}>{p.kills}/{p.deaths}/{p.assists}</span>
             </span>
             <span className="player-meta">

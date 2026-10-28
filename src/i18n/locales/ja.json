@@ -429,6 +429,7 @@
     "empty": "書き出した動画はまだありません。"
   },
   "replay": {
+    "roundKills": "このラウンドのキル数",
     "drawing": {
       "brown": "茶色",
       "gray": "灰色",

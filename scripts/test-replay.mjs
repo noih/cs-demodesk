@@ -34,6 +34,19 @@ test('inventory and ground equipment follow sampled state through throws, pickup
 });
 
 const DEFUSING = 256;
+test('round kills follow seeking, exclude team kills and suicides, and reset next round', () => {
+  const base = replay([frame(41266), frame(41300, -1, false), frame(49200)], []);
+  base.parsed.rounds.push({...base.parsed.rounds[0], round:10, startTick:49192, endTick:50000, officiallyEndedTick:50000});
+  const attacker = {steamid:'ct0', name:'CT 0', team:'CT'};
+  const kills = [41260, 41270, 41275, 41280, 41285, 41290, 49195].map(tick => ({tick, attacker, victim:{steamid:'enemy', team:'TERRORIST'}}));
+  kills.push({tick:41291, attacker, victim:{steamid:'ct1', team:'CT'}}, {tick:41292, attacker, victim:attacker});
+  const r = new Replay(base.data, base.parsed, kills.sort((a,b) => a.tick-b.tick));
+  for (const [tick, count] of [[41266,0],[41270,1],[41285,4],[41290,5],[41300,5],[49192,0],[49195,1],[41275,2]]) {
+    assert.equal(r.stateAt(tick).players[0].roundKills, count, `Round kills at ${tick}`);
+  }
+  assert.equal(r.stateAt(41300).players[0].alive, false, 'Dead players retain round kills');
+  assert.equal(r.stateAt(49195).players[0].kills, 7, 'Match kills remain cumulative');
+});
 test('roster slots do not move with active weapon and preserve duplicate utility', () => {
   const inventory = ['Flashbang', 'USP-S', 'AK-47', 'Smoke Grenade', 'Flashbang', 'Knife', 'C4 Explosive'];
   const expected = [['AK-47'], ['USP-S'], ['Smoke Grenade', 'Flashbang', 'Flashbang'], ['C4 Explosive']];

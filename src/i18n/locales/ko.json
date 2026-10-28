@@ -429,6 +429,7 @@
     "empty": "내보낸 동영상이 아직 없습니다."
   },
   "replay": {
+    "roundKills": "이번 라운드 킬",
     "drawing": {
       "brown": "갈색",
       "gray": "회색",

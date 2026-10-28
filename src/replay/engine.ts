@@ -26,6 +26,7 @@ export interface PlayerState {
   /** ground speed in units/s, from the surrounding frames */
   speed: number;
   kills: number;
+  roundKills: number;
   deaths: number;
   assists: number;
 }
@@ -231,6 +232,8 @@ export class Replay {
     if (b) for (const row of b.p) next[row[0]!] = row;
     const killIdx = lastAtOrBefore(this.kills, (kv) => kv.tick, tick);
     const kda = killIdx >= 0 ? this.kdaAfter[killIdx] : undefined;
+    const roundStartKillIdx = lastAtOrBefore(this.kills, (kv) => kv.tick, roundStart - 1);
+    const kdaBeforeRound = this.kdaAfter[roundStartKillIdx];
 
     const players: PlayerState[] = [];
     for (const row of a.p) {
@@ -265,6 +268,7 @@ export class Replay {
         money: money ?? 0,
         speed: glide && span ? dist / (span / data.tickRate) : 0,
         kills: nk,
+        roundKills: nk - (kdaBeforeRound?.get(p.steamid)?.[0] ?? 0),
         deaths: nd,
         assists: na,
       });

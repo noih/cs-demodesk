@@ -433,6 +433,7 @@
     "empty": "No exported videos yet."
   },
   "replay": {
+    "roundKills": "Round kills",
     "drawing": {
       "brown": "Brown",
       "gray": "Gray",

@@ -429,6 +429,7 @@
     "empty": "還沒有輸出的影片。"
   },
   "replay": {
+    "roundKills": "本回合擊殺",
     "drawing": {
       "brown": "棕色",
       "gray": "灰色",

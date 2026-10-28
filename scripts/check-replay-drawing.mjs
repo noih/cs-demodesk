@@ -23,7 +23,7 @@ export async function checkReplayDrawing(page) {
         tick: 0, round: 1, attacker: {...players[0], team:'CT'}, victim: {...players[5], team:'TERRORIST'},
         assister: flash === undefined ? undefined : {...players[1], team:'CT'},
         weapon:'ak47', headshot:flash === false, assistedFlash:flash ?? false,
-      }));
+      })).concat([300, 400].map(tick => ({tick, round:1, attacker:{...players[0], team:'CT'}, victim:{...players[6], team:'TERRORIST'}, weapon:'ak47'})));
       if (cmd === 'get_replay') return {path:'drawing-replay',bytes:100};
       if (cmd === 'get_map_assets') return {posX:0,posY:0,scale:1,layers:['Upper','Lower'].map((name,i)=>({name,path:name,image:name,altitudeMin:i*100,altitudeMax:(i+1)*100}))};
       const result = await original(cmd,args);
@@ -45,6 +45,21 @@ export async function checkReplayDrawing(page) {
   assert.equal(await headshot.getAttribute('src'), '/weapons/headshot.svg');
   await headshot.evaluate(img => img.decode());
   assert.equal(await feed.nth(1).getByRole('img', {name:'Headshot', exact:true}).count(), 0, 'Non-headshots have no headshot icon');
+  const roundKills = page.locator('.player-round-kills');
+  assert.equal(await roundKills.count(), 1, 'Zero-kill players have no card');
+  assert.equal(await roundKills.innerText(), '3');
+  assert.equal(await roundKills.locator('.ace').count(), 0, 'Three kills use the skull card');
+  const timeline = page.locator('.round-timeline');
+  const timelineBox = await timeline.boundingBox();
+  await timeline.click({position:{x:timelineBox.width * 0.1, y:5}});
+  assert.equal(await roundKills.innerText(), '5');
+  assert.equal(await roundKills.locator('.ace').count(), 1, 'Five kills use the spade card');
+  await timeline.click({position:{x:0, y:5}});
+  assert.equal(await roundKills.innerText(), '3', 'Seeking backwards restores the skull count');
+  assert.equal(await roundKills.locator('.ace').count(), 0);
+  for (const path of ['/playing-card.svg', '/playing-card-skull.svg']) {
+    await page.evaluate(async src => { const img = new Image(); img.src = src; await img.decode(); }, path);
+  }
   assert.equal(await page.locator('.player-loadout').count(),10);
   assert.equal(await page.locator('.player-row').first().locator('img[alt="Flashbang"]').count(),2,'Both held flashbangs remain visible');
   await page.waitForFunction(()=>Array.from(document.querySelectorAll('.player-loadout img')).every(img=>img.complete && img.naturalWidth>0));
@@ -72,8 +87,19 @@ export async function checkReplayDrawing(page) {
       assert.ok(await page.locator('.player-name').evaluateAll(rows => rows.every(row => {
         const name = row.querySelector('strong').getBoundingClientRect();
         const kda = row.querySelector('.player-kda').getBoundingClientRect();
-        return name.right <= kda.left && kda.right <= row.getBoundingClientRect().right + 1;
+        const card = row.querySelector('.player-round-kills')?.getBoundingClientRect();
+        return (!card || card.right <= name.left) && name.right <= kda.left && kda.right <= row.getBoundingClientRect().right + 1;
       })), 'Name and K/D/A stay on the first row without overlap');
+      assert.ok(await roundKills.evaluate(el => {
+        const kda = el.closest('.player-name').querySelector('.player-kda');
+        const actual = getComputedStyle(el), expected = getComputedStyle(kda);
+        return ['fontFamily','fontSize','fontWeight','lineHeight'].every(key => actual[key] === expected[key])
+          && el.getBoundingClientRect().right + 12 <= kda.getBoundingClientRect().left;
+      }), 'Round kills match K/D/A typography and keep a separate gap');
+      assert.ok(await page.locator('.player-name').evaluateAll(rows => rows.every(row => {
+        if (row.querySelector('.player-round-kills')) return true;
+        return Math.abs(row.querySelector('strong').getBoundingClientRect().left - row.getBoundingClientRect().left) < 1;
+      })), 'Zero-kill players have no empty space before their names');
       const heights = await page.locator('.player-row').evaluateAll(rows=>rows.map(row=>row.getBoundingClientRect().height));
       assert.ok(Math.max(...heights)-Math.min(...heights)<1,'All ten players have equal row heights');
       await fontOverride.evaluate(el=>el.remove());
@@ -160,6 +186,7 @@ export async function checkReplayDrawing(page) {
   await button('Magenta').click();
   await drawLine(1);
   await page.locator('.round-pill').nth(1).click();
+  assert.equal(await roundKills.count(), 0, 'Round changes hide the previous kill cards');
   assert.equal(await button('Undo').isDisabled(),true,'Round changes clear history');
   await page.waitForTimeout(50);
   assert.equal(await pinkPixels(),0,'Round changes clear the drawing');
