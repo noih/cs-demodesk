@@ -270,6 +270,7 @@
   "highlights": {
     "details": "상세",
     "scoring": {
+    "actions": "작업",
       "title": "점수 상세",
       "total": "총점 {{score}}",
       "multikill": {
@@ -639,6 +640,7 @@
     "ffmpeg": "FFmpeg가 없습니다. 도구를 다운로드하거나 경로를 지정하세요."
   },
   "scoring": {
+    "actions": "작업",
     "steps": {
       "1": "데이터 준비",
       "2": "플레이어 분석",

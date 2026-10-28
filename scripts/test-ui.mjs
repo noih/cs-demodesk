@@ -1180,6 +1180,30 @@ try {
   await page.getByRole('tab').filter({hasText:'Highlights'}).click();
   const highlightRow = page.getByRole('row').filter({has:page.getByRole('button',{name:'Details',exact:true})});
   const wasSelected = await highlightRow.getByRole('checkbox').isChecked();
+  const highlightViewport = page.viewportSize();
+  await page.setViewportSize({width:800, height:940});
+  const highlightScroller = page.locator('.highlights-table [data-radix-scroll-area-viewport]');
+  assert.ok(await highlightScroller.evaluate(el => el.scrollWidth > el.clientWidth), 'Narrow highlights overflow horizontally');
+  const highlightBox = await highlightScroller.boundingBox();
+  const highlightRowBox = await highlightRow.boundingBox();
+  const highlightDragX = highlightBox.x + highlightBox.width / 2;
+  const highlightDragY = highlightRowBox.y + 20;
+  await page.mouse.move(highlightDragX, highlightDragY);
+  await page.mouse.down();
+  await page.mouse.move(highlightDragX - 100, highlightDragY, {steps:5});
+  await page.mouse.up();
+  assert.ok(await highlightScroller.evaluate(el => el.scrollLeft > 0), 'Dragging scrolls highlights');
+  assert.equal(await highlightRow.getByRole('checkbox').isChecked(), wasSelected, 'Dragging does not select a highlight');
+  assert.equal(await page.getByRole('dialog').count(), 0, 'Dragging does not open details');
+  const highlightReleasedLeft = await highlightScroller.evaluate(el => el.scrollLeft);
+  await page.mouse.move(highlightDragX - 150, highlightDragY);
+  assert.equal(await highlightScroller.evaluate(el => el.scrollLeft), highlightReleasedLeft, 'Releasing stops highlight dragging');
+  await page.setViewportSize(highlightViewport);
+  await highlightScroller.evaluate(el => { el.scrollLeft = 0; });
+  await highlightRow.getByRole('cell').nth(1).click();
+  assert.equal(await highlightRow.getByRole('checkbox').isChecked(), !wasSelected, 'A normal row click still selects');
+  await highlightRow.getByRole('cell').nth(1).click();
+  assert.equal(await highlightRow.getByRole('checkbox').isChecked(), wasSelected);
   for (const label of ['3k', 'Wallbang', 'Blind kill', 'future-tag']) {
     assert.equal(await highlightRow.getByText(label, { exact: true }).count(), 1);
   }
@@ -1609,6 +1633,13 @@ try {
   await page.setViewportSize({width:1360,height:940});
   if(process.env.UI_SCREENSHOT_DIR) await scorePanel.screenshot({path:process.env.UI_SCREENSHOT_DIR+'/scoring-matrix.png'});
   const detailsButton = id => scoreRow(id).getByRole('button',{name:'Details',exact:true});
+  assert.ok(await scoreRow('2').evaluate(row => {
+    const tags = [...row.querySelectorAll('.analysis-tags .rt-Badge')];
+    const buttons = [...row.querySelectorAll('button')];
+    const expected = parseFloat(getComputedStyle(row).getPropertyValue('--app-font-body')) * 1.5 + 10;
+    return tags.length > 0 && buttons.length > 0 && [...tags, ...buttons].every(el => Math.abs(el.getBoundingClientRect().height - expected) < 1)
+      && [...tags, ...buttons].every(el => getComputedStyle(el).fontSize === getComputedStyle(buttons[0]).fontSize);
+  }), 'Analysis tags and actions match highlight control height and font size');
   assert.equal(await behaviorCount('2','smoke-hit-rate').innerText(),'1','Confirmed path hits remain positive counts');
   await detailsButton('2').click();
   const analysisDialog=page.getByRole('dialog');

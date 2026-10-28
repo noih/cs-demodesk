@@ -25,7 +25,7 @@ export function AnalysisExport({record,status,onSetup,onRendered}: {record:Asses
   const clips=groups.flatMap(group=>group.highlights);
   const expectedGroups=mergeRules && rules.length>1 ? [rules.join('+')] : rules;
   return <>
-    <Button variant="outline" onClick={()=>{setRules([]);setMergeRules(false);setOpen(true);}}>{t('highlights.export')}</Button>
+    <Button size="1" variant="outline" onClick={()=>{setRules([]);setMergeRules(false);setOpen(true);}}>{t('highlights.export')}</Button>
     <ExportDialog open={open} onOpenChange={setOpen} count={clips.length} seconds={clips.reduce((sum,h)=>sum+(h.endTick-h.startTick)/record.tickRate,0)}
       status={status} onSetup={onSetup} onSubmitted={onRendered} forceMerge disabled={loading||!!error||!groups.length||groups.length!==expectedGroups.length||groups.some(group=>!expectedGroups.includes(group.ruleId))}
       onSubmit={options=>api.renderAnalysis(record.demoId,{playerId:record.playerId,assessmentId:record.id,ruleIds:rules},{...options,merge:mergeRules})}>

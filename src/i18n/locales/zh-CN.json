@@ -270,6 +270,7 @@
   "highlights": {
     "details": "详情",
     "scoring": {
+    "actions": "操作",
       "title": "评分详情",
       "total": "总分 {{score}}",
       "multikill": {
@@ -639,6 +640,7 @@
     "ffmpeg": "找不到 FFmpeg，请下载工具或指定路径。"
   },
   "scoring": {
+    "actions": "操作",
     "steps": {
       "1": "准备数据",
       "2": "分析玩家",

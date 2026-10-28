@@ -569,7 +569,8 @@ video {
 .rt-Heading[data-text-role=body-heading] { font-size:var(--app-font-body); font-weight:600; line-height:1.5; }
 .rt-DialogTitle,.rt-AlertDialogTitle { font-size:var(--app-font-title); }
 .rt-Button,.rt-SelectTrigger,.rt-TextFieldRoot { min-height:calc(var(--app-font-body) * 1.5 + 10px); }
-.highlight-tags .rt-Badge { height:calc(var(--app-font-body) * 1.5 + 10px); box-sizing:border-box; align-items:center; }
+.highlight-tags .rt-Badge,.analysis-tags .rt-Badge { min-height:calc(var(--app-font-body) * 1.5 + 10px); box-sizing:border-box; align-items:center; }
+.highlight-tags { min-width:200px; }
 .highlights-table .rt-TableCell { vertical-align:top; }
 .highlights-table .rt-TableCell:nth-child(n+2):nth-child(-n+7) { line-height:1.5; padding-top:calc(var(--table-cell-padding) + 5px); }
 .highlights-table .rt-TableCell .rt-Text { line-height:inherit; }

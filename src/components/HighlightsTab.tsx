@@ -1,6 +1,6 @@
 import { ExportDialog } from './ExportDialog.tsx';
 import { displayPlayerName } from '../playerName.ts';
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { Badge, Box, Button, Checkbox, Dialog, Flex, Select, Slider, Table, Text } from '@radix-ui/themes';
 import { useTranslation } from 'react-i18next';
 import { api, clock, type DemoMeta, type Highlight, type ParsedDemo, type Status } from '../api.ts';
@@ -21,6 +21,47 @@ export function HighlightsTab({ meta, parsed, status, onRendered, onSetup }: { m
   const [dialog, setDialog] = useState(false);
   const [detail, setDetail] = useState<Highlight | null>(null);
   const tr = parsed.info.tickRate;
+  const tableRef = useCallback((element: HTMLDivElement | null) => {
+    const viewport = element?.querySelector<HTMLElement>('[data-radix-scroll-area-viewport]');
+    if (!viewport) return;
+    let drag: { id: number; x: number; left: number } | undefined;
+    let dragged = false;
+    const down = (event: PointerEvent) => {
+      dragged = false;
+      if (event.pointerType !== 'mouse' || event.button !== 0 || viewport.scrollWidth <= viewport.clientWidth) return;
+      if (event.target instanceof Element && event.target.closest('button, a, input')) return;
+      event.preventDefault();
+      drag = { id: event.pointerId, x: event.clientX, left: viewport.scrollLeft };
+    };
+    const move = (event: PointerEvent) => {
+      if (drag?.id !== event.pointerId) return;
+      if (!dragged) {
+        if (Math.abs(event.clientX - drag.x) < 4) return;
+        dragged = true;
+        viewport.setPointerCapture(event.pointerId);
+        viewport.style.cursor = 'grabbing';
+      }
+      viewport.scrollLeft = drag.left + drag.x - event.clientX;
+    };
+    const stop = () => { drag = undefined; viewport.style.cursor = ''; };
+    const click = (event: MouseEvent) => {
+      if (dragged && event.detail > 0) { event.preventDefault(); event.stopPropagation(); }
+    };
+    viewport.addEventListener('pointerdown', down);
+    viewport.addEventListener('pointermove', move);
+    viewport.addEventListener('pointerup', stop);
+    viewport.addEventListener('pointercancel', stop);
+    viewport.addEventListener('lostpointercapture', stop);
+    viewport.addEventListener('click', click, true);
+    return () => {
+      viewport.removeEventListener('pointerdown', down);
+      viewport.removeEventListener('pointermove', move);
+      viewport.removeEventListener('pointerup', stop);
+      viewport.removeEventListener('pointercancel', stop);
+      viewport.removeEventListener('lostpointercapture', stop);
+      viewport.removeEventListener('click', click, true);
+    };
+  }, []);
 
   const visible = useMemo(() => parsed.highlights.filter((h) => (playerFilter === 'all' || h.player.steamid === playerFilter) && h.score >= minScore), [parsed.highlights, playerFilter, minScore]);
   const toggle = (id: string) =>
@@ -65,7 +106,7 @@ export function HighlightsTab({ meta, parsed, status, onRendered, onSetup }: { m
         </Button>
       </Flex>
 
-      <Table.Root className="nowrap-headers highlights-table" variant="surface" size="1" layout="auto">
+      <Table.Root ref={tableRef} className="nowrap-headers highlights-table" variant="surface" size="1" layout="auto">
         <Table.Header>
           <Table.Row>
             <Table.ColumnHeaderCell width="36px" />

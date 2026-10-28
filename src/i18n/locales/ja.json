@@ -270,6 +270,7 @@
   "highlights": {
     "details": "詳細",
     "scoring": {
+    "actions": "操作",
       "title": "スコア詳細",
       "total": "合計 {{score}}",
       "multikill": {
@@ -639,6 +640,7 @@
     "ffmpeg": "FFmpeg がありません。ツールをダウンロードするか、パスを指定してください。"
   },
   "scoring": {
+    "actions": "操作",
     "steps": {
       "1": "データ準備",
       "2": "プレイヤー分析",

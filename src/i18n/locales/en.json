@@ -274,6 +274,7 @@
   "highlights": {
     "details": "Details",
     "scoring": {
+    "actions": "Actions",
       "title": "Score details",
       "total": "Total {{score}}",
       "multikill": {
@@ -643,6 +644,7 @@
     "ffmpeg": "FFmpeg is missing. Download tools or set its path."
   },
   "scoring": {
+    "actions": "Actions",
     "steps": {
       "1": "Preparing data",
       "2": "Analyzing players",

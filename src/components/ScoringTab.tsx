@@ -25,7 +25,7 @@ export function ScoringTab({players,parsed,busy,step,error,job,queuePosition,sta
       <Table.Header><Table.Row>
         <Table.ColumnHeaderCell width="22%">{t('common.player')}</Table.ColumnHeaderCell>
         <Table.ColumnHeaderCell>{t('scoring.behavior')}</Table.ColumnHeaderCell>
-        <Table.ColumnHeaderCell width="10em" style={{whiteSpace:'normal'}}>{t('scoring.details')}</Table.ColumnHeaderCell>
+        <Table.ColumnHeaderCell width="1%" style={{whiteSpace:'nowrap'}}>{t('scoring.actions')}</Table.ColumnHeaderCell>
       </Table.Row></Table.Header>
       <Table.Body>{parsed.info.players.map(player => <PlayerAnalysis
         key={player.steamid} playerId={player.steamid} name={displayPlayerName(player.name)}
@@ -67,16 +67,16 @@ function PlayerAnalysis({playerId,name,records,playerNames,status,onSetup,onRend
   return <Table.Row data-player-id={playerId}>
     <Table.RowHeaderCell style={{whiteSpace:'normal',overflowWrap:'anywhere'}}>{name}</Table.RowHeaderCell>
     <Table.Cell>
-      {observed.length > 0 || smokeRate !== undefined ? <Flex wrap="wrap" gap="2">{smokeRate !== undefined && <Badge color="gray" size="2">{t('scoring.metrics.smokeHitRate')} · {Number(smokeRate.toFixed(1))}%</Badge>}{observed.map(check => <Badge key={check.definition.id} color="gray" size="2" style={{whiteSpace:'normal'}}>
+      {observed.length > 0 || smokeRate !== undefined ? <Flex wrap="wrap" gap="1" className="analysis-tags">{smokeRate !== undefined && <Badge color="gray" size="1">{t('scoring.metrics.smokeHitRate')} · {Number(smokeRate.toFixed(1))}%</Badge>}{observed.map(check => <Badge key={check.definition.id} color="gray" size="1" style={{whiteSpace:'normal'}}>
         {t(`scoring.ruleNames.${check.definition.id}`, {defaultValue:check.definition.name})}
         <strong data-rule-count={check.definition.id} style={{fontVariantNumeric:'tabular-nums'}}>{check.occurrences.length}</strong>
       </Badge>)}</Flex> : '—'}
     </Table.Cell>
     <Table.Cell>
-      <Flex align="center" gap="2">
+      <Flex align="center" gap="2" style={{width:'max-content'}}>
       {record && <AnalysisExport record={record} status={status} onSetup={onSetup} onRendered={onRendered}/>}
       {record ? <Dialog.Root>
-        <Dialog.Trigger><Button variant="soft" style={{whiteSpace:'normal',height:'auto',minHeight:'var(--button-height)',paddingBlock:8}}>{t('scoring.detailsShort')}</Button></Dialog.Trigger>
+        <Dialog.Trigger><Button size="1" variant="soft">{t('scoring.detailsShort')}</Button></Dialog.Trigger>
         {record && <Dialog.Content aria-describedby={undefined} maxWidth="960px" style={{maxHeight:'85vh',overflowY:'auto',overflowWrap:'anywhere'}}>
           <Dialog.Title>{name} · {t('scoring.details')}</Dialog.Title>
           <Flex direction="column" gap="3">
