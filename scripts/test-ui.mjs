@@ -1637,9 +1637,11 @@ try {
     const tags = [...row.querySelectorAll('.analysis-tags .rt-Badge')];
     const buttons = [...row.querySelectorAll('button')];
     const expected = parseFloat(getComputedStyle(row).getPropertyValue('--app-font-body')) * 1.5 + 10;
-    return tags.length > 0 && buttons.length > 0 && [...tags, ...buttons].every(el => Math.abs(el.getBoundingClientRect().height - expected) < 1)
+    const tagHeight = parseFloat(getComputedStyle(row).getPropertyValue('--app-font-caption')) * 1.5 + 4;
+    return tags.length > 0 && buttons.length > 0 && buttons.every(el => Math.abs(el.getBoundingClientRect().height - expected) < 1)
+      && tags.every(el => Math.abs(el.getBoundingClientRect().height - tagHeight) < 1)
       && [...tags, ...buttons].every(el => getComputedStyle(el).fontSize === getComputedStyle(buttons[0]).fontSize);
-  }), 'Analysis tags and actions match highlight control height and font size');
+  }), 'Analysis uses compact tags and preserves action size and matching font size');
   assert.equal(await behaviorCount('2','smoke-hit-rate').innerText(),'1','Confirmed path hits remain positive counts');
   await detailsButton('2').click();
   const analysisDialog=page.getByRole('dialog');

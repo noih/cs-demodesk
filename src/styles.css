@@ -569,7 +569,8 @@ video {
 .rt-Heading[data-text-role=body-heading] { font-size:var(--app-font-body); font-weight:600; line-height:1.5; }
 .rt-DialogTitle,.rt-AlertDialogTitle { font-size:var(--app-font-title); }
 .rt-Button,.rt-SelectTrigger,.rt-TextFieldRoot { min-height:calc(var(--app-font-body) * 1.5 + 10px); }
-.highlight-tags .rt-Badge,.analysis-tags .rt-Badge { min-height:calc(var(--app-font-body) * 1.5 + 10px); box-sizing:border-box; align-items:center; }
+.highlight-tags .rt-Badge,.analysis-tags .rt-Badge { min-height:calc(var(--app-font-caption) * 1.5 + 4px); box-sizing:border-box; align-items:center; }
+.highlight-tags,.analysis-tags { padding-block:calc((var(--app-font-body) - var(--app-font-caption)) * .75 + 3px); }
 .highlight-tags { min-width:200px; }
 .highlights-table .rt-TableCell { vertical-align:top; }
 .highlights-table .rt-TableCell:nth-child(n+2):nth-child(-n+7) { line-height:1.5; padding-top:calc(var(--table-cell-padding) + 5px); }
@@ -716,9 +717,9 @@ video {
 
 .replay-drawing-toolbar {
   position: absolute;
-  top: 88px;
+  top: 112px;
   left: 12px;
-  max-height: calc(100% - 136px);
+  max-height: calc(100% - 160px);
   display: flex;
   flex-direction: column;
   align-items: flex-start;
