@@ -86,6 +86,7 @@
     "goToSettings": "設定へ"
   },
   "about": {
+    "ffmpegLicense": "GPLv3（FFmpeg）／MIT（ビルドスクリプト）",
     "storeUpdateAvailable": "Microsoft Store に更新があります",
     "storeCurrent": "Microsoft Store には現在、このインストールに適用できる更新はありません。",
     "updateCurrent": "最新バージョンです。",

@@ -86,6 +86,7 @@
     "goToSettings": "前往設定"
   },
   "about": {
+    "ffmpegLicense": "GPLv3（FFmpeg）／MIT（建置腳本）",
     "storeUpdateAvailable": "Microsoft Store 有可用更新",
     "storeCurrent": "Microsoft Store 目前未提供此安裝版本的更新。",
     "updateCurrent": "目前已是最新版本。",

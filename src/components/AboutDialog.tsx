@@ -5,14 +5,6 @@ import { useTranslation } from 'react-i18next';
 import { api, type UpdateStatus } from '../api.ts';
 import logo from '../../src-tauri/icons/128x128.png';
 
-const THIRD_PARTY: Array<{ name: string; repo: string; license: string; url: string }> = [
-  { name: 'HLAE', repo: 'advancedfx/advancedfx', license: 'custom', url: 'https://github.com/advancedfx/advancedfx' },
-  { name: 'FFmpeg', repo: 'noih/cs-demodesk-ffmpeg', license: 'GPL', url: 'https://github.com/noih/cs-demodesk-ffmpeg' },
-  { name: 'Source 2 Viewer', repo: 'ValveResourceFormat/ValveResourceFormat', license: 'MIT', url: 'https://github.com/ValveResourceFormat/ValveResourceFormat' },
-  { name: 'FidelityFX CAS', repo: 'GPUOpen-Effects/FidelityFX-CAS', license: 'MIT', url: 'https://github.com/GPUOpen-Effects/FidelityFX-CAS' },
-  { name: 'demoparser', repo: 'LaihoE/demoparser', license: 'MIT', url: 'https://github.com/LaihoE/demoparser' },
-];
-
 function LinkIcon({ url, label }: { url: string; label: string }) {
   return (
     <IconButton size="1" variant="ghost" color="gray" aria-label={label} onClick={() => void api.openUrl(url)}>
@@ -24,6 +16,13 @@ function LinkIcon({ url, label }: { url: string; label: string }) {
 /** Small "about" dialog: name, version, author, third-party components. */
 export function AboutDialog() {
   const { t } = useTranslation();
+  const THIRD_PARTY: Array<{ name: string; repo: string; license: string; url: string }> = [
+    { name: 'HLAE', repo: 'advancedfx/advancedfx', license: 'custom', url: 'https://github.com/advancedfx/advancedfx' },
+    { name: 'FFmpeg', repo: 'noih/cs-demodesk-ffmpeg', license: t('about.ffmpegLicense'), url: 'https://github.com/noih/cs-demodesk-ffmpeg' },
+    { name: 'Source 2 Viewer', repo: 'ValveResourceFormat/ValveResourceFormat', license: 'MIT', url: 'https://github.com/ValveResourceFormat/ValveResourceFormat' },
+    { name: 'FidelityFX CAS', repo: 'GPUOpen-Effects/FidelityFX-CAS', license: 'MIT', url: 'https://github.com/GPUOpen-Effects/FidelityFX-CAS' },
+    { name: 'demoparser', repo: 'LaihoE/demoparser', license: 'MIT', url: 'https://github.com/LaihoE/demoparser' },
+  ];
   const [update, setUpdate] = useState<UpdateStatus | 'failed'>();
   const updateRequest = useRef(0);
   const checkUpdates = useCallback(() => {

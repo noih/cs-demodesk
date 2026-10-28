@@ -86,6 +86,7 @@
     "goToSettings": "Открыть настройки"
   },
   "about": {
+    "ffmpegLicense": "GPLv3 (FFmpeg) / MIT (скрипты сборки)",
     "storeUpdateAvailable": "В Microsoft Store доступно обновление",
     "storeCurrent": "Microsoft Store пока не предлагает обновлений для этой установки.",
     "updateCurrent": "Установлена последняя версия.",
