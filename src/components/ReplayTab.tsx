@@ -33,7 +33,7 @@ async function load(meta: DemoMeta, parsed: ParsedDemo, signal: AbortSignal): Pr
   return { replay, map, images };
 }
 
-export function ReplayTab({ meta, parsed, onSetup }: { meta: DemoMeta; parsed: ParsedDemo; onSetup: () => void }) {
+export function ReplayTab({ meta, parsed, onSetup, active }: { active: boolean; meta: DemoMeta; parsed: ParsedDemo; onSetup: () => void }) {
   const { t } = useTranslation();
   const [loaded, setLoaded] = useState<Loaded>();
   const [error, setError] = useState<string>();
@@ -56,6 +56,8 @@ export function ReplayTab({ meta, parsed, onSetup }: { meta: DemoMeta; parsed: P
       resources?.images.forEach(image => image.close());
     };
   }, [meta.id, meta.parsedAt, parsed, attempt]);
+
+  if (!active) return null;
 
   const needsTools = error?.includes('Source 2 Viewer');
 

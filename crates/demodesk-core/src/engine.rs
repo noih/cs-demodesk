@@ -2683,7 +2683,7 @@ mod tests {
         for job in [&queued, &done, &other] {
             std::fs::write(store.job_dir(&job.id).join("video.mp4"), b"video").unwrap();
         }
-        for suffix in ["json", "summary.json", "replay.json"] {
+        for suffix in ["json", "summary.json", "replay.json", "replay.bin"] {
             std::fs::write(
                 data.join("parsed").join(format!("{id}.{suffix}")),
                 b"analysis",
@@ -3232,7 +3232,7 @@ mod tests {
             .parent()
             .unwrap()
             .to_path_buf();
-        let caches: Vec<_> = ["json", "summary.json", "replay.json"]
+        let caches: Vec<_> = ["json", "summary.json", "replay.json", "replay.bin"]
             .iter()
             .map(|suffix| cache_dir.join(format!("{id}.{suffix}")))
             .collect();

@@ -216,3 +216,10 @@ legacy journals remain offline diagnostic inputs and cannot override App scoring
 `analysis_pose_probe DEMO NEW_OUTPUT_JSON [LAST_TICK]` audits the recorded animation
 dictionaries, and `analysis_compact --inspect FILE` reports their round-trip digest.
 These dictionary audits do not validate reconstructed body coordinates.
+
+## Cached 2D load benchmark
+
+See [Replay loading performance](../docs/replay-loading-performance.md) for the
+large-cache stage benchmark, validation and measurement limits.
+
+Native 2D first-frame benchmark: benchmark-native-replay.mjs takes CDP endpoint, map filter and optional run count; see [measurement details](../docs/replay-loading-performance.md#native-webview2-binary-cache-comparison).

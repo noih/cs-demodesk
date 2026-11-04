@@ -430,17 +430,25 @@ async fn get_kills(engine: State<'_, Eng>, id: String) -> CmdResult<Vec<KillEven
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct ReplayFile {
+    binary: bool,
     path: PathBuf,
     bytes: u64,
 }
 
 /// Position stream for the 2D replay; built on first call (a few seconds).
 #[tauri::command]
-async fn get_replay(engine: State<'_, Eng>, id: String) -> CmdResult<ReplayFile> {
+async fn get_replay(engine: State<'_, Eng>, id: String, prefer_binary: Option<bool>) -> CmdResult<ReplayFile> {
     blocking(&engine, move |e| {
-        let path = e.replay_file(&id).map_err(err)?;
+        let source = e.replay_file(&id).map_err(err)?;
+        let path = if prefer_binary == Some(false) {
+            let _ = std::fs::remove_file(source.with_extension("bin"));
+            source.clone()
+        } else {
+            demodesk_core::replay::binary::ensure(&source).unwrap_or_else(|_| source.clone())
+        };
+        let binary = path != source;
         let bytes = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
-        Ok(ReplayFile { path, bytes })
+        Ok(ReplayFile { path, bytes, binary })
     })
     .await
 }

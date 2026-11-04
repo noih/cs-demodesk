@@ -1,3 +1,4 @@
+import { unpackReplay, type PackedReplay } from './replay/transfer.ts';
 import { translateError, type ErrorCode } from './errorCodes.ts';
 import { invoke, convertFileSrc } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
@@ -459,21 +460,28 @@ export const api = {
   scoreMatch: (id: string, force = true) => invoke<AnalysisJob>('score_match', { id, force }),
   kills: (id: string) => invoke<KillEvent[]>('get_kills', { id }),
   replay: async (id: string): Promise<ReplayData> => {
-    const f = await invoke<{ path: string; bytes: number }>('get_replay', { id });
-    const worker = new Worker(new URL('./replay/load.worker.ts', import.meta.url), { type: 'module' });
-    try {
-      return await new Promise<ReplayData>((resolve, reject) => {
-        worker.onmessage = (event: MessageEvent<{ data: ReplayData } | { error: string }>) => {
-          if ('error' in event.data) reject(new Error(event.data.error));
-          else resolve(event.data.data);
-        };
-        worker.onerror = event => reject(new Error(event.message || 'Replay worker failed'));
-        worker.onmessageerror = () => reject(new Error('Replay worker response could not be read'));
-        worker.postMessage(convertFileSrc(f.path));
-      });
-    } finally {
-      worker.terminate();
+    for (const preferBinary of [true, false]) {
+      const f = await invoke<{ path: string; bytes: number; binary?: boolean }>('get_replay', { id, preferBinary });
+      const worker = new Worker(new URL('./replay/load.worker.ts', import.meta.url), { type: 'module' });
+      try {
+        return await new Promise<ReplayData>((resolve, reject) => {
+          worker.onmessage = (event: MessageEvent<{ data: PackedReplay } | { error: string }>) => {
+            if ('error' in event.data) reject(new Error(event.data.error));
+            else {
+              try { resolve(unpackReplay(event.data.data)); } catch (error) { reject(error); }
+            }
+          };
+          worker.onerror = event => reject(new Error(event.message || 'Replay worker failed'));
+          worker.onmessageerror = () => reject(new Error('Replay worker response could not be read'));
+          worker.postMessage({url: convertFileSrc(f.path), binary: f.binary});
+        });
+      } catch (error) {
+        if (!f.binary || !preferBinary) throw error;
+      } finally {
+        worker.terminate();
+      }
     }
+    throw new Error('Replay could not be loaded');
   },
   mapAssets: (mapName: string) => invoke<MapAssets>('get_map_assets', { mapName }),
   clearRadar: () => invoke<number>('clear_radar'),

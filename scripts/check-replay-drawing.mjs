@@ -4,12 +4,12 @@ import { layout } from '../src/replay/draw.ts';
 export async function checkReplayDrawing(page) {
   await page.evaluate(() => {
     const original = window.__TAURI_INTERNALS__.invoke;
-    const rounds = [1, 2].map((round, i) => ({round, startTick:i * 6400, freezeEndTick:i * 6400 + 128, endTick:i * 6400 + 6200, officiallyEndedTick:(i + 1) * 6400 - 1, roster:{}}));
+    const rounds = [1, 2, 3, 4].map((round, i) => ({round, startTick:i * 6400, freezeEndTick:i * 6400 + 128, endTick:i * 6400 + 6200, officiallyEndedTick:(i + 1) * 6400 - 1, roster:{}}));
     const players = Array.from({length:10}, (_,i) => ({steamid:`replay-${i}`,name:`Player ${i + 1}`}));
     players[0].name = 'Player with a very long display name';
     rounds.forEach(r => { r.roster = Object.fromEntries(players.map((p,i)=>[p.steamid,i < 5 ? 'CT' : 'TERRORIST'])); });
     const rows = players.map((_,i) => [i,200+i*55,-240,50,0,100,100,i===5?19:3,i===5?5:1,2650,1,2,3,3,4,...(i===5?[5]:[])]);
-    const data = {schemaVersion:7,tickRate:64,step:4,firstTick:0,lastTick:12799,players,weapons:['','AK-47','USP-S','Flashbang','Smoke Grenade','C4 Explosive'],events:[],frames:[{t:0,p:rows,g:[],d:[[90,4,400,-500,50],[91,1,600,-500,50]]},{t:12799,p:rows,g:[],d:[]}]};
+    const data = {schemaVersion:7,tickRate:64,step:4,firstTick:0,lastTick:25599,players,weapons:['','AK-47','USP-S','Flashbang','Smoke Grenade','C4 Explosive'],events:[],frames:[{t:0,p:rows,g:[],d:[[90,4,400,-500,50],[91,1,600,-500,50]]},{t:25599,p:rows,g:[],d:[]}]};
     const radar = document.createElement('canvas');
     radar.width = radar.height = 1024;
     radar.getContext('2d').fillStyle = '#263440';
@@ -24,7 +24,7 @@ export async function checkReplayDrawing(page) {
         assister: flash === undefined ? undefined : {...players[1], team:'CT'},
         weapon:'ak47', headshot:flash === false, assistedFlash:flash ?? false,
       })).concat([300, 400].map(tick => ({tick, round:1, attacker:{...players[0], team:'CT'}, victim:{...players[6], team:'TERRORIST'}, weapon:'ak47'})));
-      if (cmd === 'get_replay') return {path:'drawing-replay',bytes:100};
+      if (cmd === 'get_replay') { window.replayLoads = (window.replayLoads ?? 0) + 1; return {path:'drawing-replay',bytes:100}; }
       if (cmd === 'get_map_assets') return {posX:0,posY:0,scale:1,layers:['Upper','Lower'].map((name,i)=>({name,path:name,image:name,altitudeMin:i*100,altitudeMax:(i+1)*100}))};
       const result = await original(cmd,args);
       if (cmd === 'get_demo') result.parsed.rounds = rounds;
@@ -50,6 +50,27 @@ export async function checkReplayDrawing(page) {
   assert.equal(await roundKills.innerText(), '3');
   assert.equal(await roundKills.locator('.ace').count(), 0, 'Three kills use the skull card');
   const timeline = page.locator('.round-timeline');
+  await timeline.scrollIntoViewIfNeeded();
+  const edgeBox = await timeline.boundingBox();
+  await page.mouse.move(edgeBox.x + edgeBox.width / 2, edgeBox.y + 5);
+  await page.mouse.down();
+  await page.mouse.move(edgeBox.x + edgeBox.width * 4, edgeBox.y + 5);
+  assert.equal(await page.locator('.round-pill.active').innerText(), '2', 'Dragging far beyond the right edge advances at most one round');
+  await timeline.evaluate(el => {
+    const rect=el.getBoundingClientRect();
+    for(let i=0;i<40;i++) el.dispatchEvent(new PointerEvent('pointermove',{bubbles:true,buttons:1,clientX:rect.right+2,clientY:rect.top+5}));
+  });
+  assert.equal(await page.locator('.round-pill.active').innerText(), '2', 'Repeated edge events cannot cascade through rounds during cooldown');
+  await page.waitForTimeout(650);
+  await page.mouse.move(edgeBox.x + edgeBox.width + 3, edgeBox.y + 5);
+  assert.equal(await page.locator('.round-pill.active').innerText(), '3', 'Edge seeking can advance again after the cooldown');
+  await page.mouse.up();
+  await page.locator('.round-pill').nth(3).click();
+  assert.equal(await page.locator('.round-pill.active').innerText(), '4', 'Manual round selection remains immediate');
+  await timeline.click({position:{x:edgeBox.width-1,y:5}});
+  assert.equal(await page.locator('.round-pill.active').innerText(), '4', 'Final round never wraps to the first');
+  await page.locator('.round-pill').first().click();
+  await timeline.click({position:{x:0,y:5}});
   const timelineBox = await timeline.boundingBox();
   await timeline.click({position:{x:timelineBox.width * 0.1, y:5}});
   assert.equal(await roundKills.innerText(), '5');
@@ -242,6 +263,8 @@ export async function checkReplayDrawing(page) {
       delete window.replayResources;delete window.restoreReplayTracking;
     };
   });
+  await page.locator('.demo-item').first().click();
+  const loadsBefore = await page.evaluate(() => window.replayLoads);
   const cdp=await page.context().newCDPSession(page);
   const heaps=[];
   try {
@@ -254,10 +277,14 @@ export async function checkReplayDrawing(page) {
       await page.getByRole('tab').filter({hasText:'Players'}).click();
       await canvas.waitFor({state:'detached'});
       await page.waitForFunction(()=>{const r=window.replayResources();return r.frames===0 && r.keys===0;});
-      assert.deepEqual(await page.evaluate(()=>window.replayResources()),{frames:0,keys:0,workers:0,bitmaps:0},'Leaving 2D releases animation callbacks, key listeners, workers and bitmaps');
+      assert.deepEqual(await page.evaluate(()=>window.replayResources()),{frames:0,keys:0,workers:0,bitmaps:2},'Leaving 2D stops work while retaining only the current match radar images');
+      assert.equal(await page.evaluate(() => window.replayLoads), loadsBefore + 1, 'Returning to processed 2D reuses the loaded replay without another read');
       await cdp.send('HeapProfiler.collectGarbage');
       heaps.push((await cdp.send('Runtime.getHeapUsage')).usedSize);
     }
+    await page.locator('.demo-item').nth(1).click();
+    await page.waitForFunction(() => { const r = window.replayResources(); return r.bitmaps === 0 && r.frames === 0 && r.keys === 0 && r.workers === 0; });
+    assert.deepEqual(await page.evaluate(()=>window.replayResources()),{frames:0,keys:0,workers:0,bitmaps:0}, 'Switching matches releases the retained replay resources');
     console.log('Replay cleanup: 6 drawing/unmount cycles, no remaining RAF, key listeners, radar workers or bitmaps; post-GC heap bytes:',heaps.join(', '));
   } finally {
     await page.evaluate(()=>window.restoreReplayTracking());

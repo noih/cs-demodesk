@@ -7,6 +7,7 @@ import { teamColor } from '../../replay/draw.ts';
 /** Timeline of the current round: kills as ticks, bomb plant as a red segment, click / drag to seek. */
 export function RoundTimeline({ replay, round, tick, onSeek }: { replay: Replay; round?: RoundInfo; tick: number; onSeek: (t: number) => void }) {
   const ref = useRef<HTMLDivElement>(null);
+  const nextRoundAt = useRef(0);
   const start = round?.startTick ?? replay.firstTick;
   const end = round?.officiallyEndedTick ?? replay.lastTick;
   const span = Math.max(1, end - start);
@@ -21,14 +22,27 @@ export function RoundTimeline({ replay, round, tick, onSeek }: { replay: Replay;
   }, [replay, round]);
   const seekAt = (clientX: number) => {
     const rect = ref.current!.getBoundingClientRect();
-    onSeek(start + ((clientX - rect.left) / rect.width) * span);
+    if (rect.width <= 0) return;
+    const position = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width));
+    const index = round ? replay.parsed.rounds.indexOf(round) : -1;
+    const next = index >= 0 ? replay.parsed.rounds[index + 1] : undefined;
+    if (position === 1 && next) {
+      const now = performance.now();
+      if (now < nextRoundAt.current) return;
+      // Pointer events keep arriving against the new round while the drag stays at the edge.
+      nextRoundAt.current = now + 600;
+      onSeek(next.startTick);
+      return;
+    }
+    const seekEnd = next ? Math.min(end, next.startTick - 1) : end;
+    onSeek(start + position * Math.max(0, seekEnd - start));
   };
   return (
     <div
       ref={ref}
       className="round-timeline"
       onPointerDown={(e) => {
-        (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
+        e.currentTarget.setPointerCapture(e.pointerId);
         seekAt(e.clientX);
       }}
       onPointerMove={(e) => e.buttons === 1 && seekAt(e.clientX)}

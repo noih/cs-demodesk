@@ -23,6 +23,8 @@ export function DemoView({ analysisJobs, meta, jobs, status, onChanged, onRemove
   const [confirmRemove, setConfirmRemove] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [dataRevision, setDataRevision] = useState(0);
+  const [replayOpened, setReplayOpened] = useState(false);
+  useEffect(() => { if (tab === '2d') setReplayOpened(true); }, [tab]);
   const [analysisRecords, setAnalysisRecords] = useState<Record<string, Assessment[]>>();
   const [historyError, setHistoryError] = useState<string>();
   const [loadError, setLoadError] = useState<string>();
@@ -248,8 +250,8 @@ export function DemoView({ analysisJobs, meta, jobs, status, onChanged, onRemove
             <Tabs.Content value="renders">
               <RendersTab jobs={jobs} parsed={parsed} onChanged={onChanged} scrollElement={tabScrollElement} />
             </Tabs.Content>
-            <Tabs.Content value="2d" style={{ height: '100%' }}>
-              <ReplayTab onSetup={() => onSetup('replay')} meta={meta} parsed={parsed} />
+            <Tabs.Content value="2d" forceMount={replayOpened || tab === '2d' ? true : undefined} style={{ height: '100%', display: tab === '2d' ? undefined : 'none' }}>
+              <ReplayTab active={tab === '2d'} onSetup={() => onSetup('replay')} meta={meta} parsed={parsed} />
             </Tabs.Content>
           </Box>
         </Tabs.Root>

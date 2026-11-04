@@ -1,4 +1,4 @@
-/** Each load owns its worker and bitmaps; no map cache survives leaving the replay. */
+/** Each load owns its worker and bitmaps; bitmaps are released when the current match is unloaded. */
 export async function loadRadarImages(urls: string[], signal: AbortSignal): Promise<ImageBitmap[]> {
   signal.throwIfAborted();
   const worker = new Worker(new URL('./radar.worker.ts', import.meta.url), { type: 'module' });

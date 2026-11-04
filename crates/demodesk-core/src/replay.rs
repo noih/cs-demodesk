@@ -7,6 +7,8 @@
 //! The JSON is deliberately compact — a match is ~40k frames × 10 players — so
 //! rows are positional arrays, documented on [`Frame`].
 
+pub mod binary;
+
 use crate::model::{DemoInfo, RoundInfo};
 use crate::parser::{DemoParser, Fields};
 use anyhow::{anyhow, Result};

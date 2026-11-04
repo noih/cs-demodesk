@@ -1,3 +1,5 @@
+import { decodeReplayBinary } from '../src/replay/binary.ts';
+import { packReplay, unpackReplay } from '../src/replay/transfer.ts';
 import { sharpenCas } from '../src/replay/cas.ts';
 import { draw, DEFAULT_TOGGLES, COLORS } from '../src/replay/draw.ts';
 import assert from 'node:assert/strict';
@@ -324,4 +326,42 @@ test('smoke runs draw density coverage instead of a circle and retain empty gaps
   assert.ok(fills[1].alpha>0.5 && fills[1].alpha<1,'Partial density becomes visible earlier without becoming solid');
   assert.equal(fills[2].alpha,0,'Empty smoke remains fully transparent');
   assert.equal(ctx.globalAlpha,1);
+});
+
+test('replay transfer preserves all rows, optional fields and full numeric precision', () => {
+  const original = {schemaVersion:7,tickRate:64,step:4,firstTick:0,lastTick:100,
+    players:[{steamid:'fixture',name:'Player'}],weapons:['','AK-47'],events:[{t:4,k:'shot',p:0}],
+    frames:[{t:0,p:[[0,123.123456789,-9999.9999999,0,359.99999,100,100,511,1,16000,1,2,3]],g:[],d:[[42,1,0.125,-0.5,20]],f:[[1,2,3]]},{t:4,p:[]},{t:8,p:[[0,1,2,3]],g:[[5,6,7,8]],d:[]}],
+    smoke:[{t:0,cells:null},{t:4,cells:[]},{t:8,cells:[[1.123456789,2,3]]}]};
+  const packed = packReplay(original);
+  const moved = structuredClone(packed, {transfer:[packed.rows.buffer]});
+  assert.equal(packed.rows.byteLength, 0, 'Worker numeric buffer is transferred, not copied');
+  assert.deepEqual(unpackReplay(moved), original);
+  const withoutSmoke = {...original}; delete withoutSmoke.smoke;
+  assert.deepEqual(unpackReplay(packReplay(withoutSmoke)), withoutSmoke);
+});
+
+
+test('binary cache preserves rows and rejects damaged or unsupported payloads', async () => {
+  const packed = packReplay({schemaVersion:7, frames:[{t:4,p:[[1,2.5,-3]],g:[],d:[]}], smoke:[{t:4,cells:null}]});
+  const {rows,...meta} = packed;
+  const metadata = new TextEncoder().encode(JSON.stringify(meta));
+  const start = 80 + Math.ceil(metadata.length / 8) * 8;
+  const bytes = new Uint8Array(start + rows.byteLength);
+  bytes.set(new TextEncoder().encode('DDRPLY01'));
+  const view = new DataView(bytes.buffer);
+  view.setBigUint64(32,BigInt(metadata.length),true);
+  view.setBigUint64(40,BigInt(rows.length),true);
+  bytes.set(metadata,80);
+  new Float64Array(bytes.buffer,start).set(rows);
+  bytes.set(new Uint8Array(await crypto.subtle.digest('SHA-256',bytes.subarray(80))),48);
+  const compress = async value => new Response(new Blob([value]).stream().pipeThrough(new CompressionStream('gzip'))).arrayBuffer();
+  assert.deepEqual(unpackReplay(await decodeReplayBinary(await compress(bytes.buffer))),unpackReplay(packed));
+  await assert.rejects(decodeReplayBinary(await compress(bytes.slice(0,-1).buffer)),/size/);
+  const broken = bytes.slice(); broken[broken.length-1] ^= 1;
+  await assert.rejects(decodeReplayBinary(await compress(broken.buffer)),/checksum/);
+  const unsupported = bytes.slice(); unsupported[7] = 50;
+  await assert.rejects(decodeReplayBinary(await compress(unsupported.buffer)),/Unsupported/);
+  assert.throws(()=>unpackReplay({...packed,rows:new Float64Array([1,Infinity])}),/length/);
+  assert.throws(()=>unpackReplay({...packed,rows:new Float64Array([-2])}),/length/);
 });

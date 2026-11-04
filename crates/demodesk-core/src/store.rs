@@ -464,6 +464,7 @@ impl Store {
             self.summary_path(id),
             self.parsed_path(id),
             self.replay_path(id),
+            self.replay_path(id).with_extension("bin"),
         ] {
             match fs::remove_file(path) {
                 Ok(()) => {}
