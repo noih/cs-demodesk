@@ -1,3 +1,4 @@
+import { DialogCloseButton } from './DialogCloseButton.tsx';
 import { summarizeHighlights } from '../highlightWindows.ts';
 import { useState, type ReactNode } from 'react';
 import { Box, Button, Dialog, Flex, Grid, SegmentedControl, Select, Slider, Switch, Text } from '@radix-ui/themes';
@@ -29,8 +30,9 @@ export function ExportDialog({open,onOpenChange,count,seconds,status,onSetup,onS
   };
   return (
       <Dialog.Root open={open} onOpenChange={onOpenChange}>
-        <Dialog.Content width="100%" maxWidth="min(900px, calc(100vw - 32px))">
-          <Dialog.Title>{t('highlights.dialogTitle')}</Dialog.Title>
+        <Dialog.Content className="app-dialog" width="100%" maxWidth="min(900px, calc(100vw - 32px))">
+          <Flex justify="between" align="start" gap="3" mb="3"><Dialog.Title mb="0">{t('highlights.dialogTitle')}</Dialog.Title><DialogCloseButton /></Flex>
+          <div className="app-dialog-body">
           <Dialog.Description size="2" color="gray">
             {t('highlights.summary', { n: count, seconds: Math.round(preview?.seconds ?? seconds) })}
           </Dialog.Description>
@@ -151,7 +153,8 @@ export function ExportDialog({open,onOpenChange,count,seconds,status,onSetup,onS
               </Box>
             </Flex>
           </Grid>
-          <Flex direction="column" mt="4" gap="4">
+          </div>
+        <Flex direction="column" mt="4" gap="4">
             <Flex direction="column" gap="2" pt="3" style={{ borderTop: '1px solid var(--app-border)' }}>
               <Text as="label" size="1">
                 <Flex align="center" gap="2">
@@ -169,16 +172,9 @@ export function ExportDialog({open,onOpenChange,count,seconds,status,onSetup,onS
                   <i aria-hidden="true" className="bi bi-exclamation-triangle app-icon" />{status.missingRenderTools.length ? t('common.missingTools', { tools: status.missingRenderTools.join(', ') }) : t('highlights.notReady')}<i aria-hidden="true" className="bi bi-arrow-right app-icon" />
                 </Button>
               )}
-              <Flex gap="3" style={{ marginLeft: 'auto' }}>
-                <Dialog.Close>
-                  <Button variant="soft" color="gray">
-                    {t('common.cancel')}
-                  </Button>
-                </Dialog.Close>
-                <Button disabled={submitting || !status?.ok || disabled || count===0} onClick={() => void render()}>
-                  {submitting ? t('highlights.submitting') : t('highlights.export')}
-                </Button>
-              </Flex>
+              <Button style={{ marginLeft: 'auto' }} disabled={submitting || !status?.ok || disabled || count===0} onClick={() => void render()}>
+                {submitting ? t('highlights.submitting') : t('highlights.export')}
+              </Button>
             </Flex>
           </Flex>
         </Dialog.Content>

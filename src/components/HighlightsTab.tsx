@@ -1,3 +1,4 @@
+import { DialogCloseButton } from './DialogCloseButton.tsx';
 import { ExportDialog } from './ExportDialog.tsx';
 import { displayPlayerName } from '../playerName.ts';
 import { useCallback, useMemo, useState } from 'react';
@@ -165,12 +166,13 @@ export function HighlightsTab({ meta, parsed, status, onRendered, onSetup }: { m
       </Table.Root>
 
       <Dialog.Root open={detail !== null} onOpenChange={(open) => { if (!open) setDetail(null); }}>
-        <Dialog.Content maxWidth="640px">
-          <Dialog.Title>{t('highlights.scoring.title')}</Dialog.Title>
+        <Dialog.Content className="app-dialog" maxWidth="640px">
+          <Flex justify="between" align="start" gap="3" mb="3"><Dialog.Title mb="0">{t('highlights.scoring.title')}</Dialog.Title><DialogCloseButton /></Flex>
+          <div className="app-dialog-body">
           <Dialog.Description size="2" mb="3">{detail?.title}</Dialog.Description>
           {detail && <>
             <Text as="p" weight="bold" size="4" mb="2">{t('highlights.scoring.total', { score: detail.score.toFixed(2) })}</Text>
-            <Box style={{ maxHeight: '55vh', overflowY: 'auto' }}>
+            <Box>
               {SCORE_PARTS.filter((part) => (detail.breakdown[part] ?? 0) > 0).map((part) => (
                 <Box key={part} mb="3">
                   <Flex justify="between" gap="3">
@@ -182,7 +184,8 @@ export function HighlightsTab({ meta, parsed, status, onRendered, onSetup }: { m
               ))}
             </Box>
           </>}
-          <Flex justify="end" mt="3"><Dialog.Close><Button variant="soft">{t('common.close')}</Button></Dialog.Close></Flex>
+
+        </div>
         </Dialog.Content>
       </Dialog.Root>
 

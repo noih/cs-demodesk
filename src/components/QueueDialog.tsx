@@ -1,3 +1,4 @@
+import { DialogCloseButton } from './DialogCloseButton.tsx';
 import { AnalysisQueueList } from './AnalysisQueueList.tsx';
 import { Tooltip } from '@radix-ui/themes';
 import { Spinner } from './Spinner.tsx';
@@ -82,8 +83,9 @@ export function QueueDialog({ jobs, analysisJobs, demos, onSelect, onChanged }: 
         {failed > 0 && <Badge color="red">{t('scoring.queue.errors', {count: failed})}</Badge>}
       </Button> : <IconButton variant="ghost" className="queue-trigger" aria-label={t('ui.queue')}><i aria-hidden="true" className="bi bi-list-task app-icon" /></IconButton>}
     </Dialog.Trigger></Tooltip>
-    <Dialog.Content maxWidth="720px" aria-describedby={undefined}>
-      <Dialog.Title>{t('ui.queue')}</Dialog.Title>
+    <Dialog.Content className="app-dialog" maxWidth="720px" aria-describedby={undefined}>
+      <Flex justify="between" align="start" gap="3" mb="3"><Dialog.Title mb="0">{t('ui.queue')}</Dialog.Title><DialogCloseButton /></Flex>
+          <div className="app-dialog-body">
       <Tabs.Root defaultValue="renders">
         <Tabs.List>
           <Tabs.Trigger value="renders">{t('ui.queueVideo')}{active.length > 0 && <Badge ml="2">{active.length}</Badge>}</Tabs.Trigger>
@@ -92,7 +94,8 @@ export function QueueDialog({ jobs, analysisJobs, demos, onSelect, onChanged }: 
         <Tabs.Content value="scoring"><AnalysisQueueList jobs={analysisJobs} demos={demos} onChanged={onChanged} onSelect={id => select(id, 'scoring')} /></Tabs.Content>
         <Tabs.Content value="renders"><QueueList jobs={active} demos={demos} onSelect={id => select(id, 'renders')} /></Tabs.Content>
       </Tabs.Root>
-      <Flex justify="end" mt="4"><Dialog.Close><Button variant="soft">{t('common.close')}</Button></Dialog.Close></Flex>
-    </Dialog.Content>
+
+    </div>
+        </Dialog.Content>
   </Dialog.Root>;
 }

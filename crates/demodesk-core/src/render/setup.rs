@@ -637,13 +637,7 @@ pub fn install_ffmpeg(directory: &Path, force: bool, log: Log) -> Result<PathBuf
         return Ok(dir);
     }
     validate_install_directory(&dir, FFMPEG_REPO, ffmpeg_installed, true)?;
-    install_release(
-        FFMPEG_REPO,
-        &dir,
-        ffmpeg_asset,
-        ffmpeg_installed,
-        log,
-    )?;
+    install_release(FFMPEG_REPO, &dir, ffmpeg_asset, ffmpeg_installed, log)?;
     Ok(dir)
 }
 
@@ -746,7 +740,7 @@ pub fn installed_release_tag(exe: &Path) -> Option<String> {
 /// HLAE is a GUI program with no version flag (unknown arguments open its window),
 /// so its version comes from the executable's resource; trailing ".0" trimmed to three parts.
 #[cfg(windows)]
-fn file_version(exe: &Path) -> Option<String> {
+pub(super) fn file_version(exe: &Path) -> Option<String> {
     use std::os::windows::ffi::OsStrExt;
     use windows_sys::Win32::Storage::FileSystem::{
         GetFileVersionInfoSizeW, GetFileVersionInfoW, VerQueryValueW, VS_FIXEDFILEINFO,
@@ -785,12 +779,12 @@ fn file_version(exe: &Path) -> Option<String> {
     Some(version)
 }
 #[cfg(not(windows))]
-fn file_version(_: &Path) -> Option<String> {
+pub(super) fn file_version(_: &Path) -> Option<String> {
     None
 }
 
 /// "ffmpeg version N-126574-g912208af28-20260915 Copyright ..." -> the build id.
-fn ffmpeg_banner_version(stdout: &str) -> Option<String> {
+pub(super) fn ffmpeg_banner_version(stdout: &str) -> Option<String> {
     let mut words = stdout.lines().next()?.split_whitespace();
     (words.next()? == "ffmpeg" && words.next()? == "version")
         .then(|| words.next())
@@ -799,7 +793,7 @@ fn ffmpeg_banner_version(stdout: &str) -> Option<String> {
 }
 
 /// "Version: 20.0.6980+a06886f7d06049052d32a7381ec05523064a2ca0" -> "20.0.6980"
-fn vrf_banner_version(stdout: &str) -> Option<String> {
+pub(super) fn vrf_banner_version(stdout: &str) -> Option<String> {
     stdout
         .lines()
         .find_map(|line| line.strip_prefix("Version:"))

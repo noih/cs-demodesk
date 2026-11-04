@@ -445,7 +445,7 @@ video {
 .queue-note { color:var(--app-accent); }
 .queue-trigger { box-shadow:inset 0 0 0 1px var(--app-border); background:var(--app-panel); }
 .queue-dot { width:7px; height:7px; border-radius:50%; background:var(--app-accent); }
-.queue-list { max-height:60vh; overflow:auto; margin:16px calc(-1 * var(--dialog-content-padding)) 0; padding:4px var(--dialog-content-padding); }
+.queue-list { max-height:60vh; overflow:auto; margin:16px 0 0; padding:4px 0; }
 .queue-item { padding:16px 0; border-bottom:1px solid var(--app-border); }
 .queue-clips { font-size:var(--app-font-body); color:var(--app-muted); margin-top:12px; }
 .demo-heading .rt-Heading { font-size:var(--app-font-title); letter-spacing:-.02em; line-height:1.1; }
@@ -762,3 +762,13 @@ video {
   border-radius:max(0.5px,calc(var(--segmented-control-border-radius) - 1px));
   background-color:var(--segmented-control-indicator-background-color);
 }
+
+/* Keep dialog headings and actions outside the scrollable content. */
+.rt-BaseDialogContent.app-dialog {
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100dvh - var(--space-6) - max(var(--space-6), 6vh));
+  overflow: hidden;
+}
+.app-dialog > :not(.app-dialog-body) { flex-shrink: 0; }
+.app-dialog-body { min-height: 0; overflow: auto; overscroll-behavior: contain; }

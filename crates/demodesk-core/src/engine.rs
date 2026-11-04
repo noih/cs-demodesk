@@ -1476,7 +1476,11 @@ impl Engine {
                 continue;
             }
             let _tools = self.tool_access.use_tools(&[tool]);
-            let check = crate::render::diagnostics::check(&self.tool_paths(), tool);
+            let paths = self.tool_paths();
+            let mut check = crate::render::diagnostics::check(&paths, tool);
+            if tool == SetupTool::Ffmpeg {
+                check.encoding = Some(crate::render::diagnostics::encoding::check(paths.ffmpeg_exe.as_deref()));
+            }
             self.tool_checks.lock().unwrap().insert(tool, check);
         }
     }
@@ -1504,6 +1508,7 @@ impl Engine {
         .map(|(name, tool)| {
             let mut report =
                 crate::render::diagnostics::tool_report(&doctor.paths, tool, checks.get(&tool));
+            report["currentVersion"] = crate::render::diagnostics::current_version(&doctor.paths, tool);
             if let Some(download) = downloads.get(&tool) {
                 report["download"] = json!({ "running": download.running,
                     "stopping": download.stopping, "progress": download.progress,
@@ -1540,7 +1545,17 @@ impl Engine {
                 "jobId": j.id, "demoId": j.demo_id, "stage": j.stage, "progress": j.progress,
                 "startedAt": j.started_at, "finishedAt": j.finished_at,
                 "errorCode": j.error_code, "error": j.error,
-                "logTail": &j.log[j.log.len().saturating_sub(5)..]
+                "encoding": {
+                    "codec": j.options.codec, "crf": j.options.crf,
+                    "width": j.options.width, "height": j.options.height, "fps": j.options.fps,
+                    "container": j.options.container, "maxSizeMiB": j.options.max_size_mb,
+                    "audioKbps": j.options.audio_kbps, "merge": j.options.merge,
+                    "combatQualityPriority": j.options.combat_quality_priority,
+                    "keyMomentsOnly": j.options.key_moments_only,
+                    "shortCombatClips": j.options.short_combat_clips
+                },
+                "logEntriesAvailable": j.log.len(), "logTruncated": j.log.len() > 100,
+                "logTail": &j.log[j.log.len().saturating_sub(100)..]
             })
         };
         json!({
@@ -2298,7 +2313,9 @@ mod tests {
         job.error = Some("fixture encoding failure".into());
         job.created_at = "2026-09-17T00:00:00Z".into();
         job.finished_at = Some("2026-09-17T00:03:00Z".into());
-        job.log = (0..10).map(|n| format!("stage {n}")).collect();
+        job.options.codec = "libx265".into();
+        job.options.max_size_mb = Some(12.5);
+        job.log = (0..110).map(|n| format!("stage {n}")).collect();
         engine.store.save_job(&job).unwrap();
         let mut earlier_failure = engine
             .store
@@ -2335,9 +2352,13 @@ mod tests {
         assert_eq!(failure["error"], "fixture encoding failure");
         assert_eq!(
             failure["logTail"],
-            json!(["stage 5", "stage 6", "stage 7", "stage 8", "stage 9"])
+            json!((10..110).map(|n| format!("stage {n}")).collect::<Vec<_>>())
         );
-        assert!(failure.get("options").is_none() && failure.get("outputs").is_none());
+        assert_eq!(failure["encoding"]["codec"], "libx265");
+        assert_eq!(failure["encoding"]["maxSizeMiB"], 12.5);
+        assert_eq!(failure["logEntriesAvailable"], 110);
+        assert_eq!(failure["logTruncated"], true);
+        assert!(failure.get("outputs").is_none());
         for tool in ["hlae", "ffmpeg", "vrf"] {
             assert_eq!(report["tools"][tool]["cache"], "missing");
             assert!(report["tools"][tool]["lastCheck"].is_null());

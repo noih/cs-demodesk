@@ -343,10 +343,17 @@ export interface Settings {
   ffmpegExe: string | null;
   vrfExe: string | null;
 }
+export interface EncodingReport {
+  checkedAt: string;
+  durationMs: number;
+  results: {codec: string; status: 'passed' | 'failed' | 'skipped'; durationMs: number; error: string | null}[];
+}
 export interface ToolCheck {
+  encoding?: EncodingReport | null;
   ok: boolean;
   path: string | null;
   installedRelease: string | null;
+  actualVersion: string | null;
   checkedAt: string;
   exitCode: number | null;
   timedOut: boolean;

@@ -1,11 +1,12 @@
+import { DialogCloseButton } from './DialogCloseButton.tsx';
 import { ConfirmDialog, Toast, useNotify } from './Notifications.tsx';
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
-import { Box, Button, Callout, Card, Dialog, Flex, Grid, Heading, IconButton, Select, Switch, Text, TextField, Tooltip } from '@radix-ui/themes';
+import { Fragment, useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { Box, Button, Callout, Card, Dialog, Flex, Grid, Heading, IconButton, Select, Switch, Table, Text, TextField, Tooltip } from '@radix-ui/themes';
 import { driver } from 'driver.js';
 import 'driver.js/dist/driver.css';
 import { open } from '@tauri-apps/plugin-dialog';
 import { useTranslation } from 'react-i18next';
-import { api, errorText, mb, type Settings, type ToolPaths, type ToolUpdate, type SettingsResponse, type StorageBytes } from '../api.ts';
+import { api, errorText, mb, type EncodingReport, type Settings, type ToolPaths, type ToolUpdate, type SettingsResponse, type StorageBytes } from '../api.ts';
 import { LogView } from './LogView.tsx';
 import { Spinner } from './Spinner.tsx';
 import i18n, { applyLanguage, translateProblem, detectLanguage, LANGUAGE_NAMES, LANGUAGES } from '../i18n/index.ts';
@@ -128,7 +129,9 @@ function StorageRow({ label, what, path, bytes, confirm, onClear }: { label: str
         <i aria-hidden="true" className="bi bi-folder2-open app-icon"  />
       </IconButton>
       <ConfirmDialog title={t('settings.emptyTitle', { what })} description={confirm} confirmLabel={t('settings.empty')}
-        onConfirm={() => void clear()} trigger={<Button size="2" variant="outline" color="red" aria-busy={clearing} disabled={clearing || bytes === undefined || bytes === 0}>{t('settings.empty')}</Button>} />
+        onConfirm={() => void clear()} trigger={<IconButton size="2" variant="outline" color="red" aria-label={t('settings.empty')} title={t('settings.empty')} aria-busy={clearing} disabled={clearing || bytes === undefined || bytes === 0}>
+          <i aria-hidden="true" className="bi bi-trash3 app-icon" />
+        </IconButton>} />
     </>
   );
 }
@@ -150,6 +153,8 @@ export function SettingsView({ onChanged, toolsRequest = 0, toolsTarget = 'rende
   const [storageRevision, setStorageRevision] = useState(0);
   const [checking, setChecking] = useState(false);
   const [diagnostics, setDiagnostics] = useState<string>();
+  const [encodingResults, setEncodingResults] = useState<EncodingReport>();
+  const [readingDiagnostics, setReadingDiagnostics] = useState(false);
   const activeDataDir = data?.dataDir;
   useEffect(() => {
     if (!activeDataDir) return;
@@ -273,30 +278,32 @@ export function SettingsView({ onChanged, toolsRequest = 0, toolsTarget = 'rende
   };
   /** Re-run detection with what is saved (paths typed but not saved are not checked). */
   const check = async () => {
+    if (checking) return;
+    setEncodingResults(undefined);
     setMessage(undefined);
+    setUpdates({});
     setChecking(true);
     try {
       const r = await api.checkTools();
       setData(r);
+      setEncodingResults(r.toolChecks?.ffmpeg?.encoding ?? undefined);
       setMessage(!toolsInstalled(r.doctor.paths) ? { ok: false, text: t('settings.toolsIncompleteToast') }
         : Object.values(r.toolChecks ?? {}).some(check => !check.ok) ? { ok: false, text: t('settings.startupFailedHint') }
         : r.doctor.ok ? { ok: true, text: t('settings.envReady') }
         : { ok: false, text: t('settings.envNotReady', { problems: r.doctor.problems.map(translateProblem).join('; ') }) });
+      setCheckingUpdates(true);
+      const paths = r.doctor.paths;
+      const installed = { hlae: Boolean(paths.hlaeExe && paths.hlaeDll), ffmpeg: Boolean(paths.ffmpegExe), vrf: Boolean(paths.vrfExe) };
+      const tools = (['hlae', 'ffmpeg', 'vrf'] as const).filter(tool => installed[tool]);
+      const results = await Promise.all(tools.map(tool => api.checkToolUpdate(tool).catch(error => ({ error: errorText(error) }))));
+      setUpdates(Object.fromEntries(tools.map((tool, index) => [tool, results[index]])));
       await onChanged();
     } catch (e) {
       setMessage({ ok: false, text: errorText(e) });
     } finally {
+      setCheckingUpdates(false);
       setChecking(false);
     }
-  };
-  /** Only on demand: lists the installed and online versions; updating is the user's decision. */
-  const checkUpdates = async () => {
-    const tools = (['hlae', 'ffmpeg', 'vrf'] as const).filter(tool => ready[tool]);
-    setCheckingUpdates(true);
-    setUpdates({});
-    const results = await Promise.all(tools.map(tool => api.checkToolUpdate(tool).catch(error => ({ error: errorText(error) }))));
-    setUpdates(Object.fromEntries(tools.map((tool, index) => [tool, results[index]])));
-    setCheckingUpdates(false);
   };
   const updateNote = (tool: 'hlae' | 'ffmpeg' | 'vrf') => {
     const result = updates[tool];
@@ -356,7 +363,7 @@ export function SettingsView({ onChanged, toolsRequest = 0, toolsTarget = 'rende
     const field = ({hlae: 'hlaeExe', ffmpeg: 'ffmpegExe', vrf: 'vrfExe'} as const)[tool];
     if ((form[field] ?? '') !== (data.settings[field] ?? '')) return {};
     if (!ready[tool]) return {checked: false};
-    if (checking) return {status: t('settings.verifying')};
+    if (checking && !checkingUpdates) return {status: t('settings.verifying')};
     const result = data.toolChecks?.[tool];
     if (!result) return {status: t('settings.unverified')};
     return {checked: result.ok, status: result.ok ? t('settings.ready') : t('settings.startupFailed')};
@@ -474,12 +481,12 @@ export function SettingsView({ onChanged, toolsRequest = 0, toolsTarget = 'rende
                 <Switch aria-label={t('settings.scanGameReplays')} checked={form.scanGameReplays} onCheckedChange={(v) => set({ scanGameReplays: v })} />
               </Flex>
               <Box>
-                <Flex justify="between" align="center" mb="1">
+                <Flex justify="between" align="center" mb="1" px="2">
                   <Text size="2" weight="medium">
                     {t('settings.extraFolders')}
                   </Text>
-                  <Button
-                    size="2"
+                  <IconButton
+                    size="2" aria-label={t('settings.addFolder')} title={t('settings.addFolder')}
                     variant="outline" color="gray"
                     onClick={() =>
                       void open({ directory: true, multiple: false }).then((p) => {
@@ -487,8 +494,8 @@ export function SettingsView({ onChanged, toolsRequest = 0, toolsTarget = 'rende
                       })
                     }
                   >
-                    <i aria-hidden="true" className="bi bi-plus-lg app-icon"  /> {t('settings.addFolder')}
-                  </Button>
+                    <i aria-hidden="true" className="bi bi-folder-plus app-icon" />
+                  </IconButton>
                 </Flex>
                 {folders.length === 0 ? (
                   <Text size="1" color="gray">
@@ -564,40 +571,88 @@ export function SettingsView({ onChanged, toolsRequest = 0, toolsTarget = 'rende
               </Flex>
               <PathField description={t('settings.vrfPurpose')} note={updateNote('vrf')} action={toolButton('vrf', 'Source 2 Viewer CLI')} source={SOURCES.vrf} {...toolReadiness('vrf')} label="Source 2 Viewer CLI" value={toolDirectory(form.vrfExe)} detectedPath={(form.vrfExe ?? '') === (data.settings.vrfExe ?? '') ? toolDirectory(d.paths.vrfExe) : null} placeholder={`${data.dataDir}/tools`} onChange={(v) => set({ vrfExe: v || null })} pick={{ directory: true }} />
               <Flex gap="2" wrap="wrap" align="center" justify="center">
-                <Button size="2" variant="outline" color="gray" disabled={checking} onClick={() => void check()}>{checking ? t('settings.verifying') : t('settings.recheck')}</Button>
-                <Button size="2" variant="outline" color="gray" disabled={checkingUpdates} onClick={() => void checkUpdates()}>{checkingUpdates ? <Spinner size="1" /> : t('settings.checkUpdates')}</Button>
-                <Button size="2" variant="outline" color="gray" onClick={() => void api.toolDiagnostics().then(setDiagnostics).catch(error => setMessage({ok: false, text: errorText(error)}))}>{t('settings.diagnostics')}</Button>
+                <Button size="2" variant="outline" color="gray" disabled={checking} aria-busy={checking} aria-label={t('settings.recheck')} onClick={() => void check()}>{checkingUpdates ? <><Spinner size="1" />{t('settings.checkUpdates')}</> : checking ? t('settings.verifying') : t('settings.recheck')}</Button>
+                <Button size="2" variant="outline" color="gray" disabled={readingDiagnostics} aria-busy={readingDiagnostics} onClick={() => { setReadingDiagnostics(true); void api.toolDiagnostics().then(setDiagnostics).catch(error => setMessage({ok: false, text: errorText(error)})).finally(() => setReadingDiagnostics(false)); }}>{readingDiagnostics && <Spinner size="1" />}{t('settings.diagnostics')}</Button>
               </Flex>
               {Object.values(data.toolChecks ?? {}).some(check => !check.ok && check.path) && <Text size="1" color="red">{t('settings.startupFailedHint')}</Text>}
+
             </Flex>
 
           </Card>
         </Flex>
       </Grid>
 
-      <Dialog.Root open={diagnostics !== undefined} onOpenChange={open => { if (!open) setDiagnostics(undefined); }}>
-        <Dialog.Content maxWidth="900px">
-          <Dialog.Title>{t('settings.diagnostics')}</Dialog.Title>
-          <Dialog.Description>{t('settings.diagnosticsHint')}</Dialog.Description>
-          <pre style={{whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', maxHeight: '50vh', overflow: 'auto', userSelect: 'text'}}>{diagnostics}</pre>
-          <Flex justify="end" gap="2">
-            <Button variant="outline" onClick={() => void navigator.clipboard.writeText(diagnostics ?? '').then(() => setMessage({ok: true, text: t('settings.diagnosticsCopied')})).catch(error => setMessage({ok: false, text: errorText(error)}))}>{t('settings.copyDiagnostics')}</Button>
-            <Dialog.Close><Button variant="outline">{t('common.close')}</Button></Dialog.Close>
+      <Dialog.Root open={encodingResults !== undefined} onOpenChange={open => { if (!open) setEncodingResults(undefined); }}>
+        <Dialog.Content className="app-dialog" maxWidth="720px" aria-describedby={undefined}>
+          <Flex justify="between" align="center" gap="3" mb="3">
+            <Dialog.Title mb="0">{t('settings.encodingDiagnostics')}</Dialog.Title>
+            <DialogCloseButton />
           </Flex>
+          <div className="app-dialog-body">
+              {encodingResults && <Box data-testid="encoding-diagnostics">
+                <Text as="div" size="2" color="gray">{t('settings.encodingColumns.elapsed')} · {encodingResults.durationMs} ms</Text>
+                <Table.Root size="1" variant="surface" mt="2" aria-label={t('settings.encodingDiagnostics')}>
+                  <Table.Header>
+                    <Table.Row>
+                      <Table.ColumnHeaderCell>{t('settings.encodingColumns.device')}</Table.ColumnHeaderCell>
+                      <Table.ColumnHeaderCell>{t('settings.encodingColumns.format')}</Table.ColumnHeaderCell>
+                      <Table.ColumnHeaderCell>{t('settings.encodingColumns.encoder')}</Table.ColumnHeaderCell>
+                      <Table.ColumnHeaderCell>{t('settings.encodingColumns.result')}</Table.ColumnHeaderCell>
+                      <Table.ColumnHeaderCell align="right">{t('settings.encodingColumns.elapsed')}</Table.ColumnHeaderCell>
+                    </Table.Row>
+                  </Table.Header>
+                  <Table.Body>
+                    {encodingResults.results.map(result => <Fragment key={result.codec}>
+                      <Table.Row>
+                        <Table.Cell>{result.codec.includes('nvenc') ? 'NVIDIA' : 'CPU'}</Table.Cell>
+                        <Table.Cell>{result.codec.includes('264') ? 'H.264' : result.codec.includes('265') || result.codec.includes('hevc') ? 'H.265' : 'AV1'}</Table.Cell>
+                        <Table.RowHeaderCell className="mono">{result.codec}</Table.RowHeaderCell>
+                        <Table.Cell><Text color={result.status === 'passed' ? 'green' : result.status === 'failed' ? 'red' : 'gray'}>{t(`settings.encodingStatus.${result.status}`)}</Text></Table.Cell>
+                        <Table.Cell align="right" style={{whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums'}}>{result.durationMs} ms</Table.Cell>
+                      </Table.Row>
+                      {result.error && <Table.Row>
+                        <Table.Cell colSpan={5}>
+                          <details>
+                            <summary style={{cursor: 'pointer'}}>{result.codec} · {t('settings.encodingDetails')}</summary>
+                            <pre className="selectable" style={{whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', maxHeight: 160, overflow: 'auto'}}>{result.error}</pre>
+                          </details>
+                        </Table.Cell>
+                      </Table.Row>}
+                    </Fragment>)}
+                  </Table.Body>
+                </Table.Root>
+              </Box>}
+          </div>
+        </Dialog.Content>
+      </Dialog.Root>
+
+      <Dialog.Root open={diagnostics !== undefined} onOpenChange={open => { if (!open) setDiagnostics(undefined); }}>
+        <Dialog.Content className="app-dialog" maxWidth="900px">
+          <Flex justify="between" align="center" gap="3" mb="3">
+            <Dialog.Title mb="0">{t('settings.diagnostics')}</Dialog.Title>
+            <DialogCloseButton />
+          </Flex>
+          <div className="app-dialog-body">
+          <Dialog.Description>{t('settings.diagnosticsHint')}</Dialog.Description>
+          <Box mt="3" style={{position: 'relative'}}>
+            <pre style={{margin: 0, padding: '44px 12px 12px', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', maxHeight: '50vh', overflow: 'auto', userSelect: 'text', background: 'var(--gray-2)', borderRadius: 'var(--radius-2)'}}>{diagnostics}</pre>
+            <IconButton size="2" variant="outline" aria-label={t('settings.copyDiagnostics')} title={t('settings.copyDiagnostics')} style={{position: 'absolute', top: 8, right: 24, background: 'var(--color-panel-solid)'}} onClick={() => void navigator.clipboard.writeText(diagnostics ?? '').then(() => setMessage({ok: true, text: t('settings.diagnosticsCopied')})).catch(error => setMessage({ok: false, text: errorText(error)}))}>
+              <i aria-hidden="true" className="bi bi-copy app-icon" />
+            </IconButton>
+          </Box>
+        </div>
         </Dialog.Content>
       </Dialog.Root>
       <Dialog.Root open={logTool !== undefined} onOpenChange={open => { if (!open) setLogTool(undefined); }}>
-        <Dialog.Content maxWidth="900px">
-          <Dialog.Title>{t('settings.setupLogTitle')}</Dialog.Title>
+        <Dialog.Content className="app-dialog" maxWidth="900px">
+          <Flex justify="between" align="start" gap="3" mb="3"><Dialog.Title mb="0">{t('settings.setupLogTitle')}</Dialog.Title><DialogCloseButton /></Flex>
+          <div className="app-dialog-body">
           <Dialog.Description size="2" color="gray">
             {logTool && data.setup[logTool]?.running ? t('settings.setupRunning') : t('settings.setupFinished')}
           </Dialog.Description>
           <LogView lines={logTool ? data.setup[logTool]?.log ?? [] : []} empty={t('settings.setupLogEmpty')} />
-          <Flex justify="end" mt="3">
-            <Dialog.Close>
-              <Button variant="outline">{t('common.close')}</Button>
-            </Dialog.Close>
-          </Flex>
+
+        </div>
         </Dialog.Content>
       </Dialog.Root>
     </Flex>

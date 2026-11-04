@@ -53,7 +53,7 @@ export function AboutDialog() {
 
         </IconButton>
       </Dialog.Trigger></Tooltip>
-      <Dialog.Content maxWidth="800px" style={{ padding: 32 }}>
+      <Dialog.Content className="app-dialog" maxWidth="800px" style={{ padding: 32 }}>
         <Flex justify="between" align="center" gap="3">
           <Flex align="center" gap="3">
             <img src={logo} alt="" width="48" height="48" style={{ background: 'var(--app-logo-background, #121518)', borderRadius: 10, padding: 4 }} />
@@ -61,6 +61,7 @@ export function AboutDialog() {
           </Flex>
           <Text size="2" color="gray" className="mono">v{version ?? '…'}</Text>
         </Flex>
+          <div className="app-dialog-body">
         <Dialog.Description size="2" color="gray" mt="4" mb="0" style={{ lineHeight: 1.7 }}>
           {t('about.tagline')}
         </Dialog.Description>
@@ -105,12 +106,9 @@ export function AboutDialog() {
           ))}
         </div>
 
-        <Flex justify="end" mt="4">
-          <Dialog.Close>
-            <Button variant="soft">{t('common.close')}</Button>
-          </Dialog.Close>
-        </Flex>
-      </Dialog.Content>
+
+      </div>
+        </Dialog.Content>
     </Dialog.Root>
   );
 }

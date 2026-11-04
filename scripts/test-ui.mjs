@@ -1,3 +1,4 @@
+import { mb } from '../src/api.ts';
 import { ERROR_CODES } from '../src/errorCodes.ts';
 import { checkReplayDrawing } from './check-replay-drawing.mjs';
 import assert from 'node:assert/strict';
@@ -6,11 +7,14 @@ import { createRequire } from 'node:module';
 import { createServer, preview } from 'vite';
 import { initialAppearance, THEMES } from '../src/themes.ts';
 import { projectReference } from '../src/recoil.ts';
+assert.equal(mb(1_048_576), '1.0 MiB');
+assert.equal(mb(20_000_000), '19.1 MiB');
 const errorSource = await readFile(new URL('../crates/demodesk-core/src/error.rs', import.meta.url), 'utf8');
 const rustCodes = errorSource.match(/pub enum ErrorCode \{([^}]+)\}/s)[1].split(',').map(s=>s.trim()).filter(Boolean).map(s=>s.replace(/([a-z0-9])([A-Z])/g, '$1-$2').toLowerCase());
 assert.deepEqual([...Object.values(ERROR_CODES)].sort(), rustCodes.sort(), 'Frontend codes match backend wire values');
 for (const lang of ['en','zh-TW','zh-CN','ja','ko','ru']) {
   const locale = JSON.parse(await readFile(new URL('../src/i18n/locales/' + lang + '.json', import.meta.url), 'utf8'));
+  assert.equal(locale.renders.sizeLimit, '≤ {{mb}} MiB', `${lang} uses MiB`);
   for (const code of rustCodes) assert.ok(locale.errors[code]?.trim(), `${lang} translates ${code}`);
 }
 const calibration = JSON.parse(await readFile(new URL('../src/data/recoil-reference.json', import.meta.url), 'utf8'));
@@ -77,6 +81,7 @@ try {
       if(cmd==='get_storage_bytes'){if(window.holdStorage)await new Promise(resolve=>window.releaseStorage=resolve);return window.storageBytes ?? {parsedBytes:1048576,anomalyBytes:0,clipsBytes:0,radarBytes:0};}
       if(['clear_all_analysis','clear_anomaly_data','clear_all_clips','clear_radar'].includes(cmd))return new Promise((resolve,reject)=>{window.releaseClear=()=>resolve(1048576);window.rejectClear=()=>reject('Clear failed');});
       if(cmd==='tool_diagnostics')return JSON.stringify({environment:{appVersion:'test'},tools:Object.fromEntries(['hlae','ffmpeg','vrf'].map(tool=>[tool,{path:window.toolPaths?.[tool+'Exe']??null,cache:window.toolChecks?.[tool]?'valid':'missing',lastCheck:window.toolChecks?.[tool]??null}]))});
+      if(cmd==='check_tool_update'){if(window.holdToolUpdate)await new Promise(resolve=>(window.releaseToolUpdates??=[]).push(resolve));if(window.failToolUpdate===args.tool)throw new Error('offline');return {installed:'1.0',latest:'2.0'};}
       if(cmd==='check_tools' && window.holdToolCheck)await new Promise(resolve=>window.releaseToolCheck=resolve);
       if(cmd==='get_settings' || cmd==='check_tools')return { toolChecks:window.toolChecks ?? Object.fromEntries(['hlae','ffmpeg','vrf'].map(tool=>[tool,{ok:Boolean(window.toolPaths?.[tool+'Exe']),path:window.toolPaths?.[tool+'Exe']??null}])),settings:window.savedSettings ?? {language:'en',replayFolders:[],scanGameReplays:true},doctor:{ok:true,problems:[],paths:window.toolPaths || {}},detected:{},setup:window.setupState ?? {},dataDir:'E:/data',dataDirOverride:window.selectedDataDirectory ?? null,restartRequired:Boolean(window.selectedDataDirectory && window.selectedDataDirectory!=='E:/data'),defaultDataDir:'E:/data',parsedBytes:0,anomalyBytes:0,clipsBytes:0,radarBytes:0 };
       if(cmd==='list_demos'){if(window.holdRefresh)await new Promise(resolve=>window.releaseRefresh=resolve);return demos;}
@@ -177,7 +182,7 @@ try {
       const worker = new Worker(workerUrl, {type:'module'});
       worker.onmessage = e => { worker.terminate(); resolve(e.data); };
       worker.onerror = e => { worker.terminate(); reject(new Error(e.message)); };
-      worker.postMessage(url);
+      worker.postMessage({url});
     });
     const payload = {frames:Array.from({length:50000}, (_,i)=>({t:i,p:[[1,2,3,4,5,6,7,8,9,10]]}))};
     const url = URL.createObjectURL(new Blob([JSON.stringify(payload)], {type:'application/json'}));
@@ -418,7 +423,8 @@ try {
   assert.equal(await page.evaluate(() => window.openedUrl), 'https://apps.microsoft.com/detail/9N5G4VXSDGS5');
   await page.getByRole('button', {name:'GitHub: Version 1.0.10 available',exact:true}).click();
   assert.equal(await page.evaluate(() => window.openedUrl), 'https://github.com/noih/cs-demodesk/releases/latest');
-  await page.getByRole('dialog').getByRole('button', { name: 'Close', exact: true }).click();
+  await page.mouse.click(2, 2);
+  await page.getByRole('dialog').waitFor({state:'hidden'});
   const updateCount = () => page.evaluate(() => window.testCalls.filter(c => c.cmd === 'check_for_updates').length);
   const initialChecks = await updateCount();
   await page.evaluate(() => { window.failUpdate = true; window.holdUpdate = true; });
@@ -428,13 +434,13 @@ try {
   await page.getByText('Unable to check for updates. Reopen About to try again.', {exact:true}).waitFor();
   await checkingNotice.waitFor({state:'detached'});
   await page.waitForFunction(n => window.testCalls.filter(c => c.cmd === 'check_for_updates').length === n + 1, initialChecks);
-  await page.getByRole('dialog').getByRole('button', {name:'Close',exact:true}).click();
+  await page.keyboard.press('Escape');
   assert.equal(await updateCount(), initialChecks + 1, 'Closing About does not check again');
   await page.evaluate(() => window.failUpdate = false);
   await page.getByRole('button', {name:'About',exact:true}).click();
   await page.getByRole('button', {name:'GitHub: Version 1.0.10 available',exact:true}).waitFor();
   assert.equal(await updateCount(), initialChecks + 2, 'Reopening About retries after failure');
-  await page.getByRole('dialog').getByRole('button', {name:'Close',exact:true}).click();
+  await page.keyboard.press('Escape');
   for (const status of ['current', 'storeCurrent']) {
     await page.evaluate(status => window.updateStatus = {status}, status);
     await page.getByRole('button', {name:/^About/}).click();
@@ -446,7 +452,7 @@ try {
     assert.equal(await github.getAttribute('data-accent-color'), 'gray');
     await github.click();
     assert.equal(await page.evaluate(() => window.openedUrl), 'https://github.com/noih/cs-demodesk');
-    await page.getByRole('dialog').getByRole('button', {name:'Close',exact:true}).click();
+    await page.keyboard.press('Escape');
   }
   await page.evaluate(() => window.updateStatus = {status:'storeAvailable'});
   await page.getByRole('button', {name:/^About/}).click();
@@ -456,7 +462,7 @@ try {
   assert.equal(await page.getByRole('dialog').getByRole('button', {name:'GitHub',exact:true}).getAttribute('data-accent-color'), 'gray');
   await storeUpdate.click();
   assert.equal(await page.evaluate(() => window.openedUrl), 'https://apps.microsoft.com/detail/9N5G4VXSDGS5');
-  await page.getByRole('dialog').getByRole('button', {name:'Close',exact:true}).click();
+  await page.keyboard.press('Escape');
   await page.getByRole('tab').filter({hasText:'Players'}).click();
   const tables = page.getByRole('table');
   assert.equal(await tables.count(), 2);
@@ -889,7 +895,7 @@ try {
       assert.equal(await page.getByRole('alertdialog').count(), 0, 'Repeated clicks cannot reopen the clear dialog');
       assert.equal(await page.evaluate(cmd => window.testCalls.filter(c => c.cmd === cmd).length, command), calls);
       await page.evaluate(fail => fail ? window.rejectClear() : window.releaseClear(), fail);
-      await page.waitForFunction(index => ![...document.querySelectorAll('.settings-page button')].filter(button => button.textContent === 'Empty')[index].disabled, index);
+      await page.waitForFunction(index => ![...document.querySelectorAll('.settings-page button')].filter(button => button.getAttribute('aria-label') === 'Empty')[index].disabled, index);
     }
   }
   await page.getByRole('alert').filter({hasText:'Clear failed'}).getByRole('button', {name:'Close',exact:true}).click();
@@ -942,7 +948,7 @@ try {
   });
   assert.ok(warningAlignment < 1, 'Callout icon and text are vertically centered');
   const toolLayout = await settingsPage.evaluate(el => {
-    const recheck = [...el.querySelectorAll('button')].find(b=>b.textContent.trim()==='Verify installation');
+    const recheck = [...el.querySelectorAll('button')].find(b=>b.textContent.trim()==='Check & verify');
     const card = recheck.closest('.rt-Card').getBoundingClientRect();
     const button = recheck.parentElement.getBoundingClientRect();
     const warning = recheck.closest('.rt-Card').querySelector('.rt-CalloutRoot').getBoundingClientRect();
@@ -962,20 +968,45 @@ try {
       window.toolPaths = {hlaeExe:'E:/tools/HLAE.exe',hlaeDll:'E:/tools/AfxHookSource2.dll',ffmpegExe:'E:/tools/ffmpeg.exe',vrfExe:'E:/tools/Source2Viewer-CLI.exe'};
       if (missing) delete window.toolPaths[missing];
     }, missing);
-    await settingsPage.getByRole('button', {name:'Verify installation',exact:true}).click();
+    await settingsPage.getByRole('button', {name:'Check & verify',exact:true}).click();
     await toolWarning.waitFor({state:missing ? 'visible' : 'hidden'});
     await page.locator('.notification-viewport .app-toast').getByRole('button', {name:'Close',exact:true}).click();
     assert.equal(await toolCheckCalls(), checksBeforeManual + 1, 'Check again runs tool verification once');
   }
   {
   const hlaeField = settingsPage.locator('.tool-field').filter({has:page.getByLabel('HLAE',{exact:true})});
-  await page.evaluate(() => { window.holdToolCheck=true; window.toolChecks={hlae:{ok:false,path:'E:/tools/HLAE.exe',exitCode:7,timedOut:false,stderr:'fixture startup failure'}}; });
-  await settingsPage.getByRole('button',{name:'Verify installation',exact:true}).click();
+  await page.evaluate(() => { window.holdToolCheck=true; window.toolChecks={hlae:{ok:false,path:'E:/tools/HLAE.exe',exitCode:7,timedOut:false,stderr:'fixture startup failure'},ffmpeg:{ok:true,path:'E:/tools/ffmpeg.exe',encoding:{checkedAt:'2026-11-04T00:00:00Z',durationMs:1800,results:['libx264','libx265','libsvtav1','h264_nvenc','hevc_nvenc','av1_nvenc'].map((codec,i)=>({codec,status:['passed','passed','passed','failed','failed','skipped'][i],durationMs:200,error:i===3?'No capable NVIDIA device':i===4?'Driver does not support the required NVENC API version':i===5?'FFmpeg executable not found':null}))}}}; });
+  await settingsPage.getByRole('button',{name:'Check & verify',exact:true}).click();
   await hlaeField.getByText('Verifying…',{exact:true}).waitFor();
   assert.equal(await hlaeField.getByText('Ready',{exact:true}).count(),0,'Existing file is not ready while verification runs');
   await page.waitForFunction(()=>typeof window.releaseToolCheck==='function');
   await page.evaluate(()=>{window.holdToolCheck=false;window.releaseToolCheck();});
   await hlaeField.getByText('Startup failed',{exact:true}).waitFor();
+  const encodingDialog=page.getByRole('dialog',{name:'Basic encoding diagnostics',exact:true});
+  const encodingPanel=encodingDialog.getByTestId('encoding-diagnostics');
+  await encodingPanel.getByText('Time · 1800 ms',{exact:true}).waitFor();
+  assert.equal(await encodingPanel.getByText('Passed',{exact:true}).count(),3);
+  assert.equal(await encodingPanel.getByText('Failed',{exact:true}).count(),2);
+  assert.equal(await encodingPanel.getByText('Not tested',{exact:true}).count(),1);
+  await encodingPanel.locator('summary').first().click();
+  await encodingPanel.getByText('No capable NVIDIA device',{exact:true}).waitFor();
+  const ffmpegField=settingsPage.locator('.tool-field').filter({has:page.getByLabel('FFmpeg',{exact:true})});
+  await ffmpegField.getByText('Ready',{exact:true}).waitFor();
+  await encodingDialog.getByRole('button',{name:'Close',exact:true}).click();
+  assert.equal(await settingsPage.getByTestId('encoding-diagnostics').count(),0,'Encoding results do not remain in settings');
+
+  await settingsPage.getByRole('button',{name:'Check & verify',exact:true}).waitFor();
+  await page.evaluate(()=>{window.holdToolUpdate=true;window.failToolUpdate='ffmpeg';window.releaseToolUpdates=[];window.toolChecks.ffmpeg.encoding.durationMs=1900;});
+  await settingsPage.getByRole('button',{name:'Check & verify',exact:true}).click();
+  await page.waitForFunction(()=>window.releaseToolUpdates.length===3);
+  await encodingDialog.getByText('Time · 1900 ms',{exact:true}).waitFor();
+  await encodingDialog.getByRole('button',{name:'Close',exact:true}).click();
+  assert.ok(await settingsPage.getByRole('button',{name:'Check & verify',exact:true}).isDisabled());
+  await page.evaluate(()=>{window.holdToolUpdate=false;window.releaseToolUpdates.forEach(resolve=>resolve());});
+  await settingsPage.getByText(/offline/).waitFor();
+  assert.equal(await settingsPage.getByText('Installed: 1.0',{exact:true}).count(),2);
+  await settingsPage.getByRole('button',{name:'Check & verify',exact:true}).waitFor();
+  await page.evaluate(()=>{delete window.failToolUpdate;});
   const checksBeforeDiagnostics = await toolCheckCalls();
   await settingsPage.getByRole('button',{name:'Diagnostics',exact:true}).click();
   const diagnosticsDialog=page.getByRole('dialog');
@@ -984,10 +1015,18 @@ try {
   await diagnosticsDialog.getByRole('button',{name:'Copy diagnostics',exact:true}).click();
   assert.equal(await page.evaluate(()=>JSON.parse(window.copiedDiagnostics).tools.hlae.lastCheck.exitCode),7);
   assert.equal(await page.evaluate(()=>JSON.parse(window.copiedDiagnostics).tools.hlae.cache),'valid');
+  assert.equal(await page.evaluate(()=>JSON.parse(window.copiedDiagnostics).tools.ffmpeg.lastCheck.encoding.results[3].status),'failed','Advisory encoding failures are included in diagnostics');
+  const copyToast = page.locator('.notification-viewport .app-toast').filter({hasText:'Diagnostics copied'});
+  await copyToast.waitFor();
+  assert.ok(await copyToast.evaluate(el => {
+    const r = el.getBoundingClientRect();
+    return el.contains(document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2));
+  }), 'Copy notification is above the modal mask');
+
   assert.equal(await toolCheckCalls(), checksBeforeDiagnostics, 'Generating and copying diagnostics reuses cached checks without running verification');
   await diagnosticsDialog.getByRole('button',{name:'Close',exact:true}).click();
   await page.evaluate(()=>{delete window.toolChecks;});
-  await settingsPage.getByRole('button',{name:'Verify installation',exact:true}).click();
+  await settingsPage.getByRole('button',{name:'Check & verify',exact:true}).click();
   await hlaeField.getByText('Ready',{exact:true}).waitFor();
   await page.locator('.notification-viewport .app-toast').getByRole('button',{name:'Close',exact:true}).click();
   }
@@ -1152,11 +1191,11 @@ try {
   assert.equal(await page.locator('.tools-highlight').getAttribute('aria-label'), 'Log: Source 2 Viewer CLI', 'Running downloads guide users to progress instead of cancel');
   assert.equal(await page.locator('.driver-popover-description').innerText(), 'Downloading. Please wait for completion.');
   assert.equal(await page.getByRole('button',{name:'Cancel: Source 2 Viewer CLI',exact:true}).evaluate(el => el.classList.contains('tools-highlight')), false);
-  await page.evaluate(() => window.emitTestEvent({type:'setup-progress',tool:'vrf',progress:'1 / 50 MB (2%)'}));
-  await page.locator('.tools-highlight').getByText('1 / 50 MB (2%)',{exact:true}).waitFor();
+  await page.evaluate(() => window.emitTestEvent({type:'setup-progress',tool:'vrf',progress:'1 / 50 MiB (2%)'}));
+  await page.locator('.tools-highlight').getByText('1 / 50 MiB (2%)',{exact:true}).waitFor();
   await page.locator('.driver-popover').evaluate(el => { el.dataset.sameGuide = 'true'; });
-  await page.evaluate(() => window.emitTestEvent({type:'setup-progress',tool:'vrf',progress:'2 / 50 MB (4%)'}));
-  await page.locator('.tools-highlight').getByText('2 / 50 MB (4%)',{exact:true}).waitFor();
+  await page.evaluate(() => window.emitTestEvent({type:'setup-progress',tool:'vrf',progress:'2 / 50 MiB (4%)'}));
+  await page.locator('.tools-highlight').getByText('2 / 50 MiB (4%)',{exact:true}).waitFor();
   assert.equal(await page.locator('.driver-popover').getAttribute('data-same-guide'), 'true', 'Progress updates do not rebuild the guide');
   await page.evaluate(() => { window.toolPaths.vrfExe='E:/tools/Source2Viewer-CLI.exe'; window.emitTestEvent({type:'setup-finished',tool:'vrf',ok:true,error:null}); });
   await page.locator('.driver-popover').waitFor({state:'detached'});
@@ -1230,7 +1269,7 @@ try {
   await hudSlider.press('End');
   assert.equal(await hudSlider.getAttribute('aria-valuenow'), '1');
   const exportViewport = page.viewportSize();
-  const sizeOptions = exportDialog.getByRole('radiogroup').filter({has:page.getByRole('radio',{name:'100 MB',exact:true})});
+  const sizeOptions = exportDialog.getByRole('radiogroup').filter({has:page.getByRole('radio',{name:'100 MiB',exact:true})});
   const unlimitedLabels = [];
   for (const language of ['en','zh-TW','zh-CN','ja','ko','ru']) {
     const locale = JSON.parse(await readFile(new URL('../src/i18n/locales/' + language + '.json', import.meta.url), 'utf8'));
@@ -1271,7 +1310,7 @@ try {
         && ['top','right','bottom','left'].every(side=>background[side]==='1px');
     }), 'Selection background aligns with the selected size option');
   }
-  await sizeOptions.getByRole('radio',{name:'20 MB',exact:true}).click();
+  await sizeOptions.getByRole('radio',{name:'20 MiB',exact:true}).click();
   if(process.env.UI_SCREENSHOT_DIR) await sizeOptions.screenshot({path:process.env.UI_SCREENSHOT_DIR+'/export-size-options.png'});
   await sizeOptions.evaluate(el => el.style.removeProperty('--segmented-control-transition-duration'));
   const playerKillFeed = exportDialog.getByRole('switch',{name:'Only show player-related kills',exact:true});
@@ -1307,7 +1346,7 @@ try {
   await sizeOptions.getByRole('radio',{name:'Unlimited',exact:true}).click();
   assert.equal(await combatPriority.count(),0);
   assert.equal(await fullWarning.count(),0);
-  await exportDialog.getByRole('radio',{name:'20 MB',exact:true}).click();
+  await exportDialog.getByRole('radio',{name:'20 MiB',exact:true}).click();
   assert.equal(await combatPriority.isChecked(),false,'Size selection retains the explicit opt-out');
   await combatPriority.click();
   await fullWarning.waitFor();
@@ -1341,7 +1380,7 @@ try {
   assert.equal(await group.getByRole('button',{name:'Download: HLAE',exact:true}).count(),1);
   assert.equal(await group.getByRole('button',{name:'Download: FFmpeg',exact:true}).count(),1);
   assert.equal(await group.getByRole('button',{name:'Download: Source 2 Viewer CLI',exact:true}).count(),0, 'Export guidance excludes the replay tool');
-  assert.equal(await group.getByRole('button',{name:'Verify installation',exact:true}).count(),0, 'Export guidance excludes unrelated settings actions');
+  assert.equal(await group.getByRole('button',{name:'Check & verify',exact:true}).count(),0, 'Export guidance excludes unrelated settings actions');
   assert.equal(await page.locator('.driver-popover-title').innerText(), 'Download: HLAE, FFmpeg');
   const groupArrow = await page.locator('.driver-popover-arrow').evaluate(arrow => {
     // Simulate a downward arrow while the popover is positioned on the left.
@@ -1371,21 +1410,21 @@ try {
   assert.equal(logSize.height, downloadSize.height);
   const storageCallsBeforeProgress = await page.evaluate(() => window.testCalls.filter(c => c.cmd === 'get_storage_bytes').length);
   const checksBeforeProgress = await toolCheckCalls();
-  await page.evaluate(() => window.emitTestEvent({type:'setup-progress',tool:'hlae',progress:'9.2 / 185.4 MB (5%)'}));
-  await downloadLog.getByText('9.2 / 185.4 MB (5%)',{exact:true}).waitFor();
-  await page.evaluate(() => window.emitTestEvent({type:'setup-progress',tool:'hlae',progress:'18.5 / 185.4 MB (10%)'}));
-  await downloadLog.getByText('18.5 / 185.4 MB (10%)',{exact:true}).waitFor();
+  await page.evaluate(() => window.emitTestEvent({type:'setup-progress',tool:'hlae',progress:'9.2 / 185.4 MiB (5%)'}));
+  await downloadLog.getByText('9.2 / 185.4 MiB (5%)',{exact:true}).waitFor();
+  await page.evaluate(() => window.emitTestEvent({type:'setup-progress',tool:'hlae',progress:'18.5 / 185.4 MiB (10%)'}));
+  await downloadLog.getByText('18.5 / 185.4 MiB (10%)',{exact:true}).waitFor();
   assert.equal((await downloadLog.boundingBox()).height, (await cancelHlae.boundingBox()).height, 'Progress and download buttons have the same height');
   assert.equal(await page.evaluate(() => window.testCalls.filter(c => c.cmd === 'get_storage_bytes').length), storageCallsBeforeProgress, 'Progress updates must not rescan storage');
   assert.equal(await toolCheckCalls(), checksBeforeProgress, 'Download progress does not run tool verification');
   const ffmpegDownload = page.getByRole('button',{name:'Download: FFmpeg',exact:true});
   assert.equal(await ffmpegDownload.isDisabled(), false, 'Other tools remain downloadable');
   await ffmpegDownload.click();
-  await page.evaluate(() => window.emitTestEvent({type:'setup-progress',tool:'ffmpeg',progress:'30 / 100 MB (30%)'}));
-  await page.getByRole('button',{name:'Log: FFmpeg',exact:true}).getByText('30 / 100 MB (30%)',{exact:true}).waitFor();
+  await page.evaluate(() => window.emitTestEvent({type:'setup-progress',tool:'ffmpeg',progress:'30 / 100 MiB (30%)'}));
+  await page.getByRole('button',{name:'Log: FFmpeg',exact:true}).getByText('30 / 100 MiB (30%)',{exact:true}).waitFor();
   assert.equal(await cancelHlae.isDisabled(), false);
   assert.equal(await page.getByRole('button',{name:'Cancel: FFmpeg',exact:true}).isDisabled(), false);
-  assert.equal(await downloadLog.innerText(), '18.5 / 185.4 MB (10%)', 'Concurrent tools retain separate progress');
+  assert.equal(await downloadLog.innerText(), '18.5 / 185.4 MiB (10%)', 'Concurrent tools retain separate progress');
   await page.getByRole('button',{name:'Cancel: FFmpeg',exact:true}).click();
   assert.deepEqual(await page.evaluate(() => window.testCalls.filter(c => c.cmd === 'cancel_setup').at(-1).args), {tool:'ffmpeg'});
   await page.getByRole('button',{name:'Log: FFmpeg',exact:true}).click();
@@ -1393,13 +1432,13 @@ try {
   await page.keyboard.press('Escape');
   await downloadLog.click();
   await page.getByRole('dialog').getByText('Download started',{exact:true}).waitFor();
-  assert.equal(await page.getByRole('dialog').getByText('18.5 / 185.4 MB (10%)',{exact:true}).count(), 0, 'Progress is separate from log');
+  assert.equal(await page.getByRole('dialog').getByText('18.5 / 185.4 MiB (10%)',{exact:true}).count(), 0, 'Progress is separate from log');
   assert.equal(await page.getByRole('button', {name:'Cancel: HLAE',exact:true,includeHidden:true}).evaluate(el => getComputedStyle(el).animationName), 'none', 'Downloading closes guidance and stops pulsing');
   await page.keyboard.press('Escape');
   await page.evaluate(() => window.emitTestEvent({type:'setup-finished',tool:'hlae',ok:true,error:null}));
   await page.getByRole('button',{name:'Download: HLAE',exact:true}).waitFor();
   await page.evaluate(() => { window.toolPaths = {steamDir:'E:/Steam',cs2Exe:'E:/CS2/game/bin/win64/cs2.exe',hlaeExe:'E:/tools/HLAE.exe',hlaeDll:'E:/tools/AfxHookSource2.dll'}; });
-  await page.getByRole('button', {name:'Verify installation',exact:true}).click();
+  await page.getByRole('button', {name:'Check & verify',exact:true}).click();
   await page.locator('.tool-field').filter({has:page.getByLabel('HLAE', {exact:true})}).getByText('Ready', {exact:true}).waitFor();
   assert.equal(await page.locator('.driver-popover').count(), 0, 'Tool updates do not restart guidance');
 
@@ -1414,7 +1453,20 @@ try {
   await refreshList();
   assert.equal(await page.locator('.demo-scroll').evaluate(el=>el.scrollTop),0,'Refresh does not replay an old queue navigation');
 
+  await page.evaluate(()=>{window.queueJobs=[];window.analysisJobs=[];});
+  await refreshList();
+  await page.locator('.queue-trigger').click();
+  const assertQueueWidth = async () => assert.ok(await page.getByRole('dialog').evaluate(el =>
+    [el, ...el.querySelectorAll('.app-dialog-body, .queue-list')].every(node => node.scrollWidth <= node.clientWidth)
+  ), 'Queue dialog and lists fit their containers without horizontal scrolling');
+  await assertQueueWidth();
+  await page.getByRole('dialog').getByRole('tab').nth(1).click();
+  await assertQueueWidth();
+  await page.keyboard.press('Escape');
+  await page.getByRole('dialog').waitFor({state:'detached'});
+
   await page.evaluate(async () => {
+    delete window.queueJobs;
     const jobs=await window.__TAURI_INTERNALS__.invoke('list_jobs');
     window.queueJobs=Array.from({length:30},(_,i)=>({...jobs[0],id:'queue-'+i,demoId:'demo-0',status:'queued',outputs:[]}));
   });
@@ -1425,6 +1477,7 @@ try {
   await page.locator('.queue-trigger').click();
   await page.locator('.queue-clips').first().getByText('Player — 3 kills · R8').waitFor();
   assert.equal(await demoReads()-before,1,'Visible jobs of one demo share one request');
+  await assertQueueWidth();
   await page.locator('.queue-list').evaluate(el=>{el.scrollTop=el.scrollHeight});
   await page.locator('.queue-clips').last().getByText('Player — 3 kills · R8').waitFor();
   assert.equal(await demoReads()-before,1,'Scrolling same-demo jobs reuses titles');
@@ -1659,6 +1712,23 @@ try {
 
   for (const summary of await analysisDialog.locator('[data-check-id] > summary').all()) { if (!await summary.evaluate(el=>el.parentElement.open)) await summary.click(); }
   await analysisDialog.getByText(/Ticks: 64–128/).first().waitFor();
+  const dialogViewport = page.viewportSize();
+  await page.setViewportSize({width: 960, height: 540});
+  const fixedHeading = analysisDialog.getByRole('heading', {name:'Opponent · Analysis details',exact:true});
+  const fixedClose = analysisDialog.getByRole('button', {name:'Close',exact:true});
+  const headingBeforeScroll = await fixedHeading.boundingBox();
+  const closeBeforeScroll = await fixedClose.boundingBox();
+  const dialogBody = analysisDialog.locator(':scope > .app-dialog-body');
+  assert.ok(await dialogBody.evaluate(el => el.scrollHeight > el.clientHeight), 'Long analysis content scrolls inside the body');
+  await dialogBody.evaluate(el => { el.scrollTop = el.scrollHeight; });
+  assert.ok(await dialogBody.evaluate(el => el.scrollTop > 0));
+  assert.ok(Math.abs((await fixedHeading.boundingBox()).y - headingBeforeScroll.y) < 1, 'Dialog heading stays fixed while content scrolls');
+  assert.ok(Math.abs((await fixedClose.boundingBox()).y - closeBeforeScroll.y) < 1, 'Close button stays fixed while content scrolls');
+  assert.equal(await analysisDialog.evaluate(el => el.scrollTop), 0, 'Dialog shell does not scroll');
+  if(process.env.UI_SCREENSHOT_DIR) await analysisDialog.screenshot({path:process.env.UI_SCREENSHOT_DIR+'/scoring-dialog-scrolled.png'});
+  await dialogBody.evaluate(el => { el.scrollTop = 0; });
+  await page.setViewportSize(dialogViewport);
+
   assert.equal(await analysisDialog.locator('[data-check-id] [data-occurrence-id]').first().evaluate(el=>el.tagName),'TR','Occurrences use compact table rows');
   const evidenceScroll=analysisDialog.locator('[data-check-id] > div').first();
   assert.equal(await evidenceScroll.evaluate(el=>getComputedStyle(el).maxHeight),'none','Evidence has no nested vertical scroll area');

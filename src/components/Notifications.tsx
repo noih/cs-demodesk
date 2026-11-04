@@ -1,6 +1,7 @@
+import { DialogCloseButton } from './DialogCloseButton.tsx';
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import { AlertDialog, Button, Callout, Flex, IconButton } from '@radix-ui/themes';
+import { AlertDialog, Button, Callout, Flex, IconButton, Portal, Theme } from '@radix-ui/themes';
 import { useTranslation } from 'react-i18next';
 
 type Color = 'red' | 'green' | 'amber';
@@ -16,7 +17,7 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
   }, []);
   return <Notifications.Provider value={{ host, notify }}>
     {children}
-    <div ref={setHost} className="notification-viewport" />
+    <Portal><Theme asChild><div ref={setHost} className="notification-viewport" /></Theme></Portal>
     {notices.map(notice => <Toast key={notice.id} {...notice} duration={notice.color === 'green' ? 3000 : 0}
       onDismiss={() => setNotices(items => items.filter(item => item.id !== notice.id))} />)}
   </Notifications.Provider>;
@@ -58,10 +59,12 @@ export function ConfirmDialog({ open, onOpenChange, trigger, title, description,
   const { t } = useTranslation();
   return <AlertDialog.Root open={open} onOpenChange={onOpenChange}>
     {trigger && <AlertDialog.Trigger>{trigger}</AlertDialog.Trigger>}
-    <AlertDialog.Content maxWidth="480px">
-      <AlertDialog.Title>{title}</AlertDialog.Title>
+    <AlertDialog.Content className="app-dialog" maxWidth="480px">
+      <Flex justify="between" align="start" gap="3" mb="3"><AlertDialog.Title mb="0">{title}</AlertDialog.Title><DialogCloseButton alert /></Flex>
+          <div className="app-dialog-body">
       <AlertDialog.Description size="2">{description}</AlertDialog.Description>
-      <Flex gap="3" mt="4" justify="end">
+      </div>
+        <Flex gap="3" mt="4" justify="end">
         <AlertDialog.Cancel><Button variant="soft" color="gray">{t('common.cancel')}</Button></AlertDialog.Cancel>
         <AlertDialog.Action><Button color="red" onClick={onConfirm}>{confirmLabel}</Button></AlertDialog.Action>
       </Flex>

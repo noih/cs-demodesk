@@ -1,3 +1,4 @@
+import { DialogCloseButton } from './DialogCloseButton.tsx';
 import { AnalysisExport } from './AnalysisExport.tsx';
 import { useState } from 'react';
 import { Badge, Button, Dialog, Flex, Heading, Table, Text } from '@radix-ui/themes';
@@ -77,8 +78,9 @@ function PlayerAnalysis({playerId,name,records,playerNames,status,onSetup,onRend
       {record && <AnalysisExport record={record} status={status} onSetup={onSetup} onRendered={onRendered}/>}
       {record ? <Dialog.Root>
         <Dialog.Trigger><Button size="1" variant="soft">{t('scoring.detailsShort')}</Button></Dialog.Trigger>
-        {record && <Dialog.Content aria-describedby={undefined} maxWidth="960px" style={{maxHeight:'85vh',overflowY:'auto',overflowWrap:'anywhere'}}>
-          <Dialog.Title>{name} · {t('scoring.details')}</Dialog.Title>
+        {record && <Dialog.Content className="app-dialog" aria-describedby={undefined} maxWidth="960px" style={{overflowWrap:'anywhere'}}>
+          <Flex justify="between" align="start" gap="3" mb="3"><Dialog.Title mb="0">{name} · {t('scoring.details')}</Dialog.Title><DialogCloseButton /></Flex>
+          <div className="app-dialog-body">
           <Flex direction="column" gap="3">
             {summaries.length > 0 && <><Heading size="3">{t('scoring.measuredSummary')}</Heading>
               <Table.Root size="1" variant="surface"><Table.Body>{summaries.map(check => <Table.Row key={check.definition.id} data-summary-id={check.definition.id}>
@@ -96,8 +98,9 @@ function PlayerAnalysis({playerId,name,records,playerNames,status,onSetup,onRend
               <summary style={{cursor:'pointer'}}>{t('scoring.ttdSamples')}</summary>
               <EvidenceTable items={[...(check.findings ?? []), ...(check.observations ?? [])].sort((a,b) => a.startTick-b.startTick).map(sample => ({...sample,sourceIds:[]}))} tickRate={record.tickRate} playerNames={playerNames} />
             </details>)}
-            <Flex justify="end"><Dialog.Close><Button>{t('common.close')}</Button></Dialog.Close></Flex>
+
           </Flex>
+        </div>
         </Dialog.Content>}
       </Dialog.Root> : '—'}
       </Flex>

@@ -1,3 +1,5 @@
+pub mod encoding;
+
 use super::{paths::ToolPaths, process::probe_output, SetupTool};
 use serde::Serialize;
 use std::{
@@ -12,9 +14,12 @@ pub struct Fingerprint(Vec<(PathBuf, Option<(u64, SystemTime)>)>);
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ToolCheck {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub encoding: Option<encoding::Report>,
     pub ok: bool,
     pub path: Option<PathBuf>,
     pub installed_release: Option<String>,
+    pub actual_version: Option<String>,
     pub checked_at: String,
     pub exit_code: Option<i32>,
     pub timed_out: bool,
@@ -86,9 +91,12 @@ pub fn tool_report(
     };
     report["lastCheck"] = serde_json::json!({
         "ok": check.ok, "path": check.path, "installedRelease": check.installed_release,
-        "checkedAt": check.checked_at, "exitCode": check.exit_code,
+        "actualVersion": check.actual_version, "checkedAt": check.checked_at, "exitCode": check.exit_code,
         "timedOut": check.timed_out, "error": check.error,
     });
+    if let Some(encoding) = &check.encoding {
+        report["lastCheck"]["encoding"] = serde_json::to_value(encoding).unwrap_or_default();
+    }
     if !check.ok {
         for (name, output) in [("stdout", &check.stdout), ("stderr", &check.stderr)] {
             if !output.is_empty() {
@@ -114,9 +122,11 @@ pub fn tool_report(
 
 pub fn check(paths: &ToolPaths, tool: SetupTool) -> ToolCheck {
     let mut result = ToolCheck {
+        encoding: None,
         ok: false,
         path: executable(paths, tool).cloned(),
         installed_release: None,
+        actual_version: None,
         checked_at: chrono::Utc::now().to_rfc3339(),
         exit_code: None,
         timed_out: false,
@@ -130,6 +140,9 @@ pub fn check(paths: &ToolPaths, tool: SetupTool) -> ToolCheck {
         return result;
     };
     result.installed_release = super::setup::installed_release_tag(path);
+    if tool == SetupTool::Hlae {
+        result.actual_version = super::setup::file_version(path);
+    }
     if let Some((file, _)) = result
         .fingerprint
         .0
@@ -159,6 +172,13 @@ pub fn check(paths: &ToolPaths, tool: SetupTool) -> ToolCheck {
             result.exit_code = status.and_then(|s| s.code());
             result.timed_out = status.is_none();
             result.ok = status.is_some_and(|s| s.success());
+            result.actual_version = match tool {
+                SetupTool::Hlae => result.actual_version,
+                SetupTool::Ffmpeg => super::setup::ffmpeg_banner_version(&stdout)
+                    .or_else(|| super::setup::ffmpeg_banner_version(&stderr)),
+                SetupTool::Vrf => super::setup::vrf_banner_version(&stdout)
+                    .or_else(|| super::setup::vrf_banner_version(&stderr)),
+            };
             result.stdout = stdout;
             result.stderr = stderr;
             if !result.ok {
@@ -172,6 +192,154 @@ pub fn check(paths: &ToolPaths, tool: SetupTool) -> ToolCheck {
         Err(error) => result.error = Some(format!("Cannot start tool: {error}")),
     }
     result
+}
+
+/// Read versions without starting HLAE or changing the installation-check cache.
+pub fn current_version(paths: &ToolPaths, tool: SetupTool) -> serde_json::Value {
+    let result = (|| -> Result<String, String> {
+        let path = executable(paths, tool).ok_or("Tool executable not found")?;
+        if tool == SetupTool::Hlae {
+            return super::setup::file_version(path)
+                .ok_or("Executable version metadata unavailable".into());
+        }
+        let flag = if tool == SetupTool::Ffmpeg {
+            "-version"
+        } else {
+            "--version"
+        };
+        let (status, stdout, stderr) =
+            probe_output(Command::new(path).arg(flag), Duration::from_secs(10))
+                .map_err(|e| format!("Cannot read tool version: {e}"))?;
+        let Some(status) = status else {
+            return Err("Version query timed out after 10 seconds".into());
+        };
+        if !status.success() {
+            return Err(format!(
+                "Version query exited with {:?}: {stderr}",
+                status.code()
+            ));
+        }
+        let parse = if tool == SetupTool::Ffmpeg {
+            super::setup::ffmpeg_banner_version
+        } else {
+            super::setup::vrf_banner_version
+        };
+        parse(&stdout)
+            .or_else(|| parse(&stderr))
+            .ok_or("Version output not recognized".into())
+    })();
+    match result {
+        Ok(version) => {
+            serde_json::json!({"actualVersion": version, "checkedAt": crate::store::now()})
+        }
+        Err(error) => {
+            serde_json::json!({"actualVersion": null, "error": error, "checkedAt": crate::store::now()})
+        }
+    }
+}
+
+/// Sanitize only the shareable report; never mutate paths used by the application.
+pub fn redact_paths(value: &mut serde_json::Value) {
+    let mut roots = Vec::new();
+    for (path, label) in [
+        (value["paths"]["toolsDir"].as_str(), "[TOOLS]"),
+        (value["paths"]["cs2Dir"].as_str(), "[CS2]"),
+        (value["paths"]["steamDir"].as_str(), "[STEAM]"),
+        (value["dataDirectory"].as_str(), "[DATA]"),
+        (value["pendingDataDirectory"].as_str(), "[PENDING_DATA]"),
+    ] {
+        if let Some(path) = path.filter(|p| !p.is_empty()) {
+            roots.push((path.replace('\\', "/"), label));
+        }
+    }
+    for (key, label) in [
+        ("ffmpegExe", "[FFMPEG]"),
+        ("hlaeExe", "[HLAE]"),
+        ("vrfExe", "[VRF]"),
+    ] {
+        if let Some(path) = value["paths"][key].as_str() {
+            let normalized = path.replace('\\', "/");
+            // Bundled tools retain their layout under [TOOLS]; custom installations get their own root.
+            if !roots.iter().any(|(root, _)| {
+                normalized
+                    .to_lowercase()
+                    .starts_with(&(root.to_lowercase() + "/"))
+            }) {
+                if let Some((parent, _)) = normalized.rsplit_once('/') {
+                    roots.push((parent.to_owned(), label));
+                }
+            }
+        }
+    }
+    roots.sort_by_key(|(path, _)| std::cmp::Reverse(path.len()));
+    redact_value(value, &roots);
+}
+
+fn redact_value(value: &mut serde_json::Value, roots: &[(String, &str)]) {
+    match value {
+        serde_json::Value::String(text) => *text = redact_path_text(text, roots),
+        serde_json::Value::Array(values) => values.iter_mut().for_each(|v| redact_value(v, roots)),
+        serde_json::Value::Object(values) => {
+            values.values_mut().for_each(|v| redact_value(v, roots))
+        }
+        _ => {}
+    }
+}
+
+fn redact_path_text(text: &str, roots: &[(String, &str)]) -> String {
+    let mut output = String::new();
+    let mut chars = text.char_indices().peekable();
+    let mut previous = None;
+    while let Some((index, ch)) = chars.next() {
+        let rest = &text[index..];
+        if let Some((root, label)) = roots.iter().find(|(root, _)| {
+            rest.get(..root.len())
+                .is_some_and(|prefix| prefix.replace('\\', "/").eq_ignore_ascii_case(root))
+                && rest[root.len()..].chars().next().is_none_or(|c| {
+                    c == '/' || c == '\\' || c.is_whitespace() || "\"':,)]".contains(c)
+                })
+        }) {
+            output.push_str(label);
+            while chars
+                .peek()
+                .is_some_and(|(offset, _)| *offset < index + root.len())
+            {
+                chars.next();
+            }
+            previous = Some(']');
+            continue;
+        }
+        let boundary = previous.is_none_or(|c: char| c.is_whitespace() || "\"'=([{,".contains(c));
+        let drive = previous.is_none_or(|c: char| !c.is_alphanumeric())
+            && ch.is_ascii_alphabetic()
+            && (rest.as_bytes().get(1) == Some(&b':'))
+            && matches!(rest.as_bytes().get(2), Some(b'/' | b'\\'));
+        let network = rest.starts_with("\\\\");
+        let unix = boundary && ch == '/' && rest.len() > 1;
+        if drive || network || unix || rest.starts_with("file://") {
+            output.push_str("[PATH]");
+            // Unquoted paths may contain spaces: redact through the next delimiter.
+            while let Some(&(next_index, next)) = chars.peek() {
+                let closing_quote = next == '\''
+                    && previous == Some('\'')
+                    && text[next_index + 1..]
+                        .chars()
+                        .next()
+                        .is_none_or(|c| !c.is_alphanumeric());
+                if "\"\n\r<>|".contains(next)
+                    || closing_quote
+                    || (next == ':' && text[next_index + 1..].starts_with(' '))
+                {
+                    break;
+                }
+                chars.next();
+            }
+        } else {
+            output.push(ch);
+        }
+        previous = Some(ch);
+    }
+    output
 }
 
 pub fn environment() -> serde_json::Value {
@@ -208,6 +376,64 @@ pub fn environment() -> serde_json::Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn redaction_preserves_tool_layout_and_following_log_details() {
+        let mut report = serde_json::json!({
+            "dataDirectory": "D:/Private Folder/app",
+            "paths": {"toolsDir": "D:/Private Folder/app/tools", "ffmpegExe": "D:/Private Folder/app/tools/ffmpeg/bin/ffmpeg.exe", "hlaeExe": "E:/Other Private/HLAE.exe"},
+            "log": "Cannot open D:\\Private Folder\\app\\tools\\ffmpeg\\bin\\avcodec.dll: access denied; attempt 2",
+            "outside": "D:/Private Folder/app-other/private.dem"
+        });
+        redact_paths(&mut report);
+        assert_eq!(report["dataDirectory"], "[DATA]");
+        assert_eq!(
+            report["paths"]["ffmpegExe"],
+            "[TOOLS]/ffmpeg/bin/ffmpeg.exe"
+        );
+        assert_eq!(report["paths"]["hlaeExe"], "[HLAE]/HLAE.exe");
+        assert_eq!(
+            report["log"],
+            "Cannot open [TOOLS]\\ffmpeg\\bin\\avcodec.dll: access denied; attempt 2"
+        );
+        assert_eq!(report["outside"], "[PATH]");
+        assert!(!report.to_string().contains("Private"));
+    }
+
+    #[test]
+    fn missing_version_has_an_explicit_error() {
+        let report = current_version(&ToolPaths::default(), SetupTool::Ffmpeg);
+        assert!(report["actualVersion"].is_null());
+        assert_eq!(report["error"], "Tool executable not found");
+    }
+
+    #[test]
+    fn shared_report_redacts_paths_in_nested_errors_and_logs() {
+        let mut report = serde_json::json!({
+            "path": "C:\\Private Folder\\Videos\\clip.mp4",
+            "pendingDataDirectory": "D:/Private Folder/data",
+            "nested": [{"error": "Cannot open 'E:\\Private Folder\\clip.mp4': permission denied"}],
+            "log": ["input \\\\private-server\\share\\clip.mp4", "file /home/private/video.mp4", "codec libx265; attempt 2; 300000 bytes"],
+            "url": "https://example.com/releases",
+            "uri": "file:///home/private/video.mp4",
+            "apostrophe": "C:\\Private Folder\\O'Brien\\clip.mp4",
+            "version": "N-128352-gec887b13a8"
+        });
+        redact_paths(&mut report);
+        let text = report.to_string();
+        for secret in ["Private", "private", "clip.mp4", "video.mp4"] {
+            assert!(!text.contains(secret), "{text}");
+        }
+        assert_eq!(
+            report["nested"][0]["error"],
+            "Cannot open '[PATH]': permission denied"
+        );
+        assert_eq!(report["url"], "https://example.com/releases");
+        assert_eq!(report["uri"], "[PATH]");
+        assert_eq!(report["apostrophe"], "[PATH]");
+        assert_eq!(report["log"][2], "codec libx265; attempt 2; 300000 bytes");
+        assert_eq!(report["version"], "N-128352-gec887b13a8");
+    }
 
     #[test]
     fn shared_ffmpeg_dll_changes_invalidate_cached_check() {
@@ -247,9 +473,11 @@ mod tests {
             serde_json::json!({ "path": exe, "cache": "missing", "lastCheck": null })
         );
         let mut cached = ToolCheck {
+            encoding: None,
             ok: true,
             path: Some(exe.clone()),
             installed_release: Some("v1".into()),
+            actual_version: Some("1.2.3".into()),
             checked_at: "2026-09-17T00:00:00Z".into(),
             exit_code: Some(0),
             timed_out: false,
@@ -260,10 +488,18 @@ mod tests {
         };
         let valid = tool_report(&paths, SetupTool::Hlae, Some(&cached));
         assert_eq!(valid["cache"], "valid");
+        assert_eq!(valid["lastCheck"]["actualVersion"], "1.2.3");
         assert!(valid.get("cacheReason").is_none());
         assert!(valid["lastCheck"].get("stdout").is_none());
         assert!(valid["lastCheck"].get("stderr").is_none());
         assert!(valid["lastCheck"].get("fingerprint").is_none());
+
+        cached.encoding = Some(encoding::check(None));
+        let advisory = tool_report(&paths, SetupTool::Hlae, Some(&cached));
+        assert_eq!(advisory["lastCheck"]["ok"], true);
+        assert_eq!(advisory["lastCheck"]["encoding"]["results"].as_array().unwrap().len(), 6);
+        assert_eq!(advisory["lastCheck"]["encoding"]["results"][0]["status"], "skipped");
+        cached.encoding = None;
 
         cached.ok = false;
         cached.exit_code = Some(7);
@@ -321,6 +557,16 @@ mod tests {
             let result = check(&paths, tool);
             println!("{tool:?}: {}", serde_json::to_string(&result).unwrap());
             assert!(result.ok, "{tool:?} startup failed");
+            let version = current_version(&paths, tool);
+            assert_eq!(
+                version["actualVersion"].as_str(),
+                result.actual_version.as_deref()
+            );
+            assert!(version.get("error").is_none(), "{version}");
+            assert!(
+                result.actual_version.is_some(),
+                "{tool:?} actual version missing"
+            );
             tested += 1;
         }
         assert!(tested > 0, "No installed tools found");

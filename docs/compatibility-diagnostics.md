@@ -254,3 +254,54 @@ outside those eligible samples still do not inflate the numerator. Core validati
 Desktop-path cache reuse, forced-result equality and replay-preservation checks
 passed again. Preparation took 21.37 seconds; the separate 30-second analysis gate
 still failed at 45.99 seconds (43.76 seconds on the warm run).
+
+## Shareable Settings diagnostics
+
+Settings diagnostics read `currentVersion` on demand, independently of the
+installation-check cache: FFmpeg/VRF use a version-only command with a 10-second
+timeout each; HLAE uses executable metadata without launching it. Version-query
+errors are explicit. `lastCheck` still describes the previous installation check
+and may be missing or stale. Opening diagnostics does not start recording,
+download updates, or change that check cache.
+
+The latest failed render includes encoding settings, an explicit MiB size limit,
+and the last 100 retained log entries, with available-count and truncation fields.
+An empty failure section means no retained failed job, not redacted content.
+
+Before display/copy, known directory prefixes become `[TOOLS]`, `[CS2]`, `[STEAM]`,
+`[DATA]`, or a custom tool directory alias. Relative layout, filenames and following
+error text remain available, including inside logs; prefix matching handles slash
+variants and Windows ASCII case, with directory boundaries. Unknown absolute paths
+still become `[PATH]` conservatively. The pending data directory is also aliased.
+Original job records are unchanged. Relative filenames and other free text remain
+visible: review before sharing. Nothing is uploaded automatically.
+
+
+## Advisory encoding verification
+
+Settings' Check & verify action runs a fresh, independent FFmpeg smoke test and
+shows that run in a closeable dialog. Closing it removes the result panel; the
+last run remains available under tools.ffmpeg.lastCheck.encoding in shareable
+diagnostics, with its timestamp and the existing path redaction. Opening or
+copying diagnostics does not rerun encoding.
+
+The six probes are libx264, libx265, libsvtav1, h264_nvenc, hevc_nvenc and av1_nvenc.
+Each encodes four synthetic 256x256 frames plus short stereo WAV input to MP4/AAC;
+ffprobe then checks the expected codec, four video frames and nonempty AAC audio.
+Temporary files are removed afterwards. No real Demo, recording or output file
+is used. CPU encoders use a fast preset and limited threads.
+
+Five seconds is a performance target only. The encoding suite has no execution
+deadline and waits for each tool process to finish.
+
+Results distinguish passed, failed and skipped, with duration and error
+details. NVIDIA failures are not assumed to mean an absent GPU: driver support,
+unsupported codecs and occupied hardware resources can also cause failures.
+Encoding results never change ToolCheck.ok, encoder selection, export availability,
+settings or normal encoding behavior. The last result is a diagnosis of that run,
+not a permanent hardware capability flag.
+
+2026-11-04 local measurement through the Rust process runner: all six CPU/NVIDIA
+probes and ffprobe checks passed in 2,641 ms. UI regression covers failure,
+skipped probes, unchanged FFmpeg readiness, fresh popup results and copied diagnostics.
+No-NVIDIA hardware was not physically tested; failure presentation uses fixtures.

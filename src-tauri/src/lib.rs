@@ -358,6 +358,7 @@ async fn tool_diagnostics(
         if directory.changes(&selected) {
             report["pendingDataDirectory"] = serde_json::json!(selected);
         }
+        demodesk_core::render::diagnostics::redact_paths(&mut report);
         serde_json::to_string_pretty(&report).map_err(err)
     })
     .await

@@ -1,3 +1,4 @@
+import { DialogCloseButton } from './DialogCloseButton.tsx';
 import { useNotify, ConfirmDialog } from './Notifications.tsx';
 import { Spinner } from './Spinner.tsx';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
@@ -184,17 +185,15 @@ function JobCard({ job, parsed, onChanged }: { job: RenderJob; parsed: ParsedDem
       )}
 
       <Dialog.Root open={logOpen} onOpenChange={setLogOpen}>
-        <Dialog.Content maxWidth="900px">
-          <Dialog.Title>{t('renders.logTitle')}</Dialog.Title>
+        <Dialog.Content className="app-dialog" maxWidth="900px">
+          <Flex justify="between" align="start" gap="3" mb="3"><Dialog.Title mb="0">{t('renders.logTitle')}</Dialog.Title><DialogCloseButton /></Flex>
+          <div className="app-dialog-body">
           <Dialog.Description size="2" color="gray">
             {fmtDateTime(job.createdAt)} · {t(`renders.status.${job.status}`)}
           </Dialog.Description>
           <LogView lines={job.log} empty={t('renders.logEmpty')} />
-          <Flex justify="end" mt="3">
-            <Dialog.Close>
-              <Button variant="soft">{t('common.close')}</Button>
-            </Dialog.Close>
-          </Flex>
+
+        </div>
         </Dialog.Content>
       </Dialog.Root>
 

@@ -1,3 +1,4 @@
+import { DialogCloseButton } from './DialogCloseButton.tsx';
 import { useEffect, useState } from 'react';
 import { Button, Dialog, Flex, Text } from '@radix-ui/themes';
 import { useTranslation } from 'react-i18next';
@@ -24,8 +25,9 @@ export function ToolInstallDialog({ setup }: { setup: SettingsResponse['setup'] 
     return phase ? t(`toolInstall.${phase}`) : progress || t('toolInstall.prepare');
   };
   return <Dialog.Root open={active.length > 0 && !dismissed} onOpenChange={open => { if (!open) setDismissed(true); }}>
-    <Dialog.Content maxWidth="480px">
-      <Dialog.Title>{t('toolInstall.title')}</Dialog.Title>
+    <Dialog.Content className="app-dialog" maxWidth="480px">
+      <Flex justify="between" align="start" gap="3" mb="3"><Dialog.Title mb="0">{t('toolInstall.title')}</Dialog.Title><DialogCloseButton /></Flex>
+          <div className="app-dialog-body">
       <Dialog.Description>{t('toolInstall.hint')}</Dialog.Description>
       <Flex direction="column" gap="3" my="4">
         {active.map(tool => <Flex key={tool} align="center" gap="3">
@@ -37,7 +39,8 @@ export function ToolInstallDialog({ setup }: { setup: SettingsResponse['setup'] 
           <Button variant="soft" onClick={() => void api.cancelSetup(tool).catch(error => notify(errorText(error)))}>{t('common.cancel')}</Button>
         </Flex>)}
       </Flex>
-      <Flex justify="end"><Dialog.Close><Button variant="outline">{t('common.close')}</Button></Dialog.Close></Flex>
-    </Dialog.Content>
+
+    </div>
+        </Dialog.Content>
   </Dialog.Root>;
 }
