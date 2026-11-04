@@ -115,6 +115,31 @@ fn segments(windows: &[[f64; 2]], frames: u64, fps: u32) -> Vec<(u64, u64, f64)>
     result
 }
 
+fn retry_bitrate(
+    bitrate: u32,
+    bytes: u64,
+    limit: u64,
+    audio_bytes: f64,
+    previous: Option<(u32, u64)>,
+) -> u32 {
+    let ratio = (((limit as f64 - audio_bytes) / (bytes as f64 - audio_bytes).max(1.0)) * 0.97)
+        .clamp(0.0, 0.95);
+    let mut next = (bitrate as f64 * ratio).floor() as u32;
+    // Short segments have fixed overhead; use measured slope when proportional retries converge slowly.
+    if let Some((old_rate, old_bytes)) = previous {
+        if old_rate > bitrate && old_bytes > bytes {
+            let slope = (old_bytes - bytes) as f64 / f64::from(old_rate - bitrate);
+            let fitted = (f64::from(bitrate) - (bytes as f64 - limit as f64 * 0.97) / slope)
+                .max(f64::from(bitrate) * 0.5);
+            next = next.min(fitted.floor() as u32);
+        } else if old_rate > bitrate {
+            // Short x265 segments can grow despite a lower target; escape that plateau.
+            next = next.min(bitrate / 2);
+        }
+    }
+    next
+}
+
 pub(super) fn encode(
     ffmpeg: &Path,
     input: &Path,
@@ -143,7 +168,7 @@ pub(super) fn encode(
     let seconds = info.frames as f64 / info.fps as f64;
     let (_, has_audio) = probe_media(ffmpeg, input, control)?;
     let audio = if has_audio { options.audio_kbps } else { 0 };
-    let limit = (options.max_size_mb * 1_000_000.0).floor() as u64;
+    let limit = (options.max_size_mb * 1_048_576.0).floor() as u64;
     let codec = options.codec;
     let mut reported = 0.0_f64;
     retry_stalled(control, |control| {
@@ -162,9 +187,10 @@ pub(super) fn encode(
             .tempfile_in(parent)?
             .into_temp_path();
         let mut previous = None;
-        for attempt in 0..4 {
+        let attempts = if codec == "libx265" { 6 } else { 4 };
+        for attempt in 0..attempts {
             control.check_cancelled()?;
-            (control.log)(format!("combat quality priority: {} segments, 2:1 allocation, attempt {}/4 at {bitrate} kbps",parts.len(),attempt+1));
+            (control.log)(format!("combat quality priority: {} segments, 2:1 allocation, attempt {}/{attempts} at {bitrate} kbps",parts.len(),attempt+1));
             let reuse_analysis = codec == "libsvtav1" && attempt > 0;
             if reuse_analysis {
                 (control.log)("combat quality priority: reusing AV1 first-pass analysis".into());
@@ -288,9 +314,9 @@ pub(super) fn encode(
                             ]);
                         } else {
                             args.extend([
-                                s("-pass"),
+                                s("-pass:v"),
                                 pass.to_string(),
-                                s("-passlogfile"),
+                                s("-passlogfile:v"),
                                 stats.clone(),
                             ]);
                         }
@@ -391,20 +417,7 @@ pub(super) fn encode(
                 }));
             }
             let audio_bytes = audio as f64 * 1000.0 * seconds / 8.0;
-            let ratio = (((limit as f64 - audio_bytes) / (bytes as f64 - audio_bytes).max(1.0))
-                * 0.97)
-                .clamp(0.0, 0.95);
-            let mut next = (bitrate as f64 * ratio).floor() as u32;
-            // Short segments have fixed overhead; use measured slope when proportional retries converge slowly.
-            if let Some((old_rate, old_bytes)) = previous {
-                if old_rate > bitrate && old_bytes > bytes {
-                    let slope = (old_bytes - bytes) as f64 / f64::from(old_rate - bitrate);
-                    let fitted = (f64::from(bitrate)
-                        - (bytes as f64 - limit as f64 * 0.97) / slope)
-                        .max(f64::from(bitrate) * 0.5);
-                    next = next.min(fitted.floor() as u32);
-                }
-            }
+            let next = retry_bitrate(bitrate, bytes, limit, audio_bytes, previous);
             previous = Some((bitrate, bytes));
             bitrate = next;
             if bitrate == 0 {
@@ -421,6 +434,28 @@ pub(super) fn encode(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn retry_bitrate_escapes_nonmonotonic_x265_output() {
+        // Measured silent short-segment output at a fixed 300,000-byte cap.
+        let samples = [
+            (784, 556_088),
+            (410, 360_246),
+            (277, 308_707),
+            (231, 310_051),
+        ];
+        let mut previous = None;
+        let mut next = 0;
+        for (rate, bytes) in samples {
+            next = retry_bitrate(rate, bytes, 300_000, 0.0, previous);
+            assert!(next > 0 && next < rate);
+            previous = Some((rate, bytes));
+        }
+        assert!(
+            next <= 115,
+            "stalled output needs a larger reduction: {next}"
+        );
+    }
+
     #[test]
     #[ignore = "requires FFMPEG; set TEST_NVENC=1 for GPU checks"]
     fn real_combat_encoding_preserves_timing_audio_and_cancelled_destination() {
@@ -456,6 +491,11 @@ mod tests {
             if codec.contains("nvenc") && std::env::var_os("TEST_NVENC").is_none() {
                 continue;
             }
+            let max_size_mb = if codec == "libx265" {
+                300_000.0 / 1_048_576.0
+            } else {
+                0.3
+            };
             for audio in [true, false] {
                 let source = if audio {
                     input.clone()
@@ -485,7 +525,7 @@ mod tests {
                     &output,
                     SizeOptions {
                         combat_windows: &windows,
-                        max_size_mb: 0.3,
+                        max_size_mb,
                         codec,
                         audio_kbps: 96,
                     },
@@ -513,7 +553,7 @@ mod tests {
                         0
                     }
                 );
-                assert!(result.bytes <= 300_000);
+                assert!(result.bytes <= (max_size_mb * 1_048_576.0) as u64);
                 assert_eq!(updates.last(), Some(&1.0));
                 assert!(updates.windows(2).all(|w| w[1] >= w[0]));
                 let out = Command::new(ffprobe_exe(&ffmpeg))

@@ -413,7 +413,7 @@
     "waitingPrevious": "Ожидание предыдущей задачи...",
     "starting": "Запуск...",
     "summary": "Клипов: {{n}}",
-    "sizeLimit": "≤ {{mb}} МБ",
+    "sizeLimit": "≤ {{mb}} MiB",
     "noSizeLimit": "Без ограничения размера",
     "openFolder": "Открыть папку",
     "viewLog": "Журнал",

@@ -38,7 +38,7 @@ Statistics are for reference, not a cheating verdict. They cannot identify delib
 - Customize video resolution and frame rate (FPS)
 - Choose AV1 (default), H.264 or H.265, with CPU or NVIDIA GPU encoding
 - Choose which on-screen elements to show and optionally merge clips into one video
-- Set a file size limit (10 / 20 / 50 / 100 MB) for easy sharing
+- Set a file size limit (10 / 20 / 50 / 100 MiB) for easy sharing
 
 ![Highlight scoring details](docs/images/en/04-highlights.png)
 

@@ -22,7 +22,7 @@ GPU/driver that can actually encode AV1, verified before starting the game.
 
 - AV1 CPU capture: CRF 20, preset 8, 10-bit, `tune=0:enable-tf=1:lp=6`, two-second
   GOP. Size fitting: preset 3, same pixel format and SVT parameters, two file
-  passes with FFmpeg `-pass`/`-passlogfile`. This retains the user-preferred tile 2
+  passes with FFmpeg `-pass:v`/`-passlogfile:v`. This retains the user-preferred tile 2
   configuration. Unlike x264/x265, no peak/buffer flags are added to SVT VBR.
   After an oversize result, only SVT reuses that job's completed first-pass
   analysis and reruns pass two at the adjusted bitrate. This applies both with
@@ -43,6 +43,69 @@ The tuning baseline comes from the user's own completed comparisons, not inferre
 codecs on Allstar/Medal/Discord/YouTube. Parameter references:
 [FFmpeg SVT-AV1 wrapper](https://ffmpeg.org/ffmpeg-codecs.html#libsvtav1),
 [SVT-AV1 parameters](https://gitlab.com/AOMediaCodec/SVT-AV1/-/blob/master/Docs/Parameters.md).
+
+### FFmpeg two-pass compatibility
+
+CPU size fitting scopes `-pass:v` and `-passlogfile:v` to video. Newer FFmpeg
+also applies unqualified two-pass options to audio; pass one has no audio, so
+pass two would otherwise fail trying to read an AAC statistics file. The same
+video-scoped options work with older builds. x265 retains its encoder-specific
+`-x265-params` settings.
+
+Before releasing a new FFmpeg build, run this test with `FFMPEG` pointing to
+both the current published executable and the candidate executable:
+
+```powershell
+cargo test -p demodesk-core --lib real_cpu_two_pass_preserves_audio -- --ignored --nocapture
+```
+
+Publish the compatible App before publishing the new FFmpeg package.
+
+Validated on 2026-11-04 with published `N-128212-g17a4a474f4` and candidate
+`N-128352-gec887b13a8` from FFmpeg CI run 41712330410. The unmodified App failed
+with the candidate's missing AAC pass log; the fix passed all three CPU codecs
+in both normal and combat size fitting on both builds, including audio, frame
+count, duration, size limits and full decoding. Core tests: 327 passed, 10 ignored.
+GPU and in-game capture were not rerun.
+
+### Capacity units and short x265 segments
+
+Capacity limits and file/download displays now use MiB (1,048,576 bytes).
+Saved `maxSizeMb` choices keep their numeric value and wire name: a saved 20
+now means 20 MiB. FFmpeg kbit/s remains decimal. Historical measurements below
+retain their original decimal MB budgets; they are not relabeled as MiB.
+
+Short x265 segments can produce a larger file even after reducing the target
+bitrate. The old four-attempt loop could stop at 310,051 bytes for a 300,000-byte
+limit. Combat fitting now halves the next target when a reduction fails to
+shrink the output, and x265 has at most six attempts. Existing codec presets,
+2:1 combat allocation, source/destination protection and final size validation
+remain in force; impossible budgets still fail without publishing an oversized
+file. Other codecs retain four attempts.
+
+The measured non-monotonic sequence is covered by
+`retry_bitrate_escapes_nonmonotonic_x265_output`. The broad real combat test keeps
+x265's original 300,000-byte limit (converted to MiB), so the unit change cannot
+hide the regression. Run it and the AV1 cancellation test with both builds:
+
+```powershell
+cargo test -p demodesk-core --lib real_combat_encoding_preserves_timing_audio_and_cancelled_destination -- --ignored --nocapture
+cargo test -p demodesk-core --lib real_av1_analysis_reuse_cancellation_preserves_files -- --ignored --nocapture
+```
+
+Run these sequentially with the core suite: its native PID lookup test assumes
+only one instance of the test executable is running.
+
+Validation after the MiB/retry change (2026-11-04): both FFmpeg builds above
+passed all three real tests. At the unchanged 300,000-byte x265 budget, the old
+build produced 287,398 bytes with audio and 280,425 without; the new build
+produced 286,644 and 281,433 bytes. The recorded stalled-output regression fails
+before the backoff fix and passes after it. Core suite: 328 passed, 10 ignored.
+Frontend production build, MiB formatting/six-language checks, responsive export
+options and the complete UI suite passed. The UI suite needed a retry after an
+early unrelated status-transition timeout. Clippy completed with the same 25
+existing test warnings. GPU and in-game recording were not rerun; no package was
+published.
 
 ### AV1 integration measurements (2026-10-25)
 
@@ -337,7 +400,7 @@ Results and per-pass times: `av1-speed-results.json`; merged diagnostics:
 - CQP has no size guarantee. Limited NVIDIA exports use VBR with P7/HQ, full-resolution multipass, 32-frame lookahead, temporal AQ instead of spatial AQ, four B-frames and B-frame references. HEVC allows peak bitrate twice the target average; H.264 keeps peak equal to average. The buffer is twice the target bitrate. Compatibility mode retains its P4 preset and peak equal to average.
 - CPU fitting uses two file passes with peak and buffer twice the target bitrate: HEVC uses slow; H.264 uses veryslow with at most four reference frames. The reference limit keeps this 1080p60 H.264 sample at High Level 4.2 rather than raising it to Level 5.1; higher resolutions/frame rates still select their required level automatically. No tune or AQ override is applied. Actual bytes are verified before publishing.
 - Audio defaults to AAC stereo, 192 kbit/s, 48 kHz, including size fitting.
-- Limits use decimal MB (20 MB = 20,000,000 bytes). Reserve 2% initially for muxing and rate-control error, then subtract audio. Silent inputs reserve no audio.
+- Limits use binary MiB (20 MiB = 20,971,520 bytes); FFmpeg kbit/s remains decimal. Reserve 2% initially for muxing and rate-control error, then subtract audio. Silent inputs reserve no audio.
 - Check actual output bytes. Retry from the same source at a lower bitrate at most three times. Publish only an output within the limit; on failure preserve the source and any existing destination.
 
 The NVIDIA capture settings follow the [OBS recording baseline](https://obsproject.com/kb/advanced-recording-settings-guide), mapped to FFmpeg. Offline compression uses a separate quality preset: spatial AQ trades detailed textures for smooth regions, whereas temporal AQ helps preserve detailed reference frames. The export dialog offers 30 and 60 FPS; existing jobs with other frame rates remain readable.

@@ -326,13 +326,13 @@ pub fn concat_clips(
     r
 }
 
-/// Bitrate in kbit/s that fits `max_size_mb` for `seconds` of video, leaving room for audio and container overhead.
+/// Bitrate in kbit/s that fits `max_size_mb` MiB for `seconds` of video, leaving room for audio and container overhead.
 pub fn video_bitrate_for_size(max_size_mb: f64, seconds: f64, audio_kbps: u32) -> u32 {
     if !max_size_mb.is_finite() || max_size_mb <= 0.0 || !seconds.is_finite() || seconds <= 0.0 {
         return 0;
     }
-    // MB and FFmpeg kbit/s are decimal. Reserve 2% for muxing and rate-control error.
-    ((max_size_mb * 1_000_000.0 * 8.0 * 0.98 / seconds / 1000.0 - audio_kbps as f64)
+    // MiB is binary; FFmpeg kbit/s is decimal. Reserve 2% for muxing and rate-control error.
+    ((max_size_mb * 1_048_576.0 * 8.0 * 0.98 / seconds / 1000.0 - audio_kbps as f64)
         .floor()
         .max(0.0)) as u32
 }
@@ -587,12 +587,12 @@ pub fn encode_to_size_with_progress(
                 .context(ErrorCode::InvalidExportOptions));
         }
         (control.log)(format!(
-            "size fitting: {} ({codec}, limit {max_size_mb} MB)",
+            "size fitting: {} ({codec}, limit {max_size_mb} MiB)",
             input.file_name().unwrap_or_default().to_string_lossy()
         ));
         let (seconds, has_audio) = probe_media(ffmpeg_exe, input, control)?;
         let audio_kbps = if has_audio { audio_kbps } else { 0 };
-        let limit = (max_size_mb * 1_000_000.0).floor() as u64;
+        let limit = (max_size_mb * 1_048_576.0).floor() as u64;
         let mut bitrate = video_bitrate_for_size(max_size_mb, seconds, audio_kbps);
         if bitrate == 0 {
             return Err(
@@ -742,9 +742,9 @@ pub fn encode_to_size_with_progress(
                         ]
                     } else {
                         vec![
-                            s("-pass"),
+                            s("-pass:v"),
                             n.to_string(),
-                            s("-passlogfile"),
+                            s("-passlogfile:v"),
                             passlog.clone(),
                         ]
                     }
@@ -806,12 +806,12 @@ pub fn encode_to_size_with_progress(
                 break;
             }
         }
-        Err(anyhow!("could not meet {max_size_mb} MB without changing resolution, FPS or encoder; source video was retained").context(ErrorCode::SizeLimitUnreachable))
+        Err(anyhow!("could not meet {max_size_mb} MiB without changing resolution, FPS or encoder; source video was retained").context(ErrorCode::SizeLimitUnreachable))
     })
 }
 
-pub fn bytes_to_mb(bytes: u64) -> f64 {
-    (bytes as f64 / 1_000_000.0 * 100.0).round() / 100.0
+pub fn bytes_to_mib(bytes: u64) -> f64 {
+    (bytes as f64 / 1_048_576.0 * 100.0).round() / 100.0
 }
 
 #[cfg(test)]
@@ -1073,9 +1073,11 @@ mod tests {
     }
 
     #[test]
-    fn size_budget_accounts_for_decimal_units_audio_and_invalid_inputs() {
-        assert_eq!(video_bitrate_for_size(20.0, 60.0, 192), 2421);
-        assert_eq!(video_bitrate_for_size(20.0, 60.0, 0), 2613);
+    fn size_budget_accounts_for_binary_capacity_decimal_bitrate_and_invalid_inputs() {
+        assert_eq!(bytes_to_mib(20 * 1_048_576), 20.0);
+        assert_eq!(bytes_to_mib(20_000_000), 19.07);
+        assert_eq!(video_bitrate_for_size(20.0, 60.0, 192), 2548);
+        assert_eq!(video_bitrate_for_size(20.0, 60.0, 0), 2740);
         assert_eq!(video_bitrate_for_size(0.1, 60.0, 192), 0);
         for seconds in [0.0, -1.0, f64::NAN, f64::INFINITY] {
             assert_eq!(video_bitrate_for_size(20.0, seconds, 192), 0);
@@ -1168,6 +1170,117 @@ mod tests {
             assert_eq!(std::fs::read(&output).unwrap(), b"existing destination");
             assert_eq!(std::fs::read(&input).unwrap(), original);
             assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 2);
+        }
+    }
+
+    #[test]
+    #[ignore = "requires FFMPEG; run with both old and new DemoDesk builds"]
+    fn real_cpu_two_pass_preserves_audio() {
+        let ffmpeg = PathBuf::from(std::env::var("FFMPEG").expect("FFMPEG"));
+        let dir = tempfile::tempdir().unwrap();
+        let input = dir.path().join("source.mp4");
+        run(
+            &ffmpeg,
+            &[
+                s("-y"),
+                s("-f"),
+                s("lavfi"),
+                s("-i"),
+                s("testsrc2=size=320x180:rate=30:duration=3"),
+                s("-f"),
+                s("lavfi"),
+                s("-i"),
+                s("sine=sample_rate=48000:duration=3"),
+                s("-c:v"),
+                s("libx264"),
+                s("-crf"),
+                s("0"),
+                s("-c:a"),
+                s("aac"),
+                s("-ac"),
+                s("2"),
+                input.to_string_lossy().into_owned(),
+            ],
+        )
+        .unwrap();
+        for codec in ["libx264", "libx265", "libsvtav1"] {
+            for combat in [false, true] {
+                let output = dir.path().join(format!("{codec}-{combat}.mp4"));
+                let limit = if combat { 0.5 } else { 0.2 };
+                let result = encode_to_size_with_progress(
+                    &ffmpeg,
+                    &input,
+                    &output,
+                    SizeOptions {
+                        combat_windows: if combat { &[[1.0, 2.0]] } else { &[] },
+                        max_size_mb: limit,
+                        codec,
+                        audio_kbps: 96,
+                    },
+                    &mut false,
+                    &mut |_| {},
+                    &mut Control::new(&AtomicBool::new(false), &mut |_| {}),
+                )
+                .unwrap_or_else(|error| panic!("{codec}, combat={combat}: {error:#}"));
+                assert!(result.bytes > 0 && result.bytes <= (limit * 1_048_576.0) as u64);
+                let out = Command::new(ffprobe_exe(&ffmpeg))
+                    .args([
+                        "-v",
+                        "error",
+                        "-show_streams",
+                        "-show_format",
+                        "-of",
+                        "json",
+                    ])
+                    .arg(&output)
+                    .output()
+                    .unwrap();
+                assert!(out.status.success());
+                let info: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+                let streams = info["streams"].as_array().unwrap();
+                assert_eq!(streams.len(), 2);
+                let video = streams.iter().find(|s| s["codec_type"] == "video").unwrap();
+                assert_eq!(
+                    video["codec_name"],
+                    match codec {
+                        "libx264" => "h264",
+                        "libx265" => "hevc",
+                        _ => "av1",
+                    }
+                );
+                assert_eq!(video["width"], 320);
+                assert_eq!(video["height"], 180);
+                assert_eq!(video["avg_frame_rate"], "30/1");
+                assert_eq!(video["nb_frames"], "90");
+                let audio = streams.iter().find(|s| s["codec_type"] == "audio").unwrap();
+                assert_eq!(audio["codec_name"], "aac");
+                assert_eq!(audio["sample_rate"], "48000");
+                assert_eq!(audio["channels"], 2);
+                let duration: f64 = info["format"]["duration"]
+                    .as_str()
+                    .unwrap()
+                    .parse()
+                    .unwrap();
+                assert!((duration - 3.0).abs() < 0.1);
+                run(
+                    &ffmpeg,
+                    &[
+                        s("-v"),
+                        s("error"),
+                        s("-xerror"),
+                        s("-i"),
+                        output.to_string_lossy().into_owned(),
+                        s("-f"),
+                        s("null"),
+                        s(if cfg!(windows) { "NUL" } else { "/dev/null" }),
+                    ],
+                )
+                .unwrap();
+                println!(
+                    "{codec}, combat={combat}: {} bytes; video, AAC, duration and decode passed",
+                    result.bytes
+                );
+            }
         }
     }
 
@@ -1338,7 +1451,7 @@ mod tests {
                 updates.windows(2).all(|w| w[0] <= w[1]),
                 "progress must not reset between passes or retries: {updates:?}"
             );
-            assert!(result.bytes > 0 && result.bytes <= 500_000);
+            assert!(result.bytes > 0 && result.bytes <= 524_288);
             let mut probe = Command::new(ffprobe_exe(&ffmpeg));
             probe
                 .args([
@@ -1405,7 +1518,7 @@ mod tests {
                     &mut Control::new(&AtomicBool::new(false), &mut |_| {}),
                 )
                 .unwrap();
-                assert!(result.bytes > 0 && result.bytes <= 500_000);
+                assert!(result.bytes > 0 && result.bytes <= 524_288);
                 assert!((probe_duration_seconds(&ffmpeg, &fitted).unwrap() - 4.0).abs() < 0.1);
             }
             println!(
@@ -1496,7 +1609,7 @@ mod tests {
             encode_to_size(&ffmpeg, &silent, &output, 0.5, "libx264", 192)
                 .unwrap()
                 .bytes
-                <= 500_000
+                <= 524_288
         );
         assert!(
             !probe_media(

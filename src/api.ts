@@ -244,6 +244,7 @@ export interface RenderOptions {
   keyMomentsOnly: boolean;
   shortCombatClips: boolean;
   roundResultLabel: string;
+  /** MiB; retain the wire name for saved export options. */
   maxSizeMb: number | null;
   combatQualityPriority: boolean;
   audioKbps: number;
@@ -504,7 +505,7 @@ export const api = {
   fileSrc: (path: string) => convertFileSrc(path),
 };
 
-export const mb = (bytes: number): string => `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+export const mb = (bytes: number): string => `${(bytes / 1024 / 1024).toFixed(1)} MiB`;
 /** m:ss from a number of seconds (rounded down). */
 export const mmss = (seconds: number): string => {
   const s = Math.max(0, Math.floor(seconds));

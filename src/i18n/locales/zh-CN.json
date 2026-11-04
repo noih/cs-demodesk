@@ -401,7 +401,7 @@
     "waitingPrevious": "等待上一个任务完成…",
     "starting": "准备中…",
     "summary": "{{n}} 段",
-    "sizeLimit": "≤ {{mb}} MB",
+    "sizeLimit": "≤ {{mb}} MiB",
     "noSizeLimit": "大小不限",
     "openFolder": "打开目录",
     "viewLog": "日志",

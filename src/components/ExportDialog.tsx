@@ -52,10 +52,10 @@ export function ExportDialog({open,onOpenChange,count,seconds,status,onSetup,onS
                   {count > 1 && !forceMerge && (opts.merge ? t('highlights.sizeMerged') : t('highlights.sizeEach'))}
                 </Text>
                 <SegmentedControl.Root className="export-size-options" size="1" value={String(opts.maxSizeMb)} onValueChange={(v) => setOpts({ ...opts, maxSizeMb: v === 'null' ? null : Number(v) })} style={{ width: '100%', minWidth: 0, gridAutoColumns: 'auto', whiteSpace: 'nowrap' }}>
-                  <SegmentedControl.Item value="10">10 MB</SegmentedControl.Item>
-                  <SegmentedControl.Item value="20">20 MB</SegmentedControl.Item>
-                  <SegmentedControl.Item value="50">50 MB</SegmentedControl.Item>
-                  <SegmentedControl.Item value="100">100 MB</SegmentedControl.Item>
+                  <SegmentedControl.Item value="10">10 MiB</SegmentedControl.Item>
+                  <SegmentedControl.Item value="20">20 MiB</SegmentedControl.Item>
+                  <SegmentedControl.Item value="50">50 MiB</SegmentedControl.Item>
+                  <SegmentedControl.Item value="100">100 MiB</SegmentedControl.Item>
                   <SegmentedControl.Item value="null">{t('highlights.unlimited')}</SegmentedControl.Item>
                 </SegmentedControl.Root>
                 {highlights && <Box mt="2">

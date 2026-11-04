@@ -405,7 +405,7 @@
     "waitingPrevious": "Waiting for the previous job...",
     "starting": "Starting...",
     "summary": "{{n}} clips",
-    "sizeLimit": "≤ {{mb}} MB",
+    "sizeLimit": "≤ {{mb}} MiB",
     "noSizeLimit": "No size limit",
     "openFolder": "Open folder",
     "viewLog": "Log",

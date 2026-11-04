@@ -401,7 +401,7 @@
     "waitingPrevious": "이전 작업을 기다리는 중...",
     "starting": "시작 중...",
     "summary": "클립 {{n}}개",
-    "sizeLimit": "≤ {{mb}} MB",
+    "sizeLimit": "≤ {{mb}} MiB",
     "noSizeLimit": "크기 제한 없음",
     "openFolder": "폴더 열기",
     "viewLog": "로그",

@@ -88,12 +88,12 @@ fn copy_download(
     let mut last_report = None;
     let report = |done: u64| match total {
         Some(t) => format!(
-            "  {:.2} / {:.2} MB ({}%)",
+            "  {:.2} / {:.2} MiB ({}%)",
             done as f64 / 1_048_576.0,
             t as f64 / 1_048_576.0,
             done.saturating_mul(100) / t.max(1)
         ),
-        None => format!("  {:.2} MB downloaded", done as f64 / 1_048_576.0),
+        None => format!("  {:.2} MiB downloaded", done as f64 / 1_048_576.0),
     };
     loop {
         log.check()?;

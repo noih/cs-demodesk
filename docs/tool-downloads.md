@@ -14,7 +14,7 @@ matches and report available asset names instead of guessing an architecture or
 variant. A download returning 404 or 410 refreshes metadata once. Other failures
 are reported and can be retried with Download tools.
 
-Downloads report received MB separately from the log on the first chunk and about
+Downloads report received MiB separately from the log on the first chunk and about
 once per second while data arrives, including when Content-Length is unavailable.
 Each tool can download independently; only duplicate downloads of the same tool
 are blocked. Each description row shows its own progress beside download, and

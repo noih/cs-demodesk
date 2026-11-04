@@ -48,7 +48,7 @@ use crate::model::{DemoInfo, Highlight};
 use crate::{error::ExportError, ErrorCode};
 use actions::{build_schedule, steamid_to_account_id, ActionsOptions, Camera, RenderClip};
 use anyhow::{anyhow, Result};
-use encode::{bytes_to_mb, concat_clips, encode_to_size_with_progress, mux_clip, Control};
+use encode::{bytes_to_mib, concat_clips, encode_to_size_with_progress, mux_clip, Control};
 use leftovers::{has_leftovers, remove_leftovers};
 use paths::{resolve_tool_paths, to_forward_slashes, PathOverrides, ToolPaths, IS_WINDOWS};
 use record::{collect_clip_outputs, run_recording_session, RecordSession};
@@ -208,7 +208,8 @@ pub struct RenderOptions {
     pub key_moments_only: bool,
     pub short_combat_clips: bool,
     pub round_result_label: String,
-    /// Re-encode so each output file — the merged video, or every clip — is at most this many MB
+    /// Re-encode so each output file — the merged video, or every clip — is at most this many MiB
+    // Keep the serialized field name so saved export choices survive the unit change.
     pub max_size_mb: Option<f64>,
     pub combat_quality_priority: bool,
     pub audio_kbps: u32,
@@ -735,7 +736,7 @@ pub fn render_highlights(input: RenderJobInput) -> Result<RenderResult> {
             report(1.0);
             return Ok(file);
         };
-        if std::fs::metadata(&file)?.len() <= (mb * 1_000_000.0) as u64 {
+        if std::fs::metadata(&file)?.len() <= (mb * 1_048_576.0) as u64 {
             report(1.0);
             return Ok(file);
         }
@@ -759,11 +760,11 @@ pub fn render_highlights(input: RenderJobInput) -> Result<RenderResult> {
             &mut Control::new(&cancel, log),
         )?;
         log(format!(
-            "{} → {} ({} kbps, {} MB)",
+            "{} → {} ({} kbps, {} MiB)",
             file.file_name().unwrap().to_string_lossy(),
             small.file_name().unwrap().to_string_lossy(),
             r.bitrate_kbps,
-            bytes_to_mb(r.bytes)
+            bytes_to_mib(r.bytes)
         ));
         let _ = std::fs::remove_file(&file);
         Ok(small)

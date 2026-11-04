@@ -23,7 +23,7 @@ fn main() {
     let t = Instant::now();
     let replay = build_replay(&parser, &demo.info, &demo.rounds, &bytes).expect("replay");
     let json = serde_json::to_vec(&replay).unwrap();
-    println!("replay: {:.1}s, ticks {}..{}, {} frames, {} grenade rows, {} events, {} weapons, {:.1} MB json", t.elapsed().as_secs_f64(), replay.first_tick, replay.last_tick, replay.frames.len(), replay.frames.iter().map(|f| f.g.len()).sum::<usize>(), replay.events.len(), replay.weapons.len(), json.len() as f64 / 1_048_576.0);
+    println!("replay: {:.1}s, ticks {}..{}, {} frames, {} grenade rows, {} events, {} weapons, {:.1} MiB json", t.elapsed().as_secs_f64(), replay.first_tick, replay.last_tick, replay.frames.len(), replay.frames.iter().map(|f| f.g.len()).sum::<usize>(), replay.events.len(), replay.weapons.len(), json.len() as f64 / 1_048_576.0);
     let mut kinds = std::collections::BTreeMap::new();
     for e in &replay.events {
         *kinds.entry(e.k.clone()).or_insert(0) += 1;

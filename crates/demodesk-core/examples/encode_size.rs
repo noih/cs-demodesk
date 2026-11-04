@@ -1,4 +1,4 @@
-//! `cargo run --example encode_size -- <in.mp4> <out.mp4> <max_mb> <codec> [combat-windows.json]`.
+//! `cargo run --example encode_size -- <in.mp4> <out.mp4> <max_mib> <codec> [combat-windows.json]`.
 use demodesk_core::render::encode::{encode_to_size_with_progress, Control, SizeOptions};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
