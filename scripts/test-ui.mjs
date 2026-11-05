@@ -1,3 +1,4 @@
+import { checkEditingEffects } from './check-editing-effects.mjs';
 import { mb } from '../src/api.ts';
 import { ERROR_CODES } from '../src/errorCodes.ts';
 import { checkReplayDrawing } from './check-replay-drawing.mjs';
@@ -1259,6 +1260,7 @@ try {
   await page.getByRole('button',{name:/^Export/}).click();
   const exportDialog = page.getByRole('dialog').filter({has:page.getByRole('button',{name:'Export',exact:true})});
   await exportDialog.waitFor();
+  await checkEditingEffects(page, exportDialog);
   await exportDialog.getByText('HUD scale 0.85',{exact:true}).waitFor();
   const hudSlider = exportDialog.getByRole('slider',{name:/^HUD scale/});
   assert.equal(await hudSlider.getAttribute('aria-valuenow'), '0.85');

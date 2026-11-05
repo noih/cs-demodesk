@@ -5,12 +5,14 @@
 pub mod actions;
 #[cfg(windows)]
 mod audio;
+mod camera_search;
 pub(crate) mod combat;
 pub mod diagnostics;
 pub mod encode;
 mod leftovers;
 pub mod paths;
 pub(crate) mod process;
+mod team_push;
 
 /// Check a data root through the same process launcher used by rendering tools.
 pub fn verify_data_directory(
@@ -39,9 +41,13 @@ pub fn verify_data_directory(
         std::thread::sleep(std::time::Duration::from_millis(25));
     }
 }
+mod opening;
+mod perspectives;
 mod record;
+mod seek;
 pub mod setup;
 mod startup;
+mod utility;
 mod window;
 
 use crate::model::{DemoInfo, Highlight};
@@ -207,6 +213,10 @@ pub struct RenderOptions {
     pub merge: bool,
     pub key_moments_only: bool,
     pub short_combat_clips: bool,
+    pub utility_teamwork: bool,
+    pub opening_camera: bool,
+    pub combat_perspectives: bool,
+    pub team_push: bool,
     pub round_result_label: String,
     /// Re-encode so each output file — the merged video, or every clip — is at most this many MiB
     // Keep the serialized field name so saved export choices survive the unit change.
@@ -246,6 +256,10 @@ impl Default for RenderOptions {
             merge: false,
             key_moments_only: true,
             short_combat_clips: false,
+            utility_teamwork: false,
+            opening_camera: false,
+            combat_perspectives: false,
+            team_push: false,
             round_result_label: "Round result".into(),
             max_size_mb: Some(20.0),
             combat_quality_priority: true,
@@ -412,8 +426,8 @@ fn recording_passes(clips: &[RenderClip], tick_rate: f64) -> Vec<Vec<usize>> {
         let start = i64::from(clips[i].highlight.start_tick);
         if let Some(pass) = passes.iter_mut().find(|pass| {
             let end = i64::from(clips[*pass.last().unwrap()].highlight.end_tick);
-            let rate = tick_rate.round() as i64;
-            start - end >= rate * i64::from(actions::AUDIO_PREROLL_SECONDS) + rate / 2 + 2
+            let rate = tick_rate.round() as i32;
+            start - end >= seek::minimum_gap(rate)
         }) {
             pass.push(i);
         } else {
@@ -580,8 +594,96 @@ pub fn render_highlights(input: RenderJobInput) -> Result<RenderResult> {
         o.key_moments_only,
         o.short_combat_clips,
     );
-    let recording = merge_nearby_clips(recording, demo.tick_rate);
+    let mut recording = merge_nearby_clips(recording, demo.tick_rate);
     highlights.retain(|h| recording.iter().any(|clip| clip.id == h.id));
+    let editing_events =
+        if (o.utility_teamwork || o.opening_camera || o.combat_perspectives || o.team_push)
+            && !preserve_merge_order
+        {
+            utility::load(&demo_path, &cancel)?
+        } else {
+            vec![]
+        };
+    let team_plans = if o.team_push && !preserve_merge_order {
+        stage("preparing team push");
+        let mut expanded = recording.clone();
+        let root = tools.tools_dir.parent().unwrap_or(&output_dir);
+        let result = team_push::prepare(
+            &mut expanded,
+            demo,
+            &demo_path,
+            &editing_events,
+            team_push::MapTools {
+                game: &cs2_dir,
+                vrf: tools.vrf_exe.as_deref(),
+                root,
+            },
+            &cancel,
+            log,
+        );
+        Control::new(&cancel, log).check_cancelled()?;
+        match result {
+            Ok(plans) => {
+                recording = expanded;
+                log(format!("team push: {} sequences", plans.len()));
+                plans
+            }
+            Err(error) => {
+                log(format!(
+                    "team push unavailable; keeping original POV: {error:#}"
+                ));
+                vec![]
+            }
+        }
+    } else {
+        vec![]
+    };
+    let (recording, utility_cameras) = if o.utility_teamwork && !preserve_merge_order {
+        stage("preparing utility teamwork");
+
+        let planned = utility::plan(recording, demo, &editing_events);
+        log(format!(
+            "utility teamwork: {} sequences",
+            planned.1.iter().flatten().count()
+        ));
+        planned
+    } else {
+        let count = recording.len();
+        (recording, vec![None; count])
+    };
+    let (recording, utility_cameras) = if o.combat_perspectives && !preserve_merge_order {
+        perspectives::plan(
+            recording,
+            utility_cameras,
+            &highlights,
+            demo,
+            &editing_events,
+        )
+    } else {
+        (recording, utility_cameras)
+    };
+    let team_plans: Vec<_> = team_plans
+        .into_iter()
+        .filter(|p| team_push::applies(p, &recording, &utility_cameras))
+        .collect();
+    let (recording, utility_cameras, opening_cameras) = if o.opening_camera && !preserve_merge_order
+    {
+        let opening_originals: Vec<_> = highlights
+            .iter()
+            .filter(|h| !team_plans.iter().any(|p| p.id() == h.id))
+            .cloned()
+            .collect();
+        opening::plan(
+            recording,
+            utility_cameras,
+            &opening_originals,
+            demo,
+            &editing_events,
+        )
+    } else {
+        let count = recording.len();
+        (recording, utility_cameras, vec![None; count])
+    };
     let clips = to_render_clips(demo, &recording);
     if o.kill_feed
         && o.player_kill_feed_only
@@ -652,6 +754,32 @@ pub fn render_highlights(input: RenderJobInput) -> Result<RenderResult> {
         if pass_index + 1 < passes.len() {
             pass_options.quit_when_done = true;
         }
+        let mut schedule = build_schedule(
+            &pass_clips,
+            &ActionsOptions {
+                render: &pass_options,
+                tick_rate: demo.tick_rate,
+                output_dir: to_forward_slashes(&pass_dir),
+                ffmpeg_preset: preset.clone(),
+            },
+        );
+        utility::schedule(
+            &mut schedule,
+            indices,
+            &utility_cameras,
+            &pass_dir,
+            demo.tick_rate,
+        )?;
+        opening::schedule(&mut schedule, indices, &opening_cameras, &pass_dir)?;
+        team_push::schedule(
+            &mut schedule,
+            indices,
+            &recording,
+            &utility_cameras,
+            &opening_cameras,
+            &team_plans,
+            &pass_dir,
+        )?;
         let mut session = RecordSession {
             demo_path: demo_path.clone(),
             cs2_dir: cs2_dir.clone(),
@@ -668,15 +796,7 @@ pub fn render_highlights(input: RenderJobInput) -> Result<RenderResult> {
             show_game: o.show_game,
             width: o.width,
             height: o.height,
-            schedule: build_schedule(
-                &pass_clips,
-                &ActionsOptions {
-                    render: &pass_options,
-                    tick_rate: demo.tick_rate,
-                    output_dir: to_forward_slashes(&pass_dir),
-                    ffmpeg_preset: preset.clone(),
-                },
-            ),
+            schedule,
             timeout_seconds: (180.0 + indices.len() as f64 * 30.0 + seconds * 6.0) as u64,
             extra_launch_options: o.extra_launch_options.clone(),
             cancel: cancel.clone(),
@@ -1466,3 +1586,6 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+mod experiments;

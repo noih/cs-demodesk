@@ -12,6 +12,7 @@
 //!    execute nothing in mirv_cmd; the renderer splits overlaps into separate sessions
 //!  - `quit` ~1 s after the last clip ends
 //!  - `echo [demodesk] …` markers let the app follow progress on the netcon
+use super::seek::{SeekWindow, MIN_TICK};
 use super::RenderOptions;
 use crate::model::Highlight;
 use serde::{Deserialize, Serialize};
@@ -51,8 +52,6 @@ pub struct Scheduled {
     pub cmd: String,
 }
 
-const MIN_TICK: i32 = 96;
-pub(super) const AUDIO_PREROLL_SECONDS: i32 = 3;
 /// Marker prefix echoed to the console at every milestone.
 pub const MARK: &str = "[demodesk]";
 
@@ -104,47 +103,15 @@ pub fn build_schedule(clips: &[RenderClip], o: &ActionsOptions) -> Vec<Scheduled
     for (seq, &ci) in order.iter().enumerate() {
         let clip = &clips[ci];
         let h = &clip.highlight;
-        // Clear seek audio before normal playback rebuilds sound at the clip boundary.
-        let mut setup_tick = (h.start_tick - rate * AUDIO_PREROLL_SECONDS).max(MIN_TICK + 4);
-        if let Some(pe) = prev_end {
-            setup_tick = setup_tick.max(pe + rate / 2);
-        }
-        let start_tick = h.start_tick.max(setup_tick + 2);
-        let end_tick = h.end_tick.max(start_tick + 1);
+        let window = SeekWindow::new(h.start_tick, h.end_tick, prev_end, rate);
+        let (setup_tick, start_tick, end_tick) =
+            (window.setup_tick, window.start_tick, window.end_tick);
         let folder = format!("{}/{}", o.output_dir, sequence_folder_name(seq));
         let preset = format!("demodesk{}", seq + 1);
+        let mut slot = window.schedule(seq + 1, n, &mut push);
 
-        // 1. Jump: from tick 96 for the first clip, from just after the previous clip otherwise.
-        let jump_from = match prev_end {
-            None => MIN_TICK,
-            Some(pe) => pe + rate / 4,
-        };
-        let mut slot = 0;
-        push(
-            jump_from,
-            &mut slot,
-            format!("echo {MARK} seq {} of {n} seek", seq + 1),
-        );
-        if setup_tick - 1 > jump_from + 1 {
-            push(
-                jump_from,
-                &mut slot,
-                format!("demo_gototick {}", setup_tick - 1),
-            );
-        }
-
-        // 2. Baseline + recording configuration at the setup tick.
-        let mut slot = 0;
-        push(
-            setup_tick,
-            &mut slot,
-            format!("echo {MARK} seq {} of {n} setup", seq + 1),
-        );
+        // Baseline and camera configuration share the protected seek's setup tick.
         for cmd in [
-            "sv_cheats 1",
-            "snd_soundevent_clear_deferred",
-            "snd_sos_stop_all_soundevents",
-            "demo_timescale 1",
             "demo_ui_mode 0",
             // keep rendering at full speed when the window is not in front
             "engine_no_focus_sleep 0",
@@ -159,11 +126,6 @@ pub fn build_schedule(clips: &[RenderClip], o: &ActionsOptions) -> Vec<Scheduled
         ] {
             push(setup_tick, &mut slot, cmd.to_string());
         }
-        push(
-            setup_tick,
-            &mut slot,
-            format!("echo {MARK} seq {} of {n} preroll", seq + 1),
-        );
         push(setup_tick, &mut slot, "volume 1".into());
         push(
             setup_tick,
@@ -356,20 +318,6 @@ pub fn build_schedule(clips: &[RenderClip], o: &ActionsOptions) -> Vec<Scheduled
             }
         }
 
-        push(
-            setup_tick,
-            &mut slot,
-            format!(
-                "alias demodesk_wait_{} \"demo_pause; echo {MARK} seq {} of {n} settle\"",
-                seq + 1,
-                seq + 1
-            ),
-        );
-
-        // 4. Record only when the app finishes the real-time wait at the clip start.
-        let mut slot = 0;
-        // The app clears this alias before resuming: HLAE can revisit the pause tick.
-        push(start_tick, &mut slot, format!("demodesk_wait_{}", seq + 1));
         let mut slot = 0;
         push(end_tick, &mut slot, "mirv_streams record end".into());
         push(

@@ -223,3 +223,62 @@ See [Replay loading performance](../docs/replay-loading-performance.md) for the
 large-cache stage benchmark, validation and measurement limits.
 
 Native 2D first-frame benchmark: benchmark-native-replay.mjs takes CDP endpoint, map filter and optional run count; see [measurement details](../docs/replay-loading-performance.md#native-webview2-binary-cache-comparison).
+
+Utility camera checks: `node --test scripts/test-utility-camera.mjs` verifies both
+flash and HE tracking, the shoulder-to-flight bridge, detonation hold and callback
+release at the next shot. Event-selection and timing checks live in
+`cargo test -p demodesk-core render::utility::`.
+
+Opening camera experiment: `node scripts/test-editing-opening.mjs` checks the
+1.8-second route following, acceleration and handoff. The ignored `record_editing_experiment`
+harness accepts variant `opening`; set teammate equal to player and switchTick
+to startTick + 1.8 * tickRate. Production exports bundle `render/opening-camera.mjs`; map collision and
+route selection are not automatic. See `scripts/editing-opening.mjs`.
+
+Combat replay selection and tail preservation: `cargo test -p demodesk-core render::perspectives::`. UI checks exercise all four independent editing switches and verify their true/false values in actual export submissions (native render mocked).
+
+Shared camera transitions: `node --test scripts/test-camera-transition.mjs scripts/test-editing-team-push.mjs`
+checks near/far decisions, shortest rotation, seek/obstruction cuts and stable decisions.
+`render/camera-transition.mjs` exports `createCameraTransition`: create once per shot boundary,
+then sample live source/destination views with elapsed seconds. Views require x/y/z/rX/rY/rZ/fov.
+Defaults: at most 200 world units, 60 degrees per rotation axis and 25 degrees FOV difference;
+nearby shots blend over 0.75 seconds. Pass `continuous: false` for timeline jumps,
+or `pathBlocked: true` for known obstructions. Proximity alone does not prove collision clearance.
+Used by team-push exports and experiments; combat/utility replay cuts and the opening's
+approved magnet approach keep their existing behavior.
+
+Shared fixed encounter camera search: `cargo test -p demodesk-core render::camera_search::`
+checks full-interval framing, blocked/unknown geometry rejection, and lead-in trimming
+without dropping required combat. The solver is shared by team-push exports and the local fixture runner.
+It generates 24 directions × 3 distances × 3 heights × 3 FOVs relative to subject bounds,
+checks body margins/size/separation and static chest/head rays over every supplied sample,
+then ranks accepted cameras. An empty result means keep the existing POV.
+
+For a local fixture set `DEMODESK_CAMERA_SEARCH` to a JSON file containing `dataRoot`,
+`game`, `vrf`, `map`, `samples: [{tick, subjects: [[x,y,z], ...]}]`, `requiredTick`, and
+`output`, then run `cargo test -p demodesk-core render::camera_search::plan_camera_experiment -- --ignored --nocapture`.
+Subjects are stable-order feet positions. Supply dense samples covering the whole shot;
+`requiredTick` is the earliest indispensable action, including pre-hit context. The search
+may shorten only the lead-in, returning `startTick` and ranked candidates plus rejection
+diagnostics. Copy the first candidate's position/target/fov and startTick into the
+team-push experiment's `encounter` manifest to record the result without manual placement.
+Limits: standing body envelopes and static physics approximate the image; dynamic props,
+smoke, corpse animation, map-version matching and continuous between-sample visibility
+are not yet qualified. Production uses conservative nearby T-team advancement and entry/trade rules.
+
+Subtle encounter pan: `planEncounterAim(samples, encounter, tickRate)` in
+`render/team-push-camera.mjs` (re-exported by `editing-team-push.mjs`) follows changes in the two-subject centroid, with 0.45-second
+damping and 35% angular response. Yaw offset is capped at 2 degrees and pitch offset at
+0.35 degrees; there is no random motion, roll, zoom or camera translation. Stable subject
+tracks retain the deceased player's position. Store its result in `encounter.aimPath`;
+playback interpolates by demo tick. Recheck projected body margins before recording a
+new pan; the static search's framing qualification alone does not qualify the changed aim.
+`node scripts/test-editing-team-push.mjs` checks stationary subjects, direction, bounds,
+settling, deterministic output and playback integration. Production also verifies the new pan margins and falls back to the static camera if needed.
+
+Team-push export checks: `cargo test -p demodesk-core render::team_push::` and
+`node --test scripts/test-team-push-camera.mjs scripts/test-editing-team-push.mjs scripts/test-camera-transition.mjs`.
+`render::experiments::plan_team_push_experiment` reads the existing experiment manifest from
+`DEMODESK_EDITING_EXPERIMENT`, plans from real demo positions/events, and writes a sibling
+`.plan.json` without launching CS2. The `utility` recording variant with `teamPush: true`
+exercises actual exports; `openingCamera` and `combatPerspectives` may also be enabled.

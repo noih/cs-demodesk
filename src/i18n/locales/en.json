@@ -274,7 +274,7 @@
   "highlights": {
     "details": "Details",
     "scoring": {
-    "actions": "Actions",
+      "actions": "Actions",
       "title": "Score details",
       "total": "Total {{score}}",
       "multikill": {
@@ -330,7 +330,11 @@
     "combatQualityPriorityHint": "Prioritize combat quality, slightly reduce quality elsewhere",
     "keyMomentsOnlyHint": "Skip downtime for a shorter video.",
     "keyMomentsOnly": "Combat clips",
-    "combatClipMode": {"normal": "Normal", "short": "Short", "off": "Full"},
+    "combatClipMode": {
+      "normal": "Normal",
+      "short": "Short",
+      "off": "Full"
+    },
     "fullLengthWarning": "Keeping the full sequence makes the video longer. With the same file size limit, image quality may be lower.",
     "posthumous": "Posthumous kill",
     "possibleNinja": "Possible ninja defuse",
@@ -500,10 +504,20 @@
     "diagnosticsHint": "Local paths are automatically hidden. Review system information and logs before copying; nothing is uploaded automatically.",
     "copyDiagnostics": "Copy diagnostics",
     "diagnosticsCopied": "Diagnostics copied",
-    "encodingColumns": {"device": "Device", "format": "Format", "encoder": "Encoder", "result": "Result", "elapsed": "Time"},
+    "encodingColumns": {
+      "device": "Device",
+      "format": "Format",
+      "encoder": "Encoder",
+      "result": "Result",
+      "elapsed": "Time"
+    },
     "encodingDiagnostics": "Basic encoding diagnostics",
     "encodingDetails": "Details",
-    "encodingStatus": {"passed": "Passed", "failed": "Failed", "skipped": "Not tested"},
+    "encodingStatus": {
+      "passed": "Passed",
+      "failed": "Failed",
+      "skipped": "Not tested"
+    },
     "startupFailedHint": "A tool could not start. Download it again or choose another tool location.",
     "calculating": "Calculating…",
     "demoSources": "Demo sources",
@@ -838,5 +852,24 @@
     "extract": "Extracting verified download…",
     "wait": "Waiting for the tool to finish. Close externally opened tools to continue.",
     "replace": "Replacing tool…"
+  },
+  "editingEffects": {
+    "title": "Editing",
+    "opening": {
+      "title": "Opening camera",
+      "hint": "Follow the player into the action."
+    },
+    "combat": {
+      "title": "Combat perspectives",
+      "hint": "Replay selected exchanges from the enemy’s perspective."
+    },
+    "teamwork": {
+      "title": "Utility teamwork",
+      "hint": "Show utility support and kills when suitable."
+    },
+    "push": {
+      "title": "Team push",
+      "hint": "Show coordinated team advances when suitable."
+    }
   }
 }

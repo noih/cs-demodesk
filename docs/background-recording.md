@@ -57,6 +57,15 @@ Do not add worker startup, library loading, or waits under the loader lock.
 
 ## Queue and restart behavior
 
+The protected seek protocol is owned by `render/seek.rs`: `SeekWindow::schedule`
+adds the jump, audio reset, preroll and pause boundary together; `RecordingGate`
+releases capture only after the wall-clock wait. Rendering and local editing
+experiments use this same path. Add new video seek operations through this
+protocol rather than sending `demo_gototick` directly. Perspective changes at
+the current tick do not seek; overlapping footage is recorded in separate
+passes and assembled afterward.
+
+
 Every clip, including a single-clip export and the first clip of each pass,
 seeks three seconds before its recording boundary. After seeking, the schedule
 clears deferred sound events (`snd_soundevent_clear_deferred`) and stops active
@@ -142,3 +151,75 @@ phases, including startup recovery. Closing it leaves the operation running;
 Cancel aborts preparation/waiting. Once the short directory swap begins it finishes
 or rolls back as one critical section. ZIP validation does not imply runtime
 compatibility or establish individual installed-file hashes.
+
+## Utility teamwork editing
+
+The optional `utilityTeamwork` export setting defaults to false for new and saved
+jobs. It is exposed by Editing > Utility teamwork for highlight exports. Analysis
+exports retain their requested footage/order. Opening and generic combat-view
+controls are disabled until implemented; they do not change exports.
+
+`render/utility.rs` parses the selected local demo only when enabled. It correlates
+`player_blind`, `player_hurt`, `player_death`, throws and detonation events by player,
+victim, team, round and time. Assist flags are not required. Basic support includes
+flash blindness, HE damage and fire damage. All recognized grenade damage, including
+1 HP impact damage and decoy damage, can qualify; direct grenade deaths do not
+require a separate hurt event. Repeated fire damage produces one sequence per kill.
+Pure gun-to-gun damage does not produce a teamwork edit. Ambiguous or missing throws,
+unknown player slots and unrelated/friendly damage retain the original footage.
+
+Shots are planned in final story order, then captured in forward-only passes using
+the common seek/audio gate. Adjacent continuous views are coalesced. Output indices
+restore story order before the existing highlight join, merge and size-fitting
+pipeline. Repeated demo time is intentional. Main attack footage starts no earlier
+than three seconds before the kill, preferably half a second before the effect.
+The victim shot targets about one second of effect plus its visual ramp; if death
+comes sooner it ends before death and obtains context from before the effect. A
+lethal grenade instead keeps the impact/death as the payoff; a preceding teammate's
+actual gun damage can receive a shot before that payoff.
+
+The bundled `utility-camera.mjs` uses the thrower's rendered eye direction for the
+shoulder shot. A verified flash/HE projectile entity enables a short bridge into
+trajectory following; its heading is stable through bounces. Fire-area entities
+are not bottle projectile IDs. Fire and rare impact shots retain shoulder footage
+when there is no reliable projectile link, rather than following the wrong entity.
+The override unregisters at the cut. World collision avoidance is not implemented;
+wide camera offsets are deliberately avoided, but map geometry can still occlude
+an otherwise eligible shot. The planner is an event heuristic, not a claim that
+all damage in a time window caused the eventual kill.
+
+Checks: `cargo test -p demodesk-core render::utility::`,
+`node --test scripts/test-utility-camera.mjs`, and the normal build/UI checks.
+The opt-in ignored `render::experiments::record_editing_experiment` accepts the
+`utility` variant to exercise the actual export path with a local manifest; private
+fixtures and resulting videos stay under ignored `out/`.
+
+Opening camera is optional (openingCamera, default false). It prepends one 1.8-second protagonist shot per highlight before utility edits: 1.2 seconds following the sampled eye route, then 0.6 seconds accelerating toward first person, including a 0.125-second spectator handoff guard. The script is bundled from render/opening-camera.mjs and shares the standard seek/audio gate. Existing action windows remain intact. Missing player slots, protagonist death, and insufficient room before the round boundary skip the opening. Route clearance is not a collision query; complex geometry still needs visual validation. Manual ordered clips keep their existing behavior.
+
+Combat perspectives are optional (combatPerspectives, default false). The first selector qualifies enemy gun kills with at least 20 reciprocal gun-damage points received in the preceding 2 seconds; blind exchanges, missing slots and utility-victim shots are excluded. Kills within 3 seconds form a continuous exchange, with the highest incoming-damage candidate replayed after the exchange; ongoing main-player combat delays insertion. There is no per-video replay-count cap. Enemy replays span kill minus 1.5 seconds to kill plus 0.5 seconds, then resume the uncut main-POV aftermath, including round-result metadata. No automatic peek/aim geometry quality claim is made. Shared seek/audio gates protect every replay recording.
+
+Team push is optional (`teamPush`, default false). Before a protagonist kill, the planner
+samples positions and current teams at eight samples/second. It requires at least two nearby
+living T players to advance in aligned directions over 1.5 seconds; static clusters,
+defending teams, missing tracks and round crossings do not qualify. It may extend the
+existing window backward by at most four seconds to establish the group, without shortening
+the protagonist's action or aftermath. Group shots are 0.5–2 seconds, independently selected
+from the lead-in. A nearby teammate's gun death followed by the protagonist killing the same
+enemy within four seconds can receive an independent encounter shot, ending 0.5 seconds
+after the teammate's death and before protagonist combat. Multi-entry site reasoning and
+generic gun co-attacks are not inferred.
+
+Camera search uses installed-map static physics, body framing and separation across the
+sampled interval. No candidate, missing tools or preparation failure retains the original
+POV; cancellation still aborts the job. Body envelopes and static geometry are approximations:
+smoke, dynamic props, corpse poses, historical map versions and visual recognizability are
+not fully qualified. The same camera limits established in the recorded experiments apply.
+The bounded pan follows subject-centroid motion without random movement. Its projected
+margins are checked before playback; failed pan framing retains the fixed view. Only nearby,
+contiguous shots with a checked connecting path may use the common transition; POV gaps cut.
+
+Utility and enemy-replay shots take precedence. Team cameras are clipped to the initial
+main-POV portions and never applied to later replay returns. An applicable team introduction
+suppresses the additional opening-camera introduction. Native handoff guards keep the eye
+override briefly after returning to first person, including before clip/round-result boundaries.
+Manual ordered clips bypass these edits. All seeks still use the central audio-reset gate.

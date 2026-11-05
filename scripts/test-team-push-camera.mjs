@@ -1,0 +1,18 @@
+import assert from 'node:assert/strict';
+import {startTeamPushSequence} from '../crates/demodesk-core/src/render/team-push-camera.mjs';
+let tick=100,callback,removed=false;
+globalThis.mirv={events:{cViewRenderSetupView:{on:(_,f)=>callback=f,off:()=>removed=true}},getDemoTick:()=>tick,isPlayingDemo:()=>true,isHandleValid:()=>true,getHandleEntryIndex:i=>i,getEntityFromIndex:i=>i===1?{isPlayerController:()=>true,getSteamId:()=>1,getPlayerPawnHandle:()=>65}:i===65?{isPlayerController:()=>false,isValid:()=>true,getHealth:()=>100,getRenderEyeOrigin:()=>[1,2,64],getRenderEyeAngles:()=>[5,10,0]}:undefined};
+const shot=(startTick,endTick,x,transitionSafe=false)=>({startTick,endTick,transitionSafe,camera:{position:[x,0,100],target:[0,200,36],fov:90},samples:[startTick,endTick].map(tick=>({tick,subjects:[[-30,200,0],[30,200,0]]}))});
+startTeamPushSequence({steamId:'1',tickRate:64,shots:[shot(100,200,0),shot(200,300,50,true)]});
+tick=199;assert.equal(callback().x,0);
+tick=200;assert.equal(callback().x,0,'Continuous close cut starts at outgoing camera');
+tick=224;assert.equal(callback().x,25);
+tick=248;assert.equal(callback().x,50);
+tick=150;assert.equal(callback().x,0,'Rewind resets transition state');
+tick=299;callback();tick=300;assert.deepEqual(callback(),{x:1,y:2,z:64,rX:5,rY:10,rZ:0});
+tick=308;assert.equal(callback(),undefined);assert.ok(removed);
+startTeamPushSequence({steamId:'1',tickRate:64,shots:[shot(100,200,0),shot(200,300,50)]});
+tick=199;callback();tick=200;assert.equal(callback().x,50,'Unqualified path cuts instead of crossing walls');
+startTeamPushSequence({steamId:'1',tickRate:64,shots:[shot(100,180,0),shot(200,300,50,true)]});
+tick=179;callback();tick=190;assert.equal(callback(),undefined);tick=200;assert.equal(callback().x,50,'POV gap is not bridged');
+console.log('Team-push sequence transitions, seeks, POV gaps and handoff passed');

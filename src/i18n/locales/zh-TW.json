@@ -270,7 +270,7 @@
   "highlights": {
     "details": "詳情",
     "scoring": {
-    "actions": "操作",
+      "actions": "操作",
       "title": "評分詳情",
       "total": "總分 {{score}}",
       "multikill": {
@@ -326,7 +326,11 @@
     "combatQualityPriorityHint": "優先保留交戰畫質，其他片段略降",
     "keyMomentsOnlyHint": "略過空檔，縮短影片長度",
     "keyMomentsOnly": "交戰片段",
-    "combatClipMode": {"normal": "正常", "short": "短", "off": "全程"},
+    "combatClipMode": {
+      "normal": "正常",
+      "short": "短",
+      "off": "全程"
+    },
     "fullLengthWarning": "保留過程會增加片長，容量受限可能畫質降低",
     "posthumous": "死後擊殺",
     "possibleNinja": "疑似偷拆",
@@ -496,10 +500,20 @@
     "diagnosticsHint": "本機路徑已自動遮蔽。複製前請確認系統資訊與 log 內容；不會自動上傳。",
     "copyDiagnostics": "複製診斷",
     "diagnosticsCopied": "已複製診斷資訊",
-    "encodingColumns": {"device": "運算裝置", "format": "格式", "encoder": "編碼器", "result": "結果", "elapsed": "耗時"},
+    "encodingColumns": {
+      "device": "運算裝置",
+      "format": "格式",
+      "encoder": "編碼器",
+      "result": "結果",
+      "elapsed": "耗時"
+    },
     "encodingDiagnostics": "基礎編碼診斷",
     "encodingDetails": "詳細原因",
-    "encodingStatus": {"passed": "通過", "failed": "失敗", "skipped": "未測試"},
+    "encodingStatus": {
+      "passed": "通過",
+      "failed": "失敗",
+      "skipped": "未測試"
+    },
     "startupFailedHint": "工具無法啟動，請重新下載或選擇其他工具位置。",
     "calculating": "計算中…",
     "demoSources": "Demo 來源",
@@ -834,5 +848,24 @@
     "extract": "正在解壓已驗證的下載…",
     "wait": "等待工具使用結束；請關閉自行開啟的工具以繼續。",
     "replace": "正在替換工具…"
+  },
+  "editingEffects": {
+    "title": "剪輯",
+    "opening": {
+      "title": "開場運鏡",
+      "hint": "跟隨主角，帶入交戰。"
+    },
+    "combat": {
+      "title": "交戰視角切換",
+      "hint": "從敵方視角重看精彩交鋒。"
+    },
+    "teamwork": {
+      "title": "道具配合",
+      "hint": "在適合的片段呈現道具支援與擊殺。"
+    },
+    "push": {
+      "title": "隊伍推進",
+      "hint": "在合適的片段呈現隊伍推進。"
+    }
   }
 }

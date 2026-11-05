@@ -270,7 +270,7 @@
   "highlights": {
     "details": "詳細",
     "scoring": {
-    "actions": "操作",
+      "actions": "操作",
       "title": "スコア詳細",
       "total": "合計 {{score}}",
       "multikill": {
@@ -326,7 +326,11 @@
     "combatQualityPriorityHint": "交戦シーンの画質を優先し、他のシーンは少し下げます",
     "keyMomentsOnlyHint": "待ち時間を省き、動画を短くします。",
     "keyMomentsOnly": "交戦シーン",
-    "combatClipMode": {"normal": "通常", "short": "短め", "off": "全編"},
+    "combatClipMode": {
+      "normal": "通常",
+      "short": "短め",
+      "off": "全編"
+    },
     "fullLengthWarning": "全体を残すと動画が長くなります。同じファイルサイズ上限では、画質が低下する場合があります。",
     "posthumous": "死亡後のキル",
     "possibleNinja": "ニンジャ解除の可能性",
@@ -496,10 +500,20 @@
     "diagnosticsHint": "ローカルパスは自動的に非表示になります。コピー前にシステム情報とログを確認してください。自動送信は行いません。",
     "copyDiagnostics": "診断情報をコピー",
     "diagnosticsCopied": "診断情報をコピーしました",
-    "encodingColumns": {"device": "処理装置", "format": "形式", "encoder": "エンコーダー", "result": "結果", "elapsed": "所要時間"},
+    "encodingColumns": {
+      "device": "処理装置",
+      "format": "形式",
+      "encoder": "エンコーダー",
+      "result": "結果",
+      "elapsed": "所要時間"
+    },
     "encodingDiagnostics": "基本エンコード診断",
     "encodingDetails": "詳細",
-    "encodingStatus": {"passed": "成功", "failed": "失敗", "skipped": "未テスト"},
+    "encodingStatus": {
+      "passed": "成功",
+      "failed": "失敗",
+      "skipped": "未テスト"
+    },
     "startupFailedHint": "ツールを起動できません。再ダウンロードするか、別のツールの場所を選択してください。",
     "calculating": "計算中…",
     "demoSources": "デモの読み込み元",
@@ -834,5 +848,24 @@
     "extract": "検証済みファイルを展開中…",
     "wait": "ツールの終了を待っています。別途起動したツールを閉じてください。",
     "replace": "ツールを置換中…"
+  },
+  "editingEffects": {
+    "title": "編集",
+    "opening": {
+      "title": "オープニングカメラ",
+      "hint": "プレイヤーを追い、交戦へつなぐ。"
+    },
+    "combat": {
+      "title": "交戦視点の切り替え",
+      "hint": "印象的な交戦を敵の視点でリプレイ。"
+    },
+    "teamwork": {
+      "title": "グレネード連携",
+      "hint": "適切な場面でグレネードによる支援・キルを表示します。"
+    },
+    "push": {
+      "title": "チーム進行",
+      "hint": "適した場面でチームの進行を映します。"
+    }
   }
 }

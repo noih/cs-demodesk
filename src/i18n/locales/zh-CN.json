@@ -270,7 +270,7 @@
   "highlights": {
     "details": "详情",
     "scoring": {
-    "actions": "操作",
+      "actions": "操作",
       "title": "评分详情",
       "total": "总分 {{score}}",
       "multikill": {
@@ -326,7 +326,11 @@
     "combatQualityPriorityHint": "优先保留交战画质，其他片段略降",
     "keyMomentsOnlyHint": "跳过空档，缩短视频长度",
     "keyMomentsOnly": "交战片段",
-    "combatClipMode": {"normal": "正常", "short": "短", "off": "全程"},
+    "combatClipMode": {
+      "normal": "正常",
+      "short": "短",
+      "off": "全程"
+    },
     "fullLengthWarning": "保留完整过程会增加视频长度。在相同容量限制下，画质可能降低。",
     "posthumous": "死后击杀",
     "possibleNinja": "疑似偷拆",
@@ -496,10 +500,20 @@
     "diagnosticsHint": "本机路径已自动遮蔽。复制前请确认系统信息与 log 内容；不会自动上传。",
     "copyDiagnostics": "复制诊断",
     "diagnosticsCopied": "已复制诊断信息",
-    "encodingColumns": {"device": "运算设备", "format": "格式", "encoder": "编码器", "result": "结果", "elapsed": "耗时"},
+    "encodingColumns": {
+      "device": "运算设备",
+      "format": "格式",
+      "encoder": "编码器",
+      "result": "结果",
+      "elapsed": "耗时"
+    },
     "encodingDiagnostics": "基础编码诊断",
     "encodingDetails": "详细原因",
-    "encodingStatus": {"passed": "通过", "failed": "失败", "skipped": "未测试"},
+    "encodingStatus": {
+      "passed": "通过",
+      "failed": "失败",
+      "skipped": "未测试"
+    },
     "startupFailedHint": "工具无法启动，请重新下载或选择其他工具位置。",
     "calculating": "计算中…",
     "demoSources": "Demo 来源",
@@ -834,5 +848,24 @@
     "extract": "正在解压已验证的下载…",
     "wait": "等待工具使用结束；请关闭自行打开的工具以继续。",
     "replace": "正在替换工具…"
+  },
+  "editingEffects": {
+    "title": "剪辑",
+    "opening": {
+      "title": "开场运镜",
+      "hint": "跟随主角，带入交战。"
+    },
+    "combat": {
+      "title": "交战视角切换",
+      "hint": "从敌方视角重看精彩交锋。"
+    },
+    "teamwork": {
+      "title": "道具配合",
+      "hint": "在合适的片段呈现道具支援与击杀。"
+    },
+    "push": {
+      "title": "队伍推进",
+      "hint": "在合适的片段呈现队伍推进。"
+    }
   }
 }

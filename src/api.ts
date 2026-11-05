@@ -213,6 +213,10 @@ export interface DemoMeta {
 
 export type Camera = 'slot' | 'lock';
 export interface RenderOptions {
+  utilityTeamwork: boolean;
+  openingCamera: boolean;
+  combatPerspectives: boolean;
+  teamPush: boolean;
   fps: number;
   width: number;
   height: number;
@@ -253,6 +257,10 @@ export interface RenderOptions {
 export const RENDER_QUALITY: Record<string, number> = { libsvtav1: 20, av1_nvenc: 20, libx264: 19, libx265: 20, h264_nvenc: 20, hevc_nvenc: 20 };
 
 export const DEFAULT_RENDER_OPTIONS: RenderOptions = {
+  utilityTeamwork: false,
+  openingCamera: false,
+  combatPerspectives: false,
+  teamPush: false,
   fps: 60,
   width: 1920,
   height: 1080,

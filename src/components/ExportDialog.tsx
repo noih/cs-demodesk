@@ -1,3 +1,4 @@
+import { EditingEffects } from './EditingEffects.tsx';
 import { DialogCloseButton } from './DialogCloseButton.tsx';
 import { summarizeHighlights } from '../highlightWindows.ts';
 import { useState, type ReactNode } from 'react';
@@ -153,6 +154,7 @@ export function ExportDialog({open,onOpenChange,count,seconds,status,onSetup,onS
               </Box>
             </Flex>
           </Grid>
+          {highlights && <EditingEffects push={opts.teamPush} onPushChange={teamPush=>setOpts({...opts,teamPush})} combat={opts.combatPerspectives} onCombatChange={combatPerspectives=>setOpts({...opts,combatPerspectives})} opening={opts.openingCamera} onOpeningChange={openingCamera=>setOpts({...opts,openingCamera})} enabled={opts.utilityTeamwork} onChange={utilityTeamwork=>setOpts({...opts,utilityTeamwork})} />}
           </div>
         <Flex direction="column" mt="4" gap="4">
             <Flex direction="column" gap="2" pt="3" style={{ borderTop: '1px solid var(--app-border)' }}>

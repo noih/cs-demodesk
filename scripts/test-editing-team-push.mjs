@@ -1,0 +1,35 @@
+import assert from 'node:assert/strict';
+import {startTeamPush,planEncounterAim} from './editing-team-push.mjs';
+let tick=100,callback,removed=false;const logs=[];
+const rows=[['1',3,[0,0,64]],['2',3,[90,20,64]],['3',3,[800,0,64]],['4',2,[40,0,64]]];
+const entities=new Map();rows.forEach(([id,team,eye],i)=>{entities.set(i+1,{isPlayerController:()=>true,getSteamId:()=>id,getPlayerPawnHandle:()=>65+i});entities.set(65+i,{isValid:()=>true,isPlayerPawn:()=>true,getHealth:()=>100,getTeam:()=>team,getRenderEyeOrigin:()=>eye,getRenderEyeAngles:()=>[0,0,0]});});
+globalThis.mirv={events:{cViewRenderSetupView:{on:(_,f)=>callback=f,off:()=>removed=true}},getDemoTick:()=>tick,isPlayingDemo:()=>true,getEntityFromIndex:i=>entities.get(i),isHandleValid:()=>true,getHandleEntryIndex:i=>i,message:s=>logs.push(s)};
+startTeamPush({steamId:'1',startTick:100,endTick:220});assert.equal(callback().fov,100);assert.deepEqual(JSON.parse(logs[0].slice(10)).players.map(p=>p.id),['1','2']);tick=220;assert.equal(callback().x,0);tick=228;assert.equal(callback(),undefined);assert.ok(removed);console.log('Nearby team selection and POV handoff passed');
+removed=false;tick=100;startTeamPush({steamId:'1',frontId:'2',startTick:100,endTick:196,overview:true});
+const overviewStart=callback();rows[0][2][0]+=25;assert.equal(callback().x,overviewStart.x,'Independent camera does not follow main movement');
+tick=195;const overviewEnd=callback();assert.ok(overviewEnd.x>overviewStart.x);assert.ok(overviewEnd.y<overviewStart.y);assert.ok(Number.isFinite(overviewEnd.rY));
+console.log('Independent overview dolly passed');
+
+tick=100;
+startTeamPush({steamId:'1',startTick:100,endTick:300,encounter:{startTick:120,endTick:180,position:[10,20,200],target:[30,40,0],fov:95}});
+assert.equal(callback().fov,100);
+tick=120;const exterior=callback();assert.equal(exterior.x,10);assert.equal(exterior.fov,95);
+rows[1][2][0]+=200;
+tick=179;assert.deepEqual(callback(),exterior,'Independent encounter framing stays stable through player movement');
+tick=180;assert.equal(callback().fov,100,'Returns to team follow after encounter');
+tick=300;assert.equal(callback().x,rows[0][2][0],'Protagonist handoff is preserved');
+console.log('Independent encounter boundaries and handoff passed');
+
+const shot={position:[0,-300,100],target:[0,0,36]};
+const still=Array.from({length:25},(_,i)=>({tick:i*8,subjects:[[-50,0,0],[50,0,0]]}));
+assert.equal(new Set(planEncounterAim(still,shot).map(p=>p.yaw)).size,1,'No artificial rotation when subjects are stationary');
+const moving=still.map((s,i)=>({...s,subjects:s.subjects.map(p=>[p[0]+Math.min(i,12)*8,p[1],p[2]])}));
+const path=planEncounterAim(moving,shot);
+assert.ok(path.at(-1).yaw<path[0].yaw,'Pan follows subjects toward screen right');
+assert.ok(path.every(p=>Math.abs(p.yaw-path[0].yaw)<=2 && Math.abs(p.pitch-path[0].pitch)<=0.35));
+assert.ok(Math.abs(path.at(-1).yaw-path.at(-2).yaw)<Math.abs(path[10].yaw-path[9].yaw),'Settles after movement stops');
+assert.deepEqual(planEncounterAim(moving,shot),path,'Same movement produces the same pan');
+tick=8;
+startTeamPush({steamId:'1',startTick:0,endTick:300,encounter:{...shot,startTick:0,endTick:200,fov:60,aimPath:path}});
+assert.equal(callback().rY,path[1].yaw);assert.equal(callback().x,0);
+console.log('Context-driven bounded pan and deterministic playback passed');

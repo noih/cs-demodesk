@@ -21,7 +21,6 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 pub const NETCON_PORT: u16 = 4577;
-const AUDIO_SETTLE_TIME: Duration = Duration::from_secs(3);
 
 pub struct RecordSession<'a> {
     pub demo_path: PathBuf,
@@ -435,21 +434,7 @@ fn parse_marker(line: &str) -> Option<(usize, usize, &str)> {
 struct Progress {
     seen_marker: bool,
     done: bool,
-    pending_recording: Option<(Instant, usize, usize)>,
-    last_settled_clip: usize,
-}
-
-impl Progress {
-    fn take_recording_due(&mut self, now: Instant) -> Option<String> {
-        let (deadline, i, n) = self.pending_recording?;
-        if now < deadline {
-            return None;
-        }
-        self.pending_recording = None;
-        Some(format!(
-            "alias demodesk_wait_{i} \"\"; demo_resume; mirv_streams record start; echo {MARK} seq {i} of {n} start"
-        ))
-    }
+    seek: super::seek::RecordingGate,
 }
 
 impl RecordSession<'_> {
@@ -650,7 +635,7 @@ impl RecordSession<'_> {
                         .context(ErrorCode::RecordingTimeout),
                 );
             }
-            if let Some(command) = progress.take_recording_due(Instant::now()) {
+            if let Some(command) = progress.seek.take_recording_due(Instant::now()) {
                 con.send(&command)?;
             }
             std::thread::sleep(Duration::from_millis(500));
@@ -671,11 +656,7 @@ impl RecordSession<'_> {
         {
             (self.progress)(value);
         } else if let Some((i, n, what)) = parse_marker(line) {
-            // A stalled frame can cross an entire very short clip before pause takes effect.
-            // Fail instead of starting a recording whose scheduled end has already passed.
-            if progress.pending_recording.is_some() && matches!(what, "end" | "seek" | "start") {
-                return Err(anyhow!("clip {i}/{n}: demo advanced past the recording boundary while waiting for audio").context(ErrorCode::RecordingFailed));
-            }
+            let waiting = progress.seek.observe(i, n, what, Instant::now())?;
             progress.seen_marker = true;
             match what {
                 "seek" => (self.stage)(&format!("recording {i}/{n}: seeking")),
@@ -683,14 +664,8 @@ impl RecordSession<'_> {
                 "preroll" => {
                     (self.log)(format!("clip {i}/{n}: audio reset commands sent; preroll"))
                 }
-                "settle" => {
-                    if i <= progress.last_settled_clip {
-                        return Ok(());
-                    }
-                    progress.last_settled_clip = i;
-                    (self.log)(format!("clip {i}/{n}: waiting 3 seconds before recording"));
-                    // Keep the wall-clock guard even when the demo starts too early for full preroll.
-                    progress.pending_recording = Some((Instant::now() + AUDIO_SETTLE_TIME, i, n));
+                "settle" if waiting => {
+                    (self.log)(super::seek::waiting_message(i, n));
                 }
                 "start" => {
                     (self.stage)(&format!("recording {i}/{n}"));
@@ -862,41 +837,43 @@ mod tests {
         session
             .handle_console_line("[demodesk] seq 1 of 1 settle", &mut progress)
             .unwrap();
-        let (first_deadline, i, n) = progress.pending_recording.unwrap();
+        let (first_deadline, i, n) = progress.seek.pending().unwrap();
         assert_eq!((i, n), (1, 1));
         assert!(first_deadline >= before_settle + Duration::from_secs(3));
         assert!(progress
+            .seek
             .take_recording_due(first_deadline - Duration::from_millis(1))
             .is_none());
         assert_eq!(
-            progress.take_recording_due(first_deadline).as_deref(),
+            progress.seek.take_recording_due(first_deadline).as_deref(),
             Some("alias demodesk_wait_1 \"\"; demo_resume; mirv_streams record start; echo [demodesk] seq 1 of 1 start")
         );
         session
             .handle_console_line("[demodesk] seq 1 of 1 start", &mut progress)
             .unwrap();
-        assert!(progress.pending_recording.is_none());
+        assert!(progress.seek.pending().is_none());
         let mut progress = Progress::default();
         session
             .handle_console_line("[demodesk] seq 2 of 2 settle", &mut progress)
             .unwrap();
-        let (deadline, _, _) = progress.pending_recording.unwrap();
+        let (deadline, _, _) = progress.seek.pending().unwrap();
         session
             .handle_console_line("[demodesk] seq 2 of 2 settle", &mut progress)
             .unwrap();
-        assert_eq!(progress.pending_recording.unwrap().0, deadline);
+        assert_eq!(progress.seek.pending().unwrap().0, deadline);
         assert!(progress
+            .seek
             .take_recording_due(deadline - Duration::from_millis(1))
             .is_none());
         assert!(session
             .handle_console_line("[demodesk] seq 2 of 2 end", &mut progress)
             .is_err());
         assert!(session.completed_clips.is_empty());
-        assert!(progress.take_recording_due(deadline).is_some());
+        assert!(progress.seek.take_recording_due(deadline).is_some());
         session
             .handle_console_line("[demodesk] seq 2 of 2 settle", &mut progress)
             .unwrap();
-        assert!(progress.pending_recording.is_none());
+        assert!(progress.seek.pending().is_none());
         session
             .handle_console_line("[demodesk] seq 2 of 2 start", &mut progress)
             .unwrap();
@@ -904,32 +881,6 @@ mod tests {
             .handle_console_line("[demodesk] seq 2 of 2 end", &mut progress)
             .unwrap();
         assert_eq!(session.completed_clips, vec![1]);
-    }
-
-    #[test]
-    fn audio_settle_resumes_once_after_three_real_seconds() {
-        let now = Instant::now();
-        let mut progress = Progress::default();
-        assert_eq!(progress.take_recording_due(now), None);
-        progress.pending_recording = Some((now + AUDIO_SETTLE_TIME, 2, 3));
-        assert_eq!(
-            progress.take_recording_due(now + Duration::from_millis(2999)),
-            None
-        );
-        assert_eq!(
-            progress
-                .take_recording_due(now + Duration::from_secs(3))
-                .as_deref(),
-            Some("alias demodesk_wait_2 \"\"; demo_resume; mirv_streams record start; echo [demodesk] seq 2 of 3 start")
-        );
-        assert_eq!(
-            progress.take_recording_due(now + Duration::from_secs(4)),
-            None
-        );
-        assert_eq!(
-            Progress::default().take_recording_due(now + Duration::from_secs(4)),
-            None
-        );
     }
 
     #[cfg(windows)]
