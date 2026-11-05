@@ -771,12 +771,19 @@ video {
   overflow: hidden;
 }
 .app-dialog > :not(.app-dialog-body) { flex-shrink: 0; }
-.app-dialog-body { min-height: 0; overflow: auto; overscroll-behavior: contain; }
+.app-dialog-body {
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  margin-inline: calc(-1 * var(--dialog-content-padding));
+  padding-inline: var(--dialog-content-padding);
+}
 
-.editing-effects { margin-top: var(--space-4); border-top: 1px solid var(--app-border); padding-top: var(--space-3); }
-.editing-effects > summary { cursor: pointer; display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-2); border-radius: var(--radius-2); }
+.editing-effects { margin-top: var(--space-3); border-top: 1px solid var(--app-border); padding-top: var(--space-2); }
+.editing-effects > summary { cursor: pointer; display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-2); padding: 0 var(--space-2); border-radius: var(--radius-2); }
 .editing-effects > summary::before { content: '›'; font-size: 20px; }
 .editing-effects[open] > summary::before { transform: rotate(90deg); }
-.editing-effects > summary:focus-visible { outline: 2px solid var(--focus-8); outline-offset: 4px; }
-.editing-effect-card { min-width: 0; padding: var(--space-3); border: 1px solid var(--app-border); border-radius: var(--radius-3); }
+.editing-effects > summary:focus-visible { outline: 2px solid var(--focus-8); outline-offset: -2px; }
+.editing-effect-card { min-width: 0; padding: var(--space-4); border: 1px solid var(--app-border); border-radius: var(--radius-3); overflow-wrap: anywhere; cursor: pointer; }
+.editing-effect-card [role='switch'] { flex-shrink: 0; margin-top: 3px; }
 .editing-effect-card[data-enabled='true'] { border-color: var(--accent-8); background: var(--accent-2); }

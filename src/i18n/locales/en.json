@@ -854,7 +854,8 @@
     "replace": "Replacing tool…"
   },
   "editingEffects": {
-    "title": "Editing",
+    "title": "Highlight editing",
+    "sizeLimitWarning": "May lengthen the video, reducing quality when a file size limit is set.",
     "opening": {
       "title": "Opening camera",
       "hint": "Follow the player into the action."

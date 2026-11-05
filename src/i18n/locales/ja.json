@@ -850,7 +850,8 @@
     "replace": "ツールを置換中…"
   },
   "editingEffects": {
-    "title": "編集",
+    "title": "ハイライト編集",
+    "sizeLimitWarning": "動画が長くなることがあり、容量制限がある場合は画質が低下します。",
     "opening": {
       "title": "オープニングカメラ",
       "hint": "プレイヤーを追い、交戦へつなぐ。"

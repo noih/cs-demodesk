@@ -850,7 +850,8 @@
     "replace": "正在替换工具…"
   },
   "editingEffects": {
-    "title": "剪辑",
+    "title": "精彩剪辑",
+    "sizeLimitWarning": "可能会增加片长，容量受限会降低画质。",
     "opening": {
       "title": "开场运镜",
       "hint": "跟随主角，带入交战。"

@@ -850,7 +850,8 @@
     "replace": "도구 교체 중…"
   },
   "editingEffects": {
-    "title": "편집",
+    "title": "하이라이트 편집",
+    "sizeLimitWarning": "영상이 길어질 수 있으며, 파일 크기가 제한되면 화질이 낮아집니다.",
     "opening": {
       "title": "오프닝 카메라",
       "hint": "플레이어를 따라 교전으로 이어집니다."

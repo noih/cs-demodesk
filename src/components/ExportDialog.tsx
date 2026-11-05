@@ -126,6 +126,17 @@ export function ExportDialog({open,onOpenChange,count,seconds,status,onSetup,onS
                 </Select.Root>
                 {(opts.codec === 'libsvtav1' || opts.codec === 'av1_nvenc') && <Text as="p" size="1" color="gray" mt="1">{t('highlights.av1Hint')}</Text>}
               </Box>
+              <Flex direction="column" gap="2" pt="3" style={{ borderTop: '1px solid var(--app-border)' }}>
+                <Text as="label" size="1">
+                  <Flex align="center" gap="2">
+                    <Switch size="1" checked={!opts.showGame} onCheckedChange={(hideGame) => setOpts({ ...opts, showGame: !hideGame })} />
+                    {t('highlights.hideGame')}
+                  </Flex>
+                </Text>
+                <Text size="1" color="gray">
+                  {t(opts.showGame ? 'highlights.visibleGame' : 'highlights.hiddenGame')}
+                </Text>
+              </Flex>
             </Flex>
             <Flex direction="column" gap="3">
               <Flex direction="column" gap="3">
@@ -154,21 +165,9 @@ export function ExportDialog({open,onOpenChange,count,seconds,status,onSetup,onS
               </Box>
             </Flex>
           </Grid>
-          {highlights && <EditingEffects push={opts.teamPush} onPushChange={teamPush=>setOpts({...opts,teamPush})} combat={opts.combatPerspectives} onCombatChange={combatPerspectives=>setOpts({...opts,combatPerspectives})} opening={opts.openingCamera} onOpeningChange={openingCamera=>setOpts({...opts,openingCamera})} enabled={opts.utilityTeamwork} onChange={utilityTeamwork=>setOpts({...opts,utilityTeamwork})} />}
+          {highlights && <EditingEffects hasSizeLimit={opts.maxSizeMb != null} push={opts.teamPush} onPushChange={teamPush=>setOpts({...opts,teamPush})} combat={opts.combatPerspectives} onCombatChange={combatPerspectives=>setOpts({...opts,combatPerspectives})} opening={opts.openingCamera} onOpeningChange={openingCamera=>setOpts({...opts,openingCamera})} enabled={opts.utilityTeamwork} onChange={utilityTeamwork=>setOpts({...opts,utilityTeamwork})} />}
           </div>
-        <Flex direction="column" mt="4" gap="4">
-            <Flex direction="column" gap="2" pt="3" style={{ borderTop: '1px solid var(--app-border)' }}>
-              <Text as="label" size="1">
-                <Flex align="center" gap="2">
-                  <Switch size="1" checked={!opts.showGame} onCheckedChange={(hideGame) => setOpts({ ...opts, showGame: !hideGame })} />
-                  {t('highlights.hideGame')}
-                </Flex>
-              </Text>
-              <Text size="1" color="gray">
-                {t(opts.showGame ? 'highlights.visibleGame' : 'highlights.hiddenGame')}
-              </Text>
-            </Flex>
-            <Flex gap="3" justify="end" align="center" wrap="wrap">
+            <Flex mt="4" gap="3" justify="end" align="center" wrap="wrap">
               {status && !status.ok && (
                 <Button className="environment-notice" variant="soft" color="red" style={{ marginRight: 'auto' }} onClick={() => { onOpenChange(false); onSetup(); }}>
                   <i aria-hidden="true" className="bi bi-exclamation-triangle app-icon" />{status.missingRenderTools.length ? t('common.missingTools', { tools: status.missingRenderTools.join(', ') }) : t('highlights.notReady')}<i aria-hidden="true" className="bi bi-arrow-right app-icon" />
@@ -178,7 +177,6 @@ export function ExportDialog({open,onOpenChange,count,seconds,status,onSetup,onS
                 {submitting ? t('highlights.submitting') : t('highlights.export')}
               </Button>
             </Flex>
-          </Flex>
         </Dialog.Content>
       </Dialog.Root>
   );

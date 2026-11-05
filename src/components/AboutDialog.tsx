@@ -53,7 +53,7 @@ export function AboutDialog() {
 
         </IconButton>
       </Dialog.Trigger></Tooltip>
-      <Dialog.Content className="app-dialog" maxWidth="800px" style={{ padding: 32 }}>
+      <Dialog.Content className="app-dialog" maxWidth="800px" size="4">
         <Flex justify="between" align="center" gap="3">
           <Flex align="center" gap="3">
             <img src={logo} alt="" width="48" height="48" style={{ background: 'var(--app-logo-background, #121518)', borderRadius: 10, padding: 4 }} />
