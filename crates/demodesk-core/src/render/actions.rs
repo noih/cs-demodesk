@@ -7,7 +7,7 @@
 //! Timing rules:
 //!  - nothing may be scheduled below tick 96 (early ticks get skipped)
 //!  - `demo_gototick` lands one tick before the setup tick; the setup commands
-//!    (`spec_mode 1` before `spec_player`) then run on the next frame
+//!    run next, with player selection deferred until observer mode settles
 //!  - clips are played in tick order and jumps are forward-only: backward jumps
 //!    execute nothing in mirv_cmd; the renderer splits overlaps into separate sessions
 //!  - `quit` ~1 s after the last clip ends
@@ -284,13 +284,28 @@ pub fn build_schedule(clips: &[RenderClip], o: &ActionsOptions) -> Vec<Scheduled
 
         // 3. Camera on the highlighted player (after the seek, before recording).
         push(setup_tick, &mut slot, "spec_mode 1".into());
+        // Observer-mode changes are asynchronous. Select the player after the
+        // mode has settled, while still inside the protected seek preroll.
+        let player_tick = (setup_tick + (rate / 4).max(1)).min(start_tick - 1);
+        let mut player_slot = 0;
         match (r.camera, &clip.account_id, clip.slot) {
             (Camera::Lock, Some(acc), _) => push(
-                setup_tick,
-                &mut slot,
+                player_tick,
+                &mut player_slot,
                 format!("spec_lock_to_accountid {acc}"),
             ),
-            (_, _, Some(slot_no)) => push(setup_tick, &mut slot, format!("spec_player {slot_no}")),
+            (_, _, Some(slot_no)) => {
+                push(
+                    player_tick,
+                    &mut player_slot,
+                    "spec_lock_to_accountid 0".into(),
+                );
+                push(
+                    player_tick,
+                    &mut player_slot,
+                    format!("spec_player {slot_no}"),
+                );
+            }
             _ => {}
         }
 
@@ -718,7 +733,7 @@ mod tests {
         assert!(s.iter().any(|a| a.cmd == "demo_gototick 9807"));
         assert_eq!(tick_of(&s, "mirv_streams record name"), 9808);
         assert_eq!(tick_of(&s, "spec_mode 1"), 9808);
-        assert_eq!(tick_of(&s, "spec_player"), 9808);
+        assert_eq!(tick_of(&s, "spec_player"), 9824);
         assert_eq!(tick_of(&s, "demodesk_wait_1"), 10_000);
         assert_eq!(tick_of(&s, "mirv_streams record end"), 11_000);
         assert_eq!(tick_of(&s, "quit"), 11_064);
@@ -735,6 +750,19 @@ mod tests {
             "<commandSystem>\n<commands>\n<c tick=\"96.000\">echo [demodesk] seq 1 of 1 seek</c>"
         ));
         assert!(xml.contains("<c tick=\"9808.000\">echo [demodesk] seq 1 of 1 setup</c>"));
+    }
+
+    #[test]
+    fn player_selection_waits_for_observer_mode_before_recording() {
+        for start in [50, 10_000] {
+            let schedule = build_schedule(
+                &[clip(start, start + 400, Some(3))],
+                &opts(&RenderOptions::default()),
+            );
+            assert!(tick_of(&schedule, "spec_player 3") > tick_of(&schedule, "spec_mode 1"));
+            assert!(tick_of(&schedule, "spec_player 3") < tick_of(&schedule, "demodesk_wait_1"));
+            assert!(idx(&schedule, "spec_lock_to_accountid 0") < idx(&schedule, "spec_player 3"));
+        }
     }
 
     #[test]

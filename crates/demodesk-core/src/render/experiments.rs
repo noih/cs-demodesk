@@ -3,6 +3,71 @@ use super::*;
 use anyhow::{ensure, Context};
 use std::io::Write;
 
+#[test]
+#[ignore = "reproduces a private export job in a new output directory using CS2"]
+fn reproduce_editing_job() -> Result<()> {
+    let input = PathBuf::from(std::env::var("DEMODESK_REPRO_JOB")?);
+    let output = PathBuf::from(std::env::var("DEMODESK_REPRO_OUTPUT")?);
+    ensure!(!output.exists(), "output must be a new directory");
+    let job: serde_json::Value = serde_json::from_slice(&std::fs::read(&input)?)?;
+    let root = input.parent().unwrap().parent().unwrap().parent().unwrap();
+    let cached: serde_json::Value = serde_json::from_slice(&std::fs::read(
+        root.join("parsed")
+            .join(format!("{}.json", job["demoId"].as_str().unwrap())),
+    )?)?;
+    let demo: DemoInfo = serde_json::from_value(cached["info"].clone())?;
+    let highlights: Vec<Highlight> = serde_json::from_value(cached["highlights"].clone())?;
+    let highlights: Vec<_> = highlights
+        .into_iter()
+        .filter(|h| {
+            job["highlightIds"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|id| id.as_str() == Some(&h.id))
+        })
+        .collect();
+    let mut options: RenderOptions = serde_json::from_value(job["options"].clone())?;
+    if std::env::var_os("DEMODESK_REPRO_EXACT").is_none() {
+        options.codec = "libx264".into();
+        options.width = 1280;
+        options.height = 720;
+        options.max_size_mb = None;
+    }
+    options.keep_raw_files = true;
+    if std::env::var_os("DEMODESK_REPRO_SKIP_SIZE").is_some() {
+        options.max_size_mb = None;
+    }
+    std::fs::create_dir_all(&output)?;
+    let mut file = std::fs::File::create(output.join("recording.log"))?;
+    let result = render_highlights(RenderJobInput {
+        combat_ticks: None,
+        demo: &demo,
+        demo_path: PathBuf::from(&demo.path),
+        highlights,
+        preserve_merge_order: false,
+        output_dir: output.clone(),
+        options,
+        tools: resolve_tool_paths(&root.join("tools"), &PathOverrides::default()),
+        cancel: Arc::new(AtomicBool::new(false)),
+        log: &mut |line| {
+            println!("{line}");
+            let _ = writeln!(file, "{line}");
+        },
+        stage: &mut |_| {},
+        progress: &mut |_| {},
+    })?;
+    ensure!(
+        result.failed_highlights.is_empty(),
+        "reproduction incomplete"
+    );
+    std::fs::write(
+        output.join("result.json"),
+        serde_json::to_vec_pretty(&result)?,
+    )?;
+    Ok(())
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct Experiment {
@@ -15,6 +80,8 @@ struct Experiment {
     end_tick: i32,
     switch_tick: i32,
     variant: String,
+    #[serde(default)]
+    camera: Option<Camera>,
     #[serde(default)]
     team_overview: bool,
     #[serde(default)]
@@ -122,11 +189,12 @@ fn record_editing_experiment() -> Result<()> {
         highlight,
         slot: Some(player_slot),
         round_result_slot: None,
-        account_id: None,
+        account_id: steamid_to_account_id(&player.steamid),
     };
     let tools = resolve_tool_paths(&spec.tools_dir, &PathOverrides::default());
     let ffmpeg = tools.ffmpeg_exe.clone().context("ffmpeg missing")?;
     let options = RenderOptions {
+        camera: spec.camera.unwrap_or(Camera::Slot),
         width: 1280,
         height: 720,
         fps: 60,
