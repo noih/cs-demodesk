@@ -84,10 +84,10 @@ export function ReplayTab({ meta, parsed, onSetup, active }: { active: boolean; 
       </Flex>
     );
   }
-  return <Player key={meta.id} loaded={loaded} />;
+  return <ReplayPlayer key={meta.id} loaded={loaded} />;
 }
 
-function Player({ loaded }: { loaded: Loaded }) {
+export function ReplayPlayer({ loaded, initialTick, endTick }: { loaded: Loaded; initialTick?: number; endTick?: number }) {
   const { t } = useTranslation();
   const { replay, map, images } = loaded;
   const { typography } = useAppTheme();
@@ -95,10 +95,11 @@ function Player({ loaded }: { loaded: Loaded }) {
   useEffect(() => { labelSizeRef.current = (typography[3] ?? 16) * 0.85; }, [typography]);
   const rounds = replay.parsed.rounds;
   const tr = replay.data.tickRate;
+  const clipRange: [number, number] | undefined = initialTick !== undefined && endTick !== undefined ? [initialTick, endTick] : undefined;
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const boxRef = useRef<HTMLDivElement>(null);
   // playback state lives in refs (read by the rAF loop); React state is a coarse mirror for the UI
-  const clockRef = useRef(new Clock(rounds[0]?.freezeEndTick ?? replay.firstTick, tr, replay.firstTick, replay.lastTick));
+  const clockRef = useRef(new Clock(initialTick ?? rounds[0]?.freezeEndTick ?? replay.firstTick, tr, initialTick ?? replay.firstTick, endTick ?? replay.lastTick));
   const viewRef = useRef<View>({ zoom: 1, panX: 0, panY: 0 });
   const togglesRef = useRef<DrawToggles>(DEFAULT_TOGGLES);
   const focusRef = useRef<number | undefined>(undefined);
@@ -153,11 +154,12 @@ function Player({ loaded }: { loaded: Loaded }) {
   );
   const stepRound = useCallback(
     (delta: number) => {
+      if (endTick !== undefined) return;
       const cur = roundAt(rounds, clockRef.current.tick);
       const idx = cur ? rounds.indexOf(cur) : -1;
       gotoRound(rounds[Math.min(rounds.length - 1, Math.max(0, idx + delta))]);
     },
-    [rounds, gotoRound],
+    [rounds, gotoRound, endTick],
   );
   /** Zoom around a point (canvas px from the centre), keeping that point still. */
   const setZoomTo = useCallback((next: number, cx = 0, cy = 0) => {
@@ -322,7 +324,7 @@ function Player({ loaded }: { loaded: Loaded }) {
       <Flex gap="3" align="start">
         {/* Round strip: only the bottom edge marks the winning side. */}
         <Flex gap="1" wrap="wrap" style={{ flex: 1 }}>
-          {rounds.map((r) => (
+          {(clipRange ? rounds.filter(r=>r.round===curRound?.round) : rounds).map((r) => (
             <button key={r.round} className={`round-pill ${curRound?.round === r.round ? 'active' : ''}`} aria-pressed={curRound?.round === r.round} style={{ borderBottomColor: r.winner === 'CT' ? 'var(--app-teamA)' : r.winner === 'TERRORIST' ? 'var(--app-teamB)' : 'transparent' }} onClick={() => gotoRound(r)} title={t('common.roundN', { n: r.round })}>
               {r.round}
             </button>
@@ -429,17 +431,17 @@ function Player({ loaded }: { loaded: Loaded }) {
             ))}
           </Select.Content>
         </Select.Root>
-        <Tooltip delayDuration={150} content={t('replay.prevRoundHint')}>
+        {!clipRange && <Tooltip delayDuration={150} content={t('replay.prevRoundHint')}>
           <IconButton variant="soft" onClick={() => stepRound(-1)} aria-label={t('replay.prevRound')}>
             <i aria-hidden="true" className="bi bi-skip-start-fill app-icon"  />
           </IconButton>
-        </Tooltip>
-        <RoundTimeline replay={replay} round={curRound} tick={state.tick} onSeek={seek} />
-        <Tooltip delayDuration={150} content={t('replay.nextRoundHint')}>
+        </Tooltip>}
+        <RoundTimeline replay={replay} round={curRound} tick={state.tick} onSeek={seek} range={clipRange} />
+        {!clipRange && <Tooltip delayDuration={150} content={t('replay.nextRoundHint')}>
           <IconButton variant="soft" onClick={() => stepRound(1)} aria-label={t('replay.nextRound')}>
             <i aria-hidden="true" className="bi bi-skip-end-fill app-icon"  />
           </IconButton>
-        </Tooltip>
+        </Tooltip>}
       </Flex>
     </Flex>
   );

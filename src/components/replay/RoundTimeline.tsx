@@ -5,14 +5,14 @@ import type { Replay } from '../../replay/engine.ts';
 import { teamColor } from '../../replay/draw.ts';
 
 /** Timeline of the current round: kills as ticks, bomb plant as a red segment, click / drag to seek. */
-export function RoundTimeline({ replay, round, tick, onSeek }: { replay: Replay; round?: RoundInfo; tick: number; onSeek: (t: number) => void }) {
+export function RoundTimeline({ replay, round, tick, onSeek, range }: { replay: Replay; round?: RoundInfo; tick: number; onSeek: (t: number) => void; range?: [number, number] }) {
   const ref = useRef<HTMLDivElement>(null);
   const nextRoundAt = useRef(0);
-  const start = round?.startTick ?? replay.firstTick;
-  const end = round?.officiallyEndedTick ?? replay.lastTick;
+  const start = range?.[0] ?? round?.startTick ?? replay.firstTick;
+  const end = range?.[1] ?? round?.officiallyEndedTick ?? replay.lastTick;
   const span = Math.max(1, end - start);
   const pct = (t: number) => `${Math.min(100, Math.max(0, ((t - start) / span) * 100))}%`;
-  const kills = useMemo(() => (round ? replay.killsIn(round) : []), [replay, round]);
+  const kills = useMemo(() => (round ? replay.killsIn(round) : []).filter(k=>k.tick>=start && k.tick<=end), [replay, round, start, end]);
   const plant = useMemo(() => {
     if (!round) return undefined;
     const p = replay.data.events.find((e) => e.k === 'plant' && e.t >= round.startTick && e.t <= round.endTick);
@@ -25,7 +25,7 @@ export function RoundTimeline({ replay, round, tick, onSeek }: { replay: Replay;
     if (rect.width <= 0) return;
     const position = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width));
     const index = round ? replay.parsed.rounds.indexOf(round) : -1;
-    const next = index >= 0 ? replay.parsed.rounds[index + 1] : undefined;
+    const next = !range && index >= 0 ? replay.parsed.rounds[index + 1] : undefined;
     if (position === 1 && next) {
       const now = performance.now();
       if (now < nextRoundAt.current) return;

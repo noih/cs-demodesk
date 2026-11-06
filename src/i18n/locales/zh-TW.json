@@ -877,5 +877,26 @@
     "pushUnavailable": "地圖幾何資料無法準備，暫時無法分析隊伍推進；其他剪輯仍可使用。",
     "groupEmpty": "沒有可用的剪輯情境",
     "durationHint": "片長會增加。"
+  },
+  "teamStories": {
+    "title": "隊伍故事",
+    "hint": "以隊伍為主角瀏覽整場比賽。先用 2D 檢視候選段落，再驗證影片剪輯；移動軌跡本身不代表戰術意圖。",
+    "experimental": "原型 · 2D 分鏡",
+    "analyze": "分析隊伍故事",
+    "team": "隊伍",
+    "mapUnavailable": "地圖預覽無法使用。",
+    "won": "獲勝",
+    "lost": "落敗",
+    "keyPlayer": "關鍵人物",
+    "empty": "未找到符合條件的隊伍段落。",
+    "select": "選擇一個時刻，預覽前因與結果。",
+    "utility": "集中使用道具",
+    "trade": "隊友補槍",
+    "converge": "分路接近交戰區",
+    "advance": "隊伍推進",
+    "relocate": "長距離轉移",
+    "plant": "下包",
+    "defuse": "拆包",
+    "clutch": "殘局轉折"
   }
 }

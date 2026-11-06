@@ -877,5 +877,26 @@
     "pushUnavailable": "맵 지형 데이터를 준비할 수 없어 팀 진격 분석을 사용할 수 없습니다. 다른 편집은 사용할 수 있습니다.",
     "groupEmpty": "사용 가능한 편집 없음",
     "durationHint": "영상이 길어집니다."
+  },
+  "teamStories": {
+    "title": "팀 스토리",
+    "hint": "팀을 주인공으로 경기를 살펴봅니다. 영상 편집 전에 후보 장면을 2D로 확인하세요. 이동만으로 전술 의도를 단정하지 않습니다.",
+    "experimental": "프로토타입 · 2D 스토리보드",
+    "analyze": "팀 스토리 분석",
+    "team": "팀",
+    "mapUnavailable": "맵 미리보기를 사용할 수 없습니다.",
+    "won": "승리",
+    "lost": "패배",
+    "keyPlayer": "핵심 선수",
+    "empty": "조건에 맞는 팀 장면이 없습니다.",
+    "select": "장면을 선택해 전후 상황을 확인하세요.",
+    "utility": "집중 투척",
+    "trade": "트레이드 킬",
+    "converge": "다른 경로에서 접근",
+    "advance": "팀 진격",
+    "relocate": "장거리 이동",
+    "plant": "설치",
+    "defuse": "해제",
+    "clutch": "클러치 전환점"
   }
 }

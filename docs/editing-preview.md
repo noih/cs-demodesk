@@ -83,7 +83,8 @@ No dynamic plugin framework or generic predicate engine is involved.
 
 This is an unreleased schema replacement. Version 2 invalidates old analysis keys;
 there is no reader or conversion for the old events-based cache. Reanalyze to
-create new results. Old queued editing jobs also require fresh analysis.
+create new results. Old queued editing jobs also require fresh analysis. The
+separate TypeScript team-story prototype is not part of this pipeline yet.
 
 Regression verification covers 64 selection combinations across three local demo
 jobs, comparing candidates, recommendations, conflicts and exact shot plans before
@@ -115,10 +116,26 @@ camera on the other reported clip. Four capture passes shared one CS2 launch and
 used the saved plan without reanalysis. All three enemy viewpoints were checked;
 the complete 20 MiB export produced a 30.02-second, 19.47 MiB video.
 
+## Team-story prototype
+
+The Highlights page has a separate **Team stories** entry. It builds a 2D
+storyboard across the match using stable team membership across halftime. A
+candidate shows its participants, lead-in, and payoff. Selecting it opens a
+bounded replay preview. The prototype does not yet export a team-story video.
+
+Evidence includes different teammates using utility within two seconds, trade
+kills within three seconds, coordinated movement into nearby action, distinct
+trajectories approaching the same encounter, long-distance movement after prior
+action, objective events, and clutch turning points. Ordinary proximity and
+walking without action do not qualify. Movement labels deliberately do not infer
+named sites or claim an A-to-B rotation. Site semantics, route identity, ranking,
+and cinematic assembly require further validation against more matches.
+
 ## Checks
 
 - `npm run build`
 - `npm run test:ui` (requires the documented Playwright runtime)
+- `npm run test:stories`
 - `cargo test -p demodesk-core --lib`
 - `cargo check -p demodesk`
 

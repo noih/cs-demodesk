@@ -881,5 +881,26 @@
     "pushUnavailable": "Team push analysis is unavailable because map geometry could not be prepared. Other edits are still available.",
     "groupEmpty": "No available edits",
     "durationHint": "Increases video length."
+  },
+  "teamStories": {
+    "title": "Team stories",
+    "hint": "Explore the match by team. Review candidate sequences in 2D before developing the video edit; movement alone does not establish tactical intent.",
+    "experimental": "Prototype · 2D storyboard",
+    "analyze": "Analyze team stories",
+    "team": "Team",
+    "mapUnavailable": "Map preview unavailable.",
+    "won": "Won",
+    "lost": "Lost",
+    "keyPlayer": "Key player",
+    "empty": "No supported team sequences found.",
+    "select": "Select a moment to preview its lead-in and payoff.",
+    "utility": "Utility burst",
+    "trade": "Trade kill",
+    "converge": "Converging approaches",
+    "advance": "Team advance",
+    "relocate": "Long-distance relocation",
+    "plant": "Plant",
+    "defuse": "Defuse",
+    "clutch": "Clutch turn"
   }
 }
