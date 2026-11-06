@@ -855,7 +855,7 @@
   },
   "editingEffects": {
     "title": "Highlight editing",
-    "sizeLimitWarning": "May lengthen the video, reducing quality when a file size limit is set.",
+    "sizeLimitWarning": "Increases video length; a file size limit reduces image quality.",
     "opening": {
       "title": "Opening camera",
       "hint": "Follow the player into the action."
@@ -871,6 +871,15 @@
     "push": {
       "title": "Team push",
       "hint": "Show coordinated team advances when suitable."
-    }
+    },
+    "analyze": "Analyze scenes",
+    "analyzing": "Analyzing",
+    "reanalyze": "Analyze again",
+    "selected": "{{count}} / {{total}} selected",
+    "recommended": "Recommended",
+    "empty": "No available edits for these clips. Export normally.",
+    "pushUnavailable": "Team push analysis is unavailable because map geometry could not be prepared. Other edits are still available.",
+    "groupEmpty": "No available edits",
+    "durationHint": "Increases video length."
   }
 }

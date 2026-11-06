@@ -8,7 +8,7 @@ pub struct Sample {
     pub tick: i32,
     pub subjects: Vec<Vec3>, // Feet positions, with a conservative standing body envelope.
 }
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Candidate {
     pub position: Vec3,

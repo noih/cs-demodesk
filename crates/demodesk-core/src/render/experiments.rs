@@ -4,6 +4,70 @@ use anyhow::{ensure, Context};
 use std::io::Write;
 
 #[test]
+#[ignore = "offline characterization of private demo jobs; writes a new output directory"]
+fn characterize_editing_pipeline() -> Result<()> {
+    let output = PathBuf::from(std::env::var("DEMODESK_PIPELINE_OUTPUT")?);
+    ensure!(!output.exists(), "output must be a new directory");
+    std::fs::create_dir_all(&output)?;
+    for path in std::env::var("DEMODESK_PIPELINE_JOBS")?.split(';') {
+        let path = Path::new(path);
+        let job: serde_json::Value = serde_json::from_slice(&std::fs::read(path)?)?;
+        let root = path.parent().unwrap().parent().unwrap().parent().unwrap();
+        let parsed: serde_json::Value = serde_json::from_slice(&std::fs::read(
+            root.join("parsed")
+                .join(format!("{}.json", job["demoId"].as_str().unwrap())),
+        )?)?;
+        let demo: DemoInfo = serde_json::from_value(parsed["info"].clone())?;
+        let mut clips: Vec<Highlight> = serde_json::from_value(parsed["highlights"].clone())?;
+        clips.retain(|h| {
+            job["highlightIds"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|id| id.as_str() == Some(&h.id))
+        });
+        let options: RenderOptions = serde_json::from_value(job["options"].clone())?;
+        let mut tools = resolve_tool_paths(&root.join("tools"), &PathOverrides::default());
+        tools.cs2_exe = None;
+        tools.hlae_exe = None;
+        tools.hlae_dll = None;
+        let analysis =
+            editing::Analysis::prepare("comparison".into(), clips, &demo, &options, &tools, root)?;
+        let summary = analysis.summary(false);
+        ensure!(
+            summary.candidates.len() <= 10,
+            "too many combinations for this fixture"
+        );
+        let mut plans = vec![];
+        for mask in 0..(1 << summary.candidates.len()) {
+            let ids: Vec<_> = summary
+                .candidates
+                .iter()
+                .enumerate()
+                .filter(|(i, _)| mask & (1 << i) != 0)
+                .map(|(_, c)| c.id.clone())
+                .collect();
+            let result = match analysis.select(&ids, &demo) {
+                Ok(plan) => serde_json::json!({"ids":ids,"plan":plan}),
+                Err(_) => serde_json::json!({"ids":ids,"invalid":true}),
+            };
+            plans.push(result);
+        }
+        std::fs::write(
+            output.join(format!("{}.json", job["id"].as_str().unwrap())),
+            serde_json::to_vec_pretty(&serde_json::json!({"summary":summary,"plans":plans}))?,
+        )?;
+        println!(
+            "{}: {} candidates, {} combinations",
+            job["id"],
+            summary.candidates.len(),
+            plans.len()
+        );
+    }
+    Ok(())
+}
+
+#[test]
 #[ignore = "reproduces a private export job in a new output directory using CS2"]
 fn reproduce_editing_job() -> Result<()> {
     let input = PathBuf::from(std::env::var("DEMODESK_REPRO_JOB")?);
@@ -39,8 +103,58 @@ fn reproduce_editing_job() -> Result<()> {
         options.max_size_mb = None;
     }
     std::fs::create_dir_all(&output)?;
+    let tools = resolve_tool_paths(&root.join("tools"), &PathOverrides::default());
+    let prepared_editing = if std::env::var_os("DEMODESK_REPRO_ANALYZE").is_some() {
+        let started = std::time::Instant::now();
+        let mut offline_tools = tools.clone();
+        offline_tools.cs2_exe = None;
+        offline_tools.hlae_exe = None;
+        offline_tools.hlae_dll = None;
+        offline_tools.ffmpeg_exe = None;
+        let analysis = editing::Analysis::prepare(
+            "experiment".into(),
+            highlights.clone(),
+            &demo,
+            &options,
+            &offline_tools,
+            &output,
+        )?;
+        let selected: Vec<_> = analysis
+            .candidates
+            .iter()
+            .filter(|c| {
+                c.recommended
+                    || (std::env::var_os("DEMODESK_REPRO_ALL_COMBAT").is_some()
+                        && c.kind == editing::Kind::Combat)
+            })
+            .map(|c| c.id.clone())
+            .collect();
+        let plan = analysis.select(&selected, &demo)?;
+        std::fs::write(
+            output.join("analysis.json"),
+            serde_json::to_vec_pretty(&analysis.summary(false))?,
+        )?;
+        std::fs::write(
+            output.join("editing-plan.json"),
+            serde_json::to_vec_pretty(&plan)?,
+        )?;
+        println!(
+            "Offline analysis: {:.2}s, {} candidates, {} selected",
+            started.elapsed().as_secs_f64(),
+            analysis.candidates.len(),
+            selected.len()
+        );
+        if std::env::var_os("DEMODESK_REPRO_ANALYSIS_ONLY").is_some() {
+            return Ok(());
+        }
+        Some(plan)
+    } else {
+        None
+    };
+    let started = std::time::Instant::now();
     let mut file = std::fs::File::create(output.join("recording.log"))?;
     let result = render_highlights(RenderJobInput {
+        prepared_editing,
         combat_ticks: None,
         demo: &demo,
         demo_path: PathBuf::from(&demo.path),
@@ -48,7 +162,7 @@ fn reproduce_editing_job() -> Result<()> {
         preserve_merge_order: false,
         output_dir: output.clone(),
         options,
-        tools: resolve_tool_paths(&root.join("tools"), &PathOverrides::default()),
+        tools,
         cancel: Arc::new(AtomicBool::new(false)),
         log: &mut |line| {
             println!("{line}");
@@ -57,6 +171,7 @@ fn reproduce_editing_job() -> Result<()> {
         stage: &mut |_| {},
         progress: &mut |_| {},
     })?;
+    println!("Export elapsed: {:.2}s", started.elapsed().as_secs_f64());
     ensure!(
         result.failed_highlights.is_empty(),
         "reproduction incomplete"
@@ -113,21 +228,18 @@ fn plan_team_push_experiment() -> Result<()> {
     let tools = resolve_tool_paths(&spec.tools_dir, &PathOverrides::default());
     let cancel = AtomicBool::new(false);
     let path = Path::new(&demo.path);
-    let events = utility::load(path, &cancel)?;
+    let events = demo_data::load(path, &cancel)?;
     let mut clips = vec![h];
-    let plans = team_push::prepare(
-        &mut clips,
-        &demo,
-        path,
-        &events,
-        team_push::MapTools {
-            game: tools.cs2_dir.as_deref().context("game missing")?,
-            vrf: tools.vrf_exe.as_deref(),
-            root: spec.tools_dir.parent().context("root missing")?,
-        },
-        &cancel,
-        &mut |s| println!("{s}"),
+    let tracks = demo_data::load_tracks(path, &clips, demo.tick_rate.round() as i32, &cancel)?;
+    let geometry = crate::analysis::visibility_assets::prepare(
+        spec.tools_dir.parent().context("root missing")?,
+        tools.cs2_dir.as_deref().context("game missing")?,
+        tools.vrf_exe.as_deref().context("map tools missing")?,
+        &demo.map_name,
     )?;
+    let plans = team_push::detect(&mut clips, &demo, &events, &tracks, &|a, b| {
+        geometry.world.ray(a, b)
+    });
     std::fs::write(
         manifest.with_extension("plan.json"),
         serde_json::to_vec_pretty(&serde_json::json!({"clips":clips,"plans":plans}))?,
@@ -215,6 +327,7 @@ fn record_editing_experiment() -> Result<()> {
     };
     if spec.variant == "utility" {
         let result = render_highlights(RenderJobInput {
+            prepared_editing: None,
             combat_ticks: None,
             demo: &demo,
             demo_path: PathBuf::from(&demo.path),

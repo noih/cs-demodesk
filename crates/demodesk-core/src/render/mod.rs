@@ -7,7 +7,9 @@ pub mod actions;
 mod audio;
 mod camera_search;
 pub(crate) mod combat;
+mod demo_data;
 pub mod diagnostics;
+pub mod editing;
 pub mod encode;
 mod leftovers;
 pub mod paths;
@@ -217,6 +219,8 @@ pub struct RenderOptions {
     pub opening_camera: bool,
     pub combat_perspectives: bool,
     pub team_push: bool,
+    pub editing_analysis_id: Option<String>,
+    pub editing_selections: Vec<String>,
     pub round_result_label: String,
     /// Re-encode so each output file — the merged video, or every clip — is at most this many MiB
     // Keep the serialized field name so saved export choices survive the unit change.
@@ -260,6 +264,8 @@ impl Default for RenderOptions {
             opening_camera: false,
             combat_perspectives: false,
             team_push: false,
+            editing_analysis_id: None,
+            editing_selections: vec![],
             round_result_label: "Round result".into(),
             max_size_mb: Some(20.0),
             combat_quality_priority: true,
@@ -518,6 +524,7 @@ fn join_highlight_parts(
 }
 
 pub struct RenderJobInput<'a> {
+    pub prepared_editing: Option<editing::Plan>,
     pub combat_ticks: Option<&'a combat::CombatTicks>,
     pub demo: &'a DemoInfo,
     pub demo_path: PathBuf,
@@ -546,6 +553,7 @@ fn safe_name(s: &str) -> String {
 
 pub fn render_highlights(input: RenderJobInput) -> Result<RenderResult> {
     let RenderJobInput {
+        prepared_editing,
         combat_ticks,
         demo,
         demo_path,
@@ -560,11 +568,11 @@ pub fn render_highlights(input: RenderJobInput) -> Result<RenderResult> {
         progress,
     } = input;
     let (Some(cs2_dir), Some(cs2_exe), Some(hlae_exe), Some(hlae_dll), Some(ffmpeg_exe)) = (
-        tools.cs2_dir,
-        tools.cs2_exe,
-        tools.hlae_exe,
-        tools.hlae_dll,
-        tools.ffmpeg_exe,
+        tools.cs2_dir.clone(),
+        tools.cs2_exe.clone(),
+        tools.hlae_exe.clone(),
+        tools.hlae_dll.clone(),
+        tools.ffmpeg_exe.clone(),
     ) else {
         return Err(ErrorCode::ToolsMissing.into());
     };
@@ -594,96 +602,38 @@ pub fn render_highlights(input: RenderJobInput) -> Result<RenderResult> {
         o.key_moments_only,
         o.short_combat_clips,
     );
-    let mut recording = merge_nearby_clips(recording, demo.tick_rate);
+    let recording = merge_nearby_clips(recording, demo.tick_rate);
     highlights.retain(|h| recording.iter().any(|clip| clip.id == h.id));
-    let editing_events =
-        if (o.utility_teamwork || o.opening_camera || o.combat_perspectives || o.team_push)
-            && !preserve_merge_order
-        {
-            utility::load(&demo_path, &cancel)?
-        } else {
-            vec![]
-        };
-    let team_plans = if o.team_push && !preserve_merge_order {
-        stage("preparing team push");
-        let mut expanded = recording.clone();
-        let root = tools.tools_dir.parent().unwrap_or(&output_dir);
-        let result = team_push::prepare(
-            &mut expanded,
-            demo,
-            &demo_path,
-            &editing_events,
-            team_push::MapTools {
-                game: &cs2_dir,
-                vrf: tools.vrf_exe.as_deref(),
-                root,
-            },
+    anyhow::ensure!(
+        o.editing_analysis_id.is_none() || prepared_editing.is_some(),
+        "Missing saved editing plan; analyze again"
+    );
+    let plan = if let Some(plan) = prepared_editing {
+        log("Using saved editing plan (no demo reanalysis)".into());
+        plan
+    } else if !preserve_merge_order && editing::requested(&o) {
+        stage("analyzing editing opportunities");
+        let mut source = demo.clone();
+        source.path = demo_path.to_string_lossy().into_owned();
+        editing::Analysis::defaults(
+            highlights.clone(),
+            &source,
+            &o,
+            &tools,
+            tools.tools_dir.parent().unwrap_or(&output_dir),
             &cancel,
-            log,
-        );
-        Control::new(&cancel, log).check_cancelled()?;
-        match result {
-            Ok(plans) => {
-                recording = expanded;
-                log(format!("team push: {} sequences", plans.len()));
-                plans
-            }
-            Err(error) => {
-                log(format!(
-                    "team push unavailable; keeping original POV: {error:#}"
-                ));
-                vec![]
-            }
-        }
+        )?
     } else {
-        vec![]
+        editing::Plan::plain(recording)
     };
-    let (recording, utility_cameras) = if o.utility_teamwork && !preserve_merge_order {
-        stage("preparing utility teamwork");
-
-        let planned = utility::plan(recording, demo, &editing_events);
-        log(format!(
-            "utility teamwork: {} sequences",
-            planned.1.iter().flatten().count()
-        ));
-        planned
-    } else {
-        let count = recording.len();
-        (recording, vec![None; count])
-    };
-    let (recording, utility_cameras) = if o.combat_perspectives && !preserve_merge_order {
-        perspectives::plan(
-            recording,
-            utility_cameras,
-            &highlights,
-            demo,
-            &editing_events,
-        )
-    } else {
-        (recording, utility_cameras)
-    };
-    let team_plans: Vec<_> = team_plans
-        .into_iter()
-        .filter(|p| team_push::applies(p, &recording, &utility_cameras))
-        .collect();
-    let (recording, utility_cameras, opening_cameras) = if o.opening_camera && !preserve_merge_order
-    {
-        let opening_originals: Vec<_> = highlights
-            .iter()
-            .filter(|h| !team_plans.iter().any(|p| p.id() == h.id))
-            .cloned()
-            .collect();
-        opening::plan(
-            recording,
-            utility_cameras,
-            &opening_originals,
-            demo,
-            &editing_events,
-        )
-    } else {
-        let count = recording.len();
-        (recording, utility_cameras, vec![None; count])
-    };
+    Control::new(&cancel, log).check_cancelled()?;
+    plan.validate()?;
+    let editing::Plan {
+        recording,
+        utilities: utility_cameras,
+        openings: opening_cameras,
+        teams: team_plans,
+    } = plan;
     let clips = to_render_clips(demo, &recording);
     if o.kill_feed
         && o.player_kill_feed_only
@@ -1110,6 +1060,7 @@ mod tests {
         };
         let mut log = Vec::new();
         let result = super::render_highlights(super::RenderJobInput {
+            prepared_editing: None,
             combat_ticks: None,
             demo: &demo,
             demo_path,

@@ -550,6 +550,21 @@ async fn start_render(
 }
 
 #[tauri::command]
+async fn cached_editing_analysis(engine: State<'_, Eng>, demo_id: String, highlight_ids: Vec<String>, options: RenderOptions) -> CmdResult<Option<demodesk_core::render::editing::Summary>> {
+    blocking(&engine, move |e| e.cached_editing_analysis(&demo_id, &highlight_ids, &options).map_err(err)).await
+}
+
+#[tauri::command]
+async fn analyze_editing(engine: State<'_, Eng>, demo_id: String, highlight_ids: Vec<String>, options: RenderOptions, force: bool) -> CmdResult<demodesk_core::render::editing::Summary> {
+    blocking(&engine, move |e| e.analyze_editing(&demo_id, &highlight_ids, &options, force).map_err(err)).await
+}
+
+#[tauri::command]
+async fn clear_editing_analysis(engine: State<'_, Eng>, id: String) -> CmdResult<()> {
+    blocking(&engine, move |e| e.clear_editing_analysis(&id).map_err(err)).await
+}
+
+#[tauri::command]
 async fn list_jobs(engine: State<'_, Eng>) -> CmdResult<Vec<RenderJob>> {
     blocking(&engine, |e| e.list_jobs().map_err(err)).await
 }
@@ -691,6 +706,9 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            analyze_editing,
+            cached_editing_analysis,
+            clear_editing_analysis,
             browse_directory,
             check_for_updates,
             get_startup_error,

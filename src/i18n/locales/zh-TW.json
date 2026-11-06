@@ -851,7 +851,7 @@
   },
   "editingEffects": {
     "title": "精彩剪輯",
-    "sizeLimitWarning": "可能會增加片長，容量受限會降低畫質。",
+    "sizeLimitWarning": "片長會增加，容量受限會降低畫質。",
     "opening": {
       "title": "開場運鏡",
       "hint": "跟隨主角，帶入交戰。"
@@ -867,6 +867,15 @@
     "push": {
       "title": "隊伍推進",
       "hint": "在合適的片段呈現隊伍推進。"
-    }
+    },
+    "analyze": "分析情境",
+    "analyzing": "分析中",
+    "reanalyze": "重新分析",
+    "selected": "已選 {{count}} / {{total}} 項",
+    "recommended": "推薦",
+    "empty": "這些片段沒有可用的剪輯情境，可直接輸出。",
+    "pushUnavailable": "地圖幾何資料無法準備，暫時無法分析隊伍推進；其他剪輯仍可使用。",
+    "groupEmpty": "沒有可用的剪輯情境",
+    "durationHint": "片長會增加。"
   }
 }

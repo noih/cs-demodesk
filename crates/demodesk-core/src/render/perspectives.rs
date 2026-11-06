@@ -1,11 +1,13 @@
 //! Enemy replays follow completed exchanges; the original main-POV tail survives.
 use super::*;
-use utility::{enemies, gun, shot, Chase, Event};
+use demo_data::{enemies, gun, Event};
+use editing::timeline::shot;
+use utility::Chase;
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn fixture() -> (DemoInfo, Highlight, Vec<Event>) {
+    pub(super) fn fixture() -> (DemoInfo, Highlight, Vec<Event>) {
         let demo = serde_json::from_value(serde_json::json!({"path":"test.dem","mapName":"de_test","serverName":"test","tickRate":64,
             "players":[{"steamid":"main","name":"Main","teamNumber":3,"userId":0},{"steamid":"enemy","name":"Enemy","teamNumber":2,"userId":1}]})).unwrap();
         let h = serde_json::from_value(serde_json::json!({"id":"one","player":{"steamid":"main","name":"Main"},"round":1,
@@ -19,6 +21,42 @@ mod tests {
         }
         events.sort_by_key(|e: &Event| e.tick);
         (demo, h, events)
+    }
+    #[test]
+    fn explicit_selection_can_replay_every_eligible_kill() {
+        let (demo, h, events) = fixture();
+        let selected = [1000, 1600, 1750]
+            .into_iter()
+            .map(|tick| (h.id.clone(), tick, "enemy".into()))
+            .collect();
+        let (shots, _) = plan_selected(
+            vec![h.clone()],
+            vec![None],
+            &[h.clone()],
+            &demo,
+            &events,
+            Some(&selected),
+        );
+        assert_eq!(
+            shots.iter().filter(|s| s.player.steamid == "enemy").count(),
+            3
+        );
+        let main: Vec<_> = shots
+            .iter()
+            .filter(|s| s.player.steamid == "main")
+            .collect();
+        assert_eq!(main.first().unwrap().start_tick, h.start_tick);
+        assert_eq!(main.last().unwrap().end_tick, h.end_tick);
+        assert!(main.windows(2).all(|w| w[0].end_tick == w[1].start_tick));
+        let (plain, _) = plan_selected(
+            vec![h.clone()],
+            vec![None],
+            &[h.clone()],
+            &demo,
+            &events,
+            Some(&Default::default()),
+        );
+        assert_eq!(plain.len(), 1);
     }
     #[test]
     fn multiple_replays_preserve_main_action_and_original_tail() {
@@ -146,12 +184,125 @@ fn value(kill: &Event, main: &str, events: &[Event], rate: i32) -> i32 {
         .sum::<i32>()
 }
 
+#[derive(Serialize, Deserialize)]
+pub(super) struct Prepared {
+    players: Vec<PlayerExchanges>,
+}
+#[derive(Serialize, Deserialize)]
+struct PlayerExchanges {
+    main: String,
+    kills: Vec<Kill>,
+    activity: Vec<i32>,
+}
+#[derive(Serialize, Deserialize)]
+struct Kill {
+    tick: i32,
+    victim: String,
+    eligible: bool,
+    score: i32,
+}
+
+pub(super) fn prepare(originals: &[Highlight], demo: &DemoInfo, events: &[Event]) -> Prepared {
+    let rate = demo.tick_rate.round() as i32;
+    let mains: std::collections::BTreeSet<_> = originals
+        .iter()
+        .map(|h| h.player.steamid.as_str())
+        .collect();
+    Prepared {
+        players: mains
+            .into_iter()
+            .map(|main| PlayerExchanges {
+                main: main.into(),
+                activity: events
+                    .iter()
+                    .filter(|e| involved(e, main))
+                    .map(|e| e.tick)
+                    .collect(),
+                kills: events
+                    .iter()
+                    .filter(|e| {
+                        e.event_name == "player_death"
+                            && e.attacker_steamid.as_deref() == Some(main)
+                    })
+                    .map(|kill| {
+                        let victim = kill.user_steamid.clone().unwrap_or_default();
+                        let start = kill.tick - rate * 3 / 2;
+                        let end = kill.tick + rate / 2;
+                        Kill {
+                            tick: kill.tick,
+                            score: value(kill, main, events, rate),
+                            eligible: rate > 0
+                                && gun(&kill.weapon)
+                                && enemies(kill)
+                                && start > seek::MIN_TICK + 8
+                                && !events.iter().any(|e| {
+                                    e.event_name == "round_start" && e.tick > start && e.tick <= end
+                                })
+                                && demo
+                                    .players
+                                    .iter()
+                                    .any(|p| p.steamid == victim && p.user_id.is_some()),
+                            victim,
+                        }
+                    })
+                    .collect(),
+            })
+            .collect(),
+    }
+}
+
+impl Prepared {
+    pub(super) fn all(
+        &self,
+        originals: &[Highlight],
+    ) -> std::collections::HashSet<(String, i32, String)> {
+        originals
+            .iter()
+            .flat_map(|h| {
+                self.players
+                    .iter()
+                    .filter(|p| p.main == h.player.steamid)
+                    .flat_map(move |p| {
+                        p.kills
+                            .iter()
+                            .map(move |k| (h.id.clone(), k.tick, k.victim.clone()))
+                    })
+            })
+            .collect()
+    }
+}
+
+#[cfg(test)]
 pub(super) fn plan(
     recording: Vec<Highlight>,
     cameras: Vec<Option<Chase>>,
     originals: &[Highlight],
     demo: &DemoInfo,
     events: &[Event],
+) -> (Vec<Highlight>, Vec<Option<Chase>>) {
+    plan_selected(recording, cameras, originals, demo, events, None)
+}
+
+#[cfg(test)]
+pub(super) fn plan_selected(
+    recording: Vec<Highlight>,
+    cameras: Vec<Option<Chase>>,
+    originals: &[Highlight],
+    demo: &DemoInfo,
+    events: &[Event],
+    selected: Option<&std::collections::HashSet<(String, i32, String)>>,
+) -> (Vec<Highlight>, Vec<Option<Chase>>) {
+    let prepared = prepare(originals, demo, events);
+    compose(recording, cameras, originals, demo, &prepared, selected)
+}
+
+pub(super) fn compose(
+    recording: Vec<Highlight>,
+    cameras: Vec<Option<Chase>>,
+    originals: &[Highlight],
+    demo: &DemoInfo,
+    prepared: &Prepared,
+    selected: Option<&std::collections::HashSet<(String, i32, String)>>,
 ) -> (Vec<Highlight>, Vec<Option<Chase>>) {
     let rate = demo.tick_rate.round() as i32;
     if rate <= 0 {
@@ -179,6 +330,7 @@ pub(super) fn plan(
     for (h, camera) in recording.into_iter().zip(cameras) {
         let main = h.player.steamid.as_str();
         if camera.is_some()
+            || selected.is_some_and(|s| !s.iter().any(|(id, _, _)| id == &h.id))
             || !originals
                 .iter()
                 .any(|o| o.id == h.id && o.player.steamid == main)
@@ -187,16 +339,16 @@ pub(super) fn plan(
             views.push(camera);
             continue;
         }
-        let kills: Vec<_> = events
+        let Some(exchanges) = prepared.players.iter().find(|p| p.main == main) else {
+            out.push(h);
+            views.push(camera);
+            continue;
+        };
+        let kills = exchanges
+            .kills
             .iter()
-            .filter(|e| {
-                e.event_name == "player_death"
-                    && e.attacker_steamid.as_deref() == Some(main)
-                    && e.tick >= h.start_tick
-                    && e.tick < h.end_tick
-            })
-            .collect();
-        let mut groups: Vec<Vec<&Event>> = vec![];
+            .filter(|k| k.tick >= h.start_tick && k.tick < h.end_tick);
+        let mut groups: Vec<Vec<&Kill>> = vec![];
         for kill in kills {
             if let Some(group) = groups
                 .last_mut()
@@ -211,14 +363,15 @@ pub(super) fn plan(
         for group in groups {
             let last = group.last().unwrap().tick;
             let mut settled = last;
-            for e in events
+            for &tick in exchanges
+                .activity
                 .iter()
-                .filter(|e| e.tick > last && e.tick < h.end_tick && involved(e, main))
+                .filter(|&&t| t > last && t < h.end_tick)
             {
-                if e.tick - settled > rate {
+                if tick - settled > rate {
                     break;
                 }
-                settled = e.tick;
+                settled = tick;
             }
             let cut = settled + rate / 2;
             if cut <= cursor
@@ -227,24 +380,19 @@ pub(super) fn plan(
             {
                 continue;
             }
-            let candidate = group
+            let mut candidates: Vec<_> = group
                 .into_iter()
                 .filter_map(|kill| {
-                    let enemy = kill.user_steamid.as_deref()?;
-                    let score = value(kill, main, events, rate);
+                    let enemy = kill.victim.as_str();
+                    let score = kill.score;
                     let start = kill.tick - rate * 3 / 2;
                     let end = kill.tick + rate / 2;
-                    let boundary = events
-                        .iter()
-                        .any(|e| e.event_name == "round_start" && e.tick > start && e.tick <= end);
-                    if score < 20
-                        || start <= seek::MIN_TICK + 8
-                        || boundary
-                        || used.contains(&(h.id.clone(), kill.tick))
-                        || !demo
-                            .players
-                            .iter()
-                            .any(|p| p.steamid == enemy && p.user_id.is_some())
+                    let wanted = selected.map_or(score >= 20, |s| {
+                        s.contains(&(h.id.clone(), kill.tick, enemy.to_owned()))
+                    });
+                    if !wanted
+                        || !kill.eligible
+                        || used.contains(&(h.id.clone(), kill.tick, enemy.to_owned()))
                         || represented.iter().any(|(id, player, a, b)| {
                             id == &h.id && player == enemy && *a <= end && *b >= start
                         })
@@ -253,19 +401,30 @@ pub(super) fn plan(
                     }
                     Some((score, kill))
                 })
-                .max_by_key(|(score, kill)| (*score, kill.tick));
-            let Some((_, kill)) = candidate else { continue };
+                .collect();
+            if selected.is_none() {
+                candidates = candidates
+                    .into_iter()
+                    .max_by_key(|(score, kill)| (*score, kill.tick))
+                    .into_iter()
+                    .collect();
+            }
+            if candidates.is_empty() {
+                continue;
+            }
             out.push(shot(&h, main, cursor, cut, demo));
             views.push(None);
-            out.push(shot(
-                &h,
-                kill.user_steamid.as_deref().unwrap(),
-                kill.tick - rate * 3 / 2,
-                kill.tick + rate / 2,
-                demo,
-            ));
-            views.push(None);
-            used.insert((h.id.clone(), kill.tick));
+            for (_, kill) in candidates {
+                out.push(shot(
+                    &h,
+                    &kill.victim,
+                    kill.tick - rate * 3 / 2,
+                    kill.tick + rate / 2,
+                    demo,
+                ));
+                views.push(None);
+                used.insert((h.id.clone(), kill.tick, kill.victim.clone()));
+            }
             cursor = cut;
         }
         if cursor == h.start_tick {

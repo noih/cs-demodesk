@@ -1,23 +1,9 @@
 //! Event-driven utility edits. Recording order may differ from the final story order.
+use super::demo_data::{enemies, gun, Event};
 use super::*;
-use serde_json::Value;
+use editing::timeline::shot;
 
-#[derive(Debug, Clone, Deserialize, Default)]
-#[serde(default)]
-pub(super) struct Event {
-    pub(super) tick: i32,
-    pub(super) event_name: String,
-    pub(super) weapon: String,
-    pub(super) user_steamid: Option<String>,
-    pub(super) attacker_steamid: Option<String>,
-    pub(super) user_team_num: Option<i32>,
-    pub(super) attacker_team_num: Option<i32>,
-    entityid: Option<i32>,
-    pub(super) blind_duration: Option<f64>,
-    pub(super) dmg_health: Option<i32>,
-}
-
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(super) struct Chase {
     pub steam_id: String,
@@ -26,7 +12,7 @@ pub(super) struct Chase {
     pub grenade: Option<Grenade>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(super) struct Grenade {
     pub entity_index: i32,
@@ -34,91 +20,10 @@ pub(super) struct Grenade {
     pub class_name: String,
 }
 
-pub(super) fn load(path: &Path, cancel: &AtomicBool) -> Result<Vec<Event>> {
-    Control::new(cancel, &mut |_| {}).check_cancelled()?;
-    let bytes = std::fs::read(path)?;
-    let names = [
-        "weapon_fire",
-        "player_blind",
-        "player_hurt",
-        "player_death",
-        "flashbang_detonate",
-        "hegrenade_detonate",
-        "round_start",
-        "inferno_startburn",
-        "decoy_detonate",
-        "smokegrenade_detonate",
-    ];
-    let data = crate::parser::DemoParser::new().events(
-        &bytes,
-        &names.map(String::from),
-        &["team_num".into()],
-        &[],
-    )?;
-    Control::new(cancel, &mut |_| {}).check_cancelled()?;
-    let mut events: Vec<Event> = data
-        .game_events
-        .iter()
-        .map(|e| {
-            let value: Value = serde_json::to_value(e)?;
-            serde_json::from_value(value)
-        })
-        .collect::<std::result::Result<_, _>>()?;
-    events.sort_by_key(|e| e.tick);
-    Ok(events)
-}
-
 fn utility_weapon(weapon: &str) -> bool {
     matches!(
         weapon.trim_start_matches("weapon_"),
         "hegrenade" | "flashbang" | "smokegrenade" | "decoy" | "molotov" | "incgrenade" | "inferno"
-    )
-}
-
-pub(super) fn gun(weapon: &str) -> bool {
-    matches!(
-        weapon.trim_start_matches("weapon_"),
-        "ak47"
-            | "m4a1"
-            | "m4a1_silencer"
-            | "awp"
-            | "ssg08"
-            | "scar20"
-            | "g3sg1"
-            | "aug"
-            | "sg556"
-            | "famas"
-            | "galilar"
-            | "glock"
-            | "hkp2000"
-            | "usp_silencer"
-            | "p250"
-            | "deagle"
-            | "revolver"
-            | "tec9"
-            | "fiveseven"
-            | "cz75a"
-            | "elite"
-            | "mac10"
-            | "mp9"
-            | "mp7"
-            | "mp5sd"
-            | "ump45"
-            | "p90"
-            | "bizon"
-            | "nova"
-            | "xm1014"
-            | "mag7"
-            | "sawedoff"
-            | "m249"
-            | "negev"
-    )
-}
-
-pub(super) fn enemies(event: &Event) -> bool {
-    matches!(
-        (event.attacker_team_num, event.user_team_num),
-        (Some(2), Some(3)) | (Some(3), Some(2))
     )
 }
 
@@ -278,52 +183,55 @@ fn candidate<'a>(
     None
 }
 
-pub(super) fn shot(
-    h: &Highlight,
-    player: &str,
-    start: i32,
-    end: i32,
-    demo: &DemoInfo,
-) -> Highlight {
-    let mut out = h.clone();
-    out.start_tick = start;
-    out.end_tick = end;
-    out.anchor_tick = h.anchor_tick.clamp(start, end);
-    out.key_moments.clear();
-    out.round_result = None;
-    out.player.steamid = player.into();
-    out.player.name = demo
-        .players
-        .iter()
-        .find(|p| p.steamid == player)
-        .map_or_else(|| h.player.name.clone(), |p| p.name.clone());
-    out
+#[derive(Serialize, Deserialize)]
+pub(super) struct Prepared {
+    stories: Vec<Story>,
 }
 
-/// Preserve final story order here. recording_passes separately arranges forward-only capture.
-pub(super) fn plan(
-    recording: Vec<Highlight>,
-    demo: &DemoInfo,
-    events: &[Event],
-) -> (Vec<Highlight>, Vec<Option<Chase>>) {
+#[derive(Serialize, Deserialize)]
+struct Story {
+    main: String,
+    kill_tick: i32,
+    effect_tick: i32,
+    chase: Chase,
+    shooter: Option<View>,
+    victim: View,
+    return_start: Option<i32>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct View {
+    player: String,
+    start: i32,
+    end: i32,
+}
+
+/// Resolve event relationships once; composition only places these prepared stories.
+pub(super) fn prepare(originals: &[Highlight], demo: &DemoInfo, events: &[Event]) -> Prepared {
     let rate = demo.tick_rate.round() as i32;
-    let mut shots = Vec::new();
-    let mut cameras = Vec::new();
+    let mut stories = vec![];
     if rate <= 0 {
-        return (recording.clone(), vec![None; recording.len()]);
+        return Prepared { stories };
     }
-    for h in recording {
-        let mut cursor = h.start_tick;
-        let mut edited = false;
+    let mains: std::collections::BTreeSet<_> = originals
+        .iter()
+        .map(|h| h.player.steamid.as_str())
+        .collect();
+    for main in mains {
         for kill in events.iter().filter(|e| {
-            e.event_name == "player_death" && e.tick >= h.start_tick && e.tick < h.end_tick
+            e.event_name == "player_death"
+                && originals.iter().any(|h| {
+                    h.player.steamid == main
+                        && e.tick >= h.start_tick - 4 * rate
+                        && e.tick < h.end_tick
+                })
         }) {
-            let Some(c) = candidate(kill, &h.player.steamid, events, rate) else {
+            let Some(c) = candidate(kill, main, events, rate) else {
                 continue;
             };
             let thrower = c.throw.user_steamid.as_deref().unwrap_or_default();
             let victim = kill.user_steamid.as_deref().unwrap_or_default();
-            if [thrower, victim, &h.player.steamid].iter().any(|id| {
+            if [thrower, victim, main].iter().any(|id| {
                 !demo
                     .players
                     .iter()
@@ -334,16 +242,6 @@ pub(super) fn plan(
             let start = (c.throw.tick - rate * 3 / 4)
                 .max(c.round_start)
                 .max(seek::MIN_TICK + 1);
-            // Do not replace an earlier kill or replay a utility event already used in this window.
-            if edited && start < cursor {
-                continue;
-            }
-            if h.kills
-                .iter()
-                .any(|k| k.tick >= cursor && k.tick < c.effect.tick && k.tick != kill.tick)
-            {
-                continue;
-            }
             let chase_end = c
                 .detonation
                 .map_or(c.throw.tick + rate / 2, |d| d.tick - (rate / 5).max(1))
@@ -360,71 +258,128 @@ pub(super) fn plan(
             if start >= chase_end || enemy_end <= c.effect.tick || enemy_start >= enemy_end {
                 continue;
             }
+            let shooter = c
+                .utility_kill
+                .then(|| {
+                    events.iter().rev().find(|e| {
+                        e.event_name == "player_hurt"
+                            && e.user_steamid.as_deref() == Some(victim)
+                            && e.attacker_steamid.as_deref() != Some(thrower)
+                            && e.attacker_team_num == kill.attacker_team_num
+                            && enemies(e)
+                            && gun(&e.weapon)
+                            && e.dmg_health.unwrap_or(0) > 0
+                            && e.tick >= (kill.tick - 3 * rate).max(c.round_start)
+                            && e.tick < kill.tick
+                    })
+                })
+                .flatten()
+                .and_then(|damage| {
+                    let shooter = damage.attacker_steamid.as_deref().filter(|id| {
+                        demo.players
+                            .iter()
+                            .any(|p| p.steamid == *id && p.user_id.is_some())
+                    })?;
+                    Some(View {
+                        player: shooter.into(),
+                        start: (damage.tick - rate / 2).max(c.round_start),
+                        end: (damage.tick + rate / 3).min(kill.tick - 1),
+                    })
+                });
+            stories.push(Story {
+                main: main.into(),
+                kill_tick: kill.tick,
+                effect_tick: c.effect.tick,
+                chase: Chase {
+                    steam_id: thrower.into(),
+                    start_tick: start,
+                    end_tick: chase_end,
+                    grenade: c.detonation.and_then(|det| {
+                        let class_name = match c.throw.weapon.trim_start_matches("weapon_") {
+                            "flashbang" => "flashbang_projectile",
+                            "hegrenade" => "hegrenade_projectile",
+                            _ => return None,
+                        };
+                        Some(Grenade {
+                            entity_index: det.entityid?,
+                            throw_tick: c.throw.tick + 2,
+                            class_name: class_name.into(),
+                        })
+                    }),
+                },
+                shooter,
+                victim: View {
+                    player: victim.into(),
+                    start: enemy_start,
+                    end: enemy_end,
+                },
+                return_start: (!c.utility_kill).then_some(
+                    (c.effect.tick - rate / 2)
+                        .max(kill.tick - 3 * rate)
+                        .max(c.round_start),
+                ),
+            });
+        }
+    }
+    Prepared { stories }
+}
+
+#[cfg(test)]
+pub(super) fn plan(
+    recording: Vec<Highlight>,
+    demo: &DemoInfo,
+    events: &[Event],
+) -> (Vec<Highlight>, Vec<Option<Chase>>) {
+    let prepared = prepare(&recording, demo, events);
+    compose(recording, demo, &prepared)
+}
+
+pub(super) fn compose(
+    recording: Vec<Highlight>,
+    demo: &DemoInfo,
+    prepared: &Prepared,
+) -> (Vec<Highlight>, Vec<Option<Chase>>) {
+    let rate = demo.tick_rate.round() as i32;
+    let mut shots = vec![];
+    let mut cameras = vec![];
+    for h in recording {
+        let mut cursor = h.start_tick;
+        let mut edited = false;
+        for story in prepared.stories.iter().filter(|s| {
+            s.main == h.player.steamid && s.kill_tick >= h.start_tick && s.kill_tick < h.end_tick
+        }) {
+            let start = story.chase.start_tick;
+            if edited && start < cursor {
+                continue;
+            }
+            if h.kills.iter().any(|k| {
+                k.tick >= cursor && k.tick < story.effect_tick && k.tick != story.kill_tick
+            }) {
+                continue;
+            }
             if start > cursor && start - cursor >= rate / 3 {
                 shots.push(shot(&h, &h.player.steamid, cursor, start, demo));
                 cameras.push(None);
             }
-            shots.push(shot(&h, thrower, start, chase_end, demo));
-            cameras.push(Some(Chase {
-                steam_id: thrower.into(),
-                start_tick: start,
-                end_tick: chase_end,
-                grenade: c.detonation.and_then(|det| {
-                    let class_name = match c.throw.weapon.trim_start_matches("weapon_") {
-                        "flashbang" => "flashbang_projectile",
-                        "hegrenade" => "hegrenade_projectile",
-                        // Fire entity IDs identify the fire area, not the thrown bottle.
-                        _ => return None,
-                    };
-                    Some(Grenade {
-                        entity_index: det.entityid?,
-                        throw_tick: c.throw.tick + 2,
-                        class_name: class_name.into(),
-                    })
-                }),
-            }));
-            if c.utility_kill {
-                if let Some(damage) = events.iter().rev().find(|e| {
-                    e.event_name == "player_hurt"
-                        && e.user_steamid.as_deref() == Some(victim)
-                        && e.attacker_steamid.as_deref() != Some(thrower)
-                        && e.attacker_team_num == kill.attacker_team_num
-                        && enemies(e)
-                        && gun(&e.weapon)
-                        && e.dmg_health.unwrap_or(0) > 0
-                        && e.tick >= (kill.tick - 3 * rate).max(c.round_start)
-                        && e.tick < kill.tick
-                }) {
-                    if let Some(shooter) = damage.attacker_steamid.as_deref().filter(|id| {
-                        demo.players
-                            .iter()
-                            .any(|p| p.steamid == *id && p.user_id.is_some())
-                    }) {
-                        let end = (damage.tick + rate / 3).min(kill.tick - 1);
-                        shots.push(shot(
-                            &h,
-                            shooter,
-                            (damage.tick - rate / 2).max(c.round_start),
-                            end,
-                            demo,
-                        ));
-                        cameras.push(None);
-                    }
-                }
+            shots.push(shot(
+                &h,
+                &story.chase.steam_id,
+                start,
+                story.chase.end_tick,
+                demo,
+            ));
+            cameras.push(Some(story.chase.clone()));
+            for view in story.shooter.iter().chain(std::iter::once(&story.victim)) {
+                shots.push(shot(&h, &view.player, view.start, view.end, demo));
+                cameras.push(None);
             }
-            shots.push(shot(&h, victim, enemy_start, enemy_end, demo));
-            cameras.push(None);
-            if c.utility_kill {
-                // Explosion is the payoff. No invented gun kill after it.
-                cursor = enemy_end.min(h.end_tick);
-            } else {
-                let main_start = (c.effect.tick - rate / 2)
-                    .max(kill.tick - 3 * rate)
-                    .max(c.round_start);
-                let main_end = (kill.tick + rate / 2).min(h.end_tick);
+            if let Some(main_start) = story.return_start {
+                let main_end = (story.kill_tick + rate / 2).min(h.end_tick);
                 shots.push(shot(&h, &h.player.steamid, main_start, main_end, demo));
                 cameras.push(None);
                 cursor = main_end;
+            } else {
+                cursor = story.victim.end.min(h.end_tick);
             }
             edited = true;
         }

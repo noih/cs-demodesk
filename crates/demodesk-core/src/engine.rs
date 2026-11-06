@@ -26,6 +26,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 mod tool_access;
+mod editing;
 
 const PARSE_CONCURRENCY: usize = 3;
 
@@ -151,6 +152,7 @@ pub struct Engine {
     radar_lock: Mutex<()>,
     // ponytail: one scoring worker; use per-demo locks if concurrent scoring becomes necessary.
     scoring_lock: Mutex<()>,
+    editing_lock: Mutex<()>,
     analysis_queue: Mutex<crate::scoring::queue::Queue>,
     active_job: Mutex<Option<(String, Arc<AtomicBool>)>>,
     render_worker_running: AtomicBool,
@@ -195,6 +197,7 @@ impl Engine {
             replay_queue: Mutex::new(ReplayQueue::default()),
             radar_lock: Mutex::new(()),
             scoring_lock: Mutex::new(()),
+            editing_lock: Mutex::new(()),
             analysis_queue: Mutex::new(crate::scoring::queue::Queue::default()),
             active_job: Mutex::new(None),
             render_worker_running: AtomicBool::new(false),
@@ -606,6 +609,7 @@ impl Engine {
         )
     }
     pub fn clear_anomaly_data(&self) -> Result<u64> {
+        let _editing = self.editing_lock.try_lock().map_err(|_| anyhow!("editing analysis is running"))?;
         let _guard = self
             .scoring_lock
             .try_lock()
@@ -1347,6 +1351,7 @@ impl Engine {
     /// Delete every parse result (disk + memory). Refused while something is parsing or rendering.
     pub fn clear_all_analysis(&self) -> Result<u64> {
         let _replay_guard = self.data_lock.lock().unwrap();
+        let _editing = self.editing_lock.try_lock().map_err(|_| anyhow!("editing analysis is running"))?;
         if !self.parsing.lock().unwrap().is_empty() {
             return Err(anyhow!("a demo is being parsed"));
         }
@@ -1736,7 +1741,6 @@ impl Engine {
         highlight_ids: Vec<String>,
         options: RenderOptions,
     ) -> Result<RenderJob> {
-        let _guard = self.data_lock.lock().unwrap();
         let (meta, parsed) = self
             .get_demo(demo_id)
             .ok_or_else(|| anyhow::Error::new(crate::ErrorCode::DemoMissing))?;
@@ -1747,7 +1751,20 @@ impl Engine {
             return Err(crate::ErrorCode::NoHighlights.into());
         }
         check_ascii_path(Path::new(&meta.path))?;
+        let plan = self.selected_editing_plan(&meta, parsed.as_ref().unwrap(), &highlight_ids, &options)?;
+        let _guard = self.data_lock.lock().unwrap();
+        anyhow::ensure!(self.get_demo(demo_id).is_some_and(|(current, result)|
+            current.status == DemoStatus::Parsed && current.path == meta.path
+                && result.is_some_and(|p| p.parsed_at == parsed.as_ref().unwrap().parsed_at)),
+            crate::ErrorCode::DemoNotReady);
         let job = self.store.new_job(demo_id, highlight_ids, options)?;
+        if let Some(plan) = plan {
+            let saved = serde_json::to_vec(&plan).map_err(anyhow::Error::from).and_then(|bytes| crate::store::write_atomic(&self.store.job_dir(&job.id).join("editing-plan.json"), &bytes));
+            if let Err(error) = saved {
+                self.store.delete_job(&job.id)?;
+                return Err(error);
+            }
+        }
         self.render_queue.lock().unwrap().push_back(job.id.clone());
         self.notify.notify(Event::JobChanged {
             job: Box::new(job.clone()),
@@ -2023,6 +2040,7 @@ impl Engine {
                     log("combat quality priority: event data unavailable; using normal size fitting (reparse the demo to enable)".into());
                 }
                 render_highlights(RenderJobInput {
+                    prepared_editing: self.saved_editing_plan(&job, &meta, &parsed)?,
                     combat_ticks: combat_ticks.as_ref(),
                     demo: &parsed.info,
                     demo_path: PathBuf::from(&meta.path),

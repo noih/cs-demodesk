@@ -1,4 +1,4 @@
-import { EditingEffects } from './EditingEffects.tsx';
+import { EditingEffects, type EditingChoice } from './EditingEffects.tsx';
 import { DialogCloseButton } from './DialogCloseButton.tsx';
 import { summarizeHighlights } from '../highlightWindows.ts';
 import { useState, type ReactNode } from 'react';
@@ -14,19 +14,25 @@ const RESOLUTIONS = [
 /** HUD switches in the export dialog, in display order. */
 const HUD_TOGGLES = ['hud', 'playerAvatars', 'crosshair', 'radar', 'killFeed', 'chat', 'viewmodel', 'tracers', 'xray', 'trueView'] as const;
 
-export function ExportDialog({open,onOpenChange,count,seconds,status,onSetup,onSubmit,onSubmitted,forceMerge=false,disabled=false,children,highlights,tickRate}: {
+export function ExportDialog({open,onOpenChange,count,seconds,status,onSetup,onSubmit,onSubmitted,forceMerge=false,disabled=false,children,highlights,tickRate,demoId}: {
   open:boolean;onOpenChange:(open:boolean)=>void;count:number;seconds:number;status?:Status;onSetup:()=>void;
-  highlights?:Highlight[];tickRate?:number;
+  highlights?:Highlight[];tickRate?:number;demoId?:string;
   onSubmit:(options:RenderOptions)=>Promise<unknown>;onSubmitted:()=>void;forceMerge?:boolean;disabled?:boolean;children?:ReactNode;
 }) {
   const {t}=useTranslation();
   const [opts,setOpts]=useState<RenderOptions>(DEFAULT_RENDER_OPTIONS);
   const [submitting,setSubmitting]=useState(false);
   const [error,setError]=useState<string>();
+  const [editing,setEditing]=useState<EditingChoice>();
+  const editingContext=JSON.stringify([demoId, highlights?.map(h=>h.id).sort(), opts.keyMomentsOnly, opts.shortCombatClips]);
+  const choice=editing?.context===editingContext ? editing : undefined;
   const preview = highlights && tickRate ? summarizeHighlights(highlights, tickRate, opts.keyMomentsOnly, opts.shortCombatClips) : undefined;
   const render=async()=>{
-    if(submitting)return;setSubmitting(true);setError(undefined);
-    try {await onSubmit({...opts,roundResultLabel:t('highlights.roundResult'),merge:forceMerge||opts.merge,keyMomentsOnly:!!highlights&&opts.keyMomentsOnly});onOpenChange(false);onSubmitted();}
+    if(submitting || choice?.busy)return;setSubmitting(true);setError(undefined);
+    const chosen=choice?.analysis?.candidates.filter(c=>choice.selected.includes(c.id)) ?? [];
+    try {await onSubmit({...opts,editingAnalysisId:chosen.length ? choice?.analysis?.id : undefined,editingSelections:chosen.map(c=>c.id),
+      openingCamera:chosen.some(c=>c.kind==='opening'),combatPerspectives:chosen.some(c=>c.kind==='combat'),utilityTeamwork:chosen.some(c=>c.kind==='teamwork'),teamPush:chosen.some(c=>c.kind==='push'),
+      roundResultLabel:t('highlights.roundResult'),merge:forceMerge||opts.merge,keyMomentsOnly:!!highlights&&opts.keyMomentsOnly});onOpenChange(false);onSubmitted();}
     catch(error){setError(errorText(error));}finally{setSubmitting(false);}
   };
   return (
@@ -165,7 +171,7 @@ export function ExportDialog({open,onOpenChange,count,seconds,status,onSetup,onS
               </Box>
             </Flex>
           </Grid>
-          {highlights && <EditingEffects hasSizeLimit={opts.maxSizeMb != null} push={opts.teamPush} onPushChange={teamPush=>setOpts({...opts,teamPush})} combat={opts.combatPerspectives} onCombatChange={combatPerspectives=>setOpts({...opts,combatPerspectives})} opening={opts.openingCamera} onOpeningChange={openingCamera=>setOpts({...opts,openingCamera})} enabled={opts.utilityTeamwork} onChange={utilityTeamwork=>setOpts({...opts,utilityTeamwork})} />}
+          {highlights && demoId && tickRate && <EditingEffects key={editingContext} context={editingContext} demoId={demoId} highlights={highlights} tickRate={tickRate} options={opts} onChange={setEditing} />}
           </div>
             <Flex mt="4" gap="3" justify="end" align="center" wrap="wrap">
               {status && !status.ok && (
@@ -173,7 +179,7 @@ export function ExportDialog({open,onOpenChange,count,seconds,status,onSetup,onS
                   <i aria-hidden="true" className="bi bi-exclamation-triangle app-icon" />{status.missingRenderTools.length ? t('common.missingTools', { tools: status.missingRenderTools.join(', ') }) : t('highlights.notReady')}<i aria-hidden="true" className="bi bi-arrow-right app-icon" />
                 </Button>
               )}
-              <Button style={{ marginLeft: 'auto' }} disabled={submitting || !status?.ok || disabled || count===0} onClick={() => void render()}>
+              <Button style={{ marginLeft: 'auto' }} disabled={submitting || choice?.busy || !status?.ok || disabled || count===0} onClick={() => void render()}>
                 {submitting ? t('highlights.submitting') : t('highlights.export')}
               </Button>
             </Flex>

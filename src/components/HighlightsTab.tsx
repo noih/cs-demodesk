@@ -189,7 +189,7 @@ export function HighlightsTab({ meta, parsed, status, onRendered, onSetup }: { m
         </Dialog.Content>
       </Dialog.Root>
 
-      <ExportDialog open={dialog} onOpenChange={setDialog} count={chosen.length} highlights={chosen} tickRate={tr} seconds={selectedSeconds} status={status} onSetup={onSetup}
+      <ExportDialog demoId={meta.id} open={dialog} onOpenChange={setDialog} count={chosen.length} highlights={chosen} tickRate={tr} seconds={selectedSeconds} status={status} onSetup={onSetup}
         onSubmit={options=>api.render(meta.id,[...selected],options)} onSubmitted={()=>{setSelected(new Set());onRendered();}} />
     </Box>
   );

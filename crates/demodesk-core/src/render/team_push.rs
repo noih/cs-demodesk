@@ -1,18 +1,10 @@
 //! Conservative nearby attacking-team pushes. Independent cameras never replace main combat.
+use super::demo_data::{Player, Tracks};
 use super::*;
 use crate::analysis::line_of_sight::{Occlusion, Vec3};
 use camera_search::{Candidate, Sample};
-use std::collections::{BTreeMap, BTreeSet};
 
-#[derive(Clone, Debug)]
-struct Player {
-    id: String,
-    team: i32,
-    alive: bool,
-    position: Vec3,
-}
-type Tracks = BTreeMap<i32, Vec<Player>>;
-#[derive(Clone, Serialize)]
+#[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(super) struct Shot {
     start_tick: i32,
@@ -21,7 +13,7 @@ pub(super) struct Shot {
     samples: Vec<Sample>,
     transition_safe: bool,
 }
-#[derive(Clone, Serialize)]
+#[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(super) struct Sequence {
     id: String,
@@ -68,63 +60,20 @@ fn distance(a: Vec3, b: Vec3) -> f64 {
 fn member<'a>(players: &'a [Player], id: &str) -> Option<&'a Player> {
     players.iter().find(|p| p.id == id)
 }
-fn active(e: &utility::Event, id: &str) -> bool {
+fn active(e: &demo_data::Event, id: &str) -> bool {
     matches!(e.event_name.as_str(), "player_hurt" | "player_death")
         && (e.user_steamid.as_deref() == Some(id) || e.attacker_steamid.as_deref() == Some(id))
 }
-fn main_owns(events: &[utility::Event], main: &str, start: i32, end: i32, rate: i32) -> bool {
+fn main_owns(events: &[demo_data::Event], main: &str, start: i32, end: i32, rate: i32) -> bool {
     events.iter().any(|e| {
         e.tick >= start - rate / 4
             && e.tick < end + rate / 4
             && (active(e, main)
                 || (e.event_name == "weapon_fire"
                     && e.user_steamid.as_deref() == Some(main)
-                    && utility::gun(&e.weapon)))
+                    && demo_data::gun(&e.weapon)))
     })
 }
-fn load(path: &Path, clips: &[Highlight], rate: i32, cancel: &AtomicBool) -> Result<Tracks> {
-    let mut ticks = BTreeSet::new();
-    let step = (rate / 8).max(1) as usize;
-    for h in clips {
-        ticks.extend(((h.start_tick - 4 * rate).max(seek::MIN_TICK)..=h.end_tick).step_by(step));
-    }
-    if ticks.is_empty() {
-        return Ok(Tracks::new());
-    }
-    Control::new(cancel, &mut |_| {}).check_cancelled()?;
-    let bytes = std::fs::read(path)?;
-    let rows = crate::parser::DemoParser::new().ticks(
-        &bytes,
-        &["X", "Y", "Z", "team_num", "health"].map(String::from),
-        ticks.into_iter().collect(),
-    )?;
-    let mut out = Tracks::new();
-    for row in rows.iter() {
-        let (Some(tick), Some(id), Some(x), Some(y), Some(z), Some(team), Some(health)) = (
-            row.tick(),
-            row.steamid(),
-            row.num("X"),
-            row.num("Y"),
-            row.num("Z"),
-            row.num("team_num"),
-            row.num("health"),
-        ) else {
-            continue;
-        };
-        if id == "0" || ![x, y, z].iter().all(|v| v.is_finite()) {
-            continue;
-        }
-        out.entry(tick).or_default().push(Player {
-            id,
-            team: team as i32,
-            alive: health > 0.,
-            position: [x, y, z],
-        });
-    }
-    Control::new(cancel, &mut |_| {}).check_cancelled()?;
-    Ok(out)
-}
-
 fn samples(
     tracks: &Tracks,
     ids: &[String],
@@ -246,7 +195,7 @@ fn camera_shot(
 fn plan_one(
     h: &Highlight,
     tracks: &Tracks,
-    events: &[utility::Event],
+    events: &[demo_data::Event],
     rate: i32,
     ray: &impl Fn(Vec3, Vec3) -> Occlusion,
 ) -> Option<Sequence> {
@@ -258,7 +207,7 @@ fn plan_one(
                 && e.attacker_steamid.as_deref() == Some(main)
                 && e.tick >= h.start_tick
                 && e.tick < h.end_tick
-                && utility::enemies(e)
+                && demo_data::enemies(e)
         })?
         .tick;
     let round = events
@@ -297,7 +246,7 @@ fn plan_one(
                 && e.tick + rate / 2 < end
                 && e.user_team_num == Some(2)
                 && e.attacker_team_num == Some(3)
-                && utility::gun(&e.weapon)
+                && demo_data::gun(&e.weapon)
         })
         .find_map(|death| {
             let ally = death.user_steamid.as_deref()?;
@@ -397,33 +346,16 @@ fn plan_one(
     })
 }
 
-pub(super) struct MapTools<'a> {
-    pub game: &'a Path,
-    pub vrf: Option<&'a Path>,
-    pub root: &'a Path,
-}
-
-pub(super) fn prepare(
+pub(super) fn detect(
     clips: &mut [Highlight],
     demo: &DemoInfo,
-    path: &Path,
-    events: &[utility::Event],
-    map: MapTools<'_>,
-    cancel: &AtomicBool,
-    log: &mut dyn FnMut(String),
-) -> Result<Vec<Sequence>> {
-    let Some(vrf) = map.vrf else {
-        log("team push: map tools unavailable; keeping original POV".into());
-        return Ok(vec![]);
-    };
+    events: &[demo_data::Event],
+    tracks: &Tracks,
+    ray: &impl Fn(Vec3, Vec3) -> Occlusion,
+) -> Vec<Sequence> {
     let rate = demo.tick_rate.round() as i32;
-    anyhow::ensure!(rate >= 8, "invalid team-push tick rate");
-    let tracks = load(path, clips, rate, cancel)?;
-    let world =
-        crate::analysis::visibility_assets::prepare(map.root, map.game, vrf, &demo.map_name)?;
     let mut plans = vec![];
     for h in clips {
-        Control::new(cancel, &mut |_| {}).check_cancelled()?;
         if plans.iter().any(|p: &Sequence| p.id == h.id) {
             continue;
         }
@@ -434,23 +366,18 @@ pub(super) fn prepare(
         {
             continue;
         }
-        if let Some(plan) = plan_one(h, &tracks, events, rate, &|a, b| world.world.ray(a, b)) {
+        if let Some(plan) = plan_one(h, tracks, events, rate, ray) {
             h.start_tick = h.start_tick.min(plan.shots[0].start_tick);
-            log(format!(
-                "team push: {} cameras in {}",
-                plan.shots.len(),
-                h.id
-            ));
             plans.push(plan);
         }
     }
-    Ok(plans)
+    plans
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn fixture() -> (Highlight, Tracks, Vec<utility::Event>) {
+    fn fixture() -> (Highlight, Tracks, Vec<demo_data::Event>) {
         let h=serde_json::from_value(serde_json::json!({"id":"push","player":{"steamid":"main","name":"Main"},"round":1,"startTick":400,"endTick":800,"anchorTick":640,"score":1,"tags":[],"title":"test","kills":[],"breakdown":{}})).unwrap();
         let tracks = (0..=800)
             .step_by(8)

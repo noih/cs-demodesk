@@ -213,6 +213,8 @@ export interface DemoMeta {
 
 export type Camera = 'slot' | 'lock';
 export interface RenderOptions {
+  editingAnalysisId?: string;
+  editingSelections?: string[];
   utilityTeamwork: boolean;
   openingCamera: boolean;
   combatPerspectives: boolean;
@@ -296,6 +298,22 @@ export const DEFAULT_RENDER_OPTIONS: RenderOptions = {
 };
 
 export type JobStatus = 'queued' | 'running' | 'done' | 'partial' | 'error' | 'cancelled';
+export interface EditingCandidate {
+  id: string;
+  highlightId: string;
+  kind: 'opening' | 'combat' | 'teamwork' | 'push';
+  tick: number;
+  target: string;
+  recommended: boolean;
+  conflicts: string[];
+  addedSeconds: number;
+}
+export interface EditingAnalysis {
+  id: string;
+  candidates: EditingCandidate[];
+  cached: boolean;
+  warnings: string[];
+}
 export interface JobOutput {
   file: string;
   bytes: number;
@@ -510,6 +528,8 @@ export const api = {
   analysisClips: (demoId:string,selection:AnalysisClipSelection,merge=false)=>invoke<RuleClips[]>('analysis_clips',{demoId,selection,merge}),
   renderAnalysis: (demoId:string,selection:AnalysisClipSelection,options:RenderOptions)=>invoke<RenderJob[]>('start_analysis_render',{demoId,selection,options}),
   render: (demoId: string, highlightIds: string[], options: RenderOptions) => invoke<RenderJob>('start_render', { demoId, highlightIds, options }),
+  analyzeEditing: (demoId: string, highlightIds: string[], options: RenderOptions, force = false) => invoke<EditingAnalysis>('analyze_editing', { demoId, highlightIds, options, force }),
+  cachedEditingAnalysis: (demoId: string, highlightIds: string[], options: RenderOptions) => invoke<EditingAnalysis | null>('cached_editing_analysis', { demoId, highlightIds, options }),
   jobs: () => invoke<RenderJob[]>('list_jobs'),
   cancel: (id: string) => invoke<boolean>('cancel_job', { id }),
   deleteJob: (id: string) => invoke<void>('delete_job', { id }),

@@ -851,7 +851,7 @@
   },
   "editingEffects": {
     "title": "하이라이트 편집",
-    "sizeLimitWarning": "영상이 길어질 수 있으며, 파일 크기가 제한되면 화질이 낮아집니다.",
+    "sizeLimitWarning": "영상이 길어지며, 파일 크기 제한이 있으면 화질이 낮아집니다.",
     "opening": {
       "title": "오프닝 카메라",
       "hint": "플레이어를 따라 교전으로 이어집니다."
@@ -867,6 +867,15 @@
     "push": {
       "title": "팀 진입",
       "hint": "적절한 장면에서 팀의 진입을 보여줍니다."
-    }
+    },
+    "analyze": "장면 분석",
+    "analyzing": "분석 중",
+    "reanalyze": "다시 분석",
+    "selected": "{{total}}개 중 {{count}}개 선택",
+    "recommended": "추천",
+    "empty": "편집 가능한 장면이 없습니다. 그대로 내보낼 수 있습니다.",
+    "pushUnavailable": "맵 지형 데이터를 준비할 수 없어 팀 진격 분석을 사용할 수 없습니다. 다른 편집은 사용할 수 있습니다.",
+    "groupEmpty": "사용 가능한 편집 없음",
+    "durationHint": "영상이 길어집니다."
   }
 }

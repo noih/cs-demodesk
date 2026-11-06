@@ -851,7 +851,7 @@
   },
   "editingEffects": {
     "title": "精彩剪辑",
-    "sizeLimitWarning": "可能会增加片长，容量受限会降低画质。",
+    "sizeLimitWarning": "片长会增加，容量受限会降低画质。",
     "opening": {
       "title": "开场运镜",
       "hint": "跟随主角，带入交战。"
@@ -867,6 +867,15 @@
     "push": {
       "title": "队伍推进",
       "hint": "在合适的片段呈现队伍推进。"
-    }
+    },
+    "analyze": "分析情境",
+    "analyzing": "分析中",
+    "reanalyze": "重新分析",
+    "selected": "已选 {{count}} / {{total}} 项",
+    "recommended": "推荐",
+    "empty": "这些片段没有可用的剪辑情境，可直接输出。",
+    "pushUnavailable": "地图几何数据无法准备，暂时无法分析队伍推进；其他剪辑仍可使用。",
+    "groupEmpty": "没有可用的剪辑情境",
+    "durationHint": "片长会增加。"
   }
 }

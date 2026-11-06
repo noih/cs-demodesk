@@ -851,7 +851,7 @@
   },
   "editingEffects": {
     "title": "ハイライト編集",
-    "sizeLimitWarning": "動画が長くなることがあり、容量制限がある場合は画質が低下します。",
+    "sizeLimitWarning": "動画が長くなり、容量制限があると画質が下がります。",
     "opening": {
       "title": "オープニングカメラ",
       "hint": "プレイヤーを追い、交戦へつなぐ。"
@@ -867,6 +867,15 @@
     "push": {
       "title": "チーム進行",
       "hint": "適した場面でチームの進行を映します。"
-    }
+    },
+    "analyze": "シーンを分析",
+    "analyzing": "分析中",
+    "reanalyze": "再分析",
+    "selected": "{{total}} 件中 {{count}} 件を選択",
+    "recommended": "おすすめ",
+    "empty": "利用可能な編集候補はありません。そのまま書き出せます。",
+    "pushUnavailable": "マップの形状データを準備できないため、チーム進攻を分析できません。他の編集は利用できます。",
+    "groupEmpty": "利用できる編集はありません",
+    "durationHint": "動画が長くなります。"
   }
 }

@@ -17,7 +17,7 @@ mod tests {
             end_tick: 1100,
             grenade: None,
         };
-        let round: utility::Event =
+        let round: demo_data::Event =
             serde_json::from_value(serde_json::json!({"tick":700,"event_name":"round_start"}))
                 .unwrap();
         let (shots, utilities, openings) = plan(
@@ -58,7 +58,7 @@ mod tests {
     }
 }
 
-#[derive(Clone, Serialize)]
+#[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(super) struct Opening {
     steam_id: String,
@@ -67,12 +67,83 @@ pub(super) struct Opening {
     tick_rate: f64,
 }
 
+#[derive(Serialize, Deserialize)]
+pub(super) struct Prepared {
+    windows: Vec<AliveWindow>,
+}
+#[derive(Serialize, Deserialize)]
+struct AliveWindow {
+    player: String,
+    start: i32,
+    end: i32,
+}
+
+pub(super) fn prepare(
+    originals: &[Highlight],
+    demo: &DemoInfo,
+    events: &[demo_data::Event],
+) -> Prepared {
+    let mut rounds: Vec<_> = events
+        .iter()
+        .filter(|e| e.event_name == "round_start")
+        .map(|e| e.tick)
+        .collect();
+    rounds.insert(0, seek::MIN_TICK);
+    rounds.push(i32::MAX);
+    let mut windows = vec![];
+    let mains: std::collections::BTreeSet<_> = originals
+        .iter()
+        .map(|h| h.player.steamid.as_str())
+        .collect();
+    for player in mains.into_iter().filter(|id| {
+        demo.players
+            .iter()
+            .any(|p| p.steamid == *id && p.user_id.is_some())
+    }) {
+        for round in rounds.windows(2) {
+            let death = events
+                .iter()
+                .filter(|e| {
+                    e.event_name == "player_death"
+                        && e.user_steamid.as_deref() == Some(player)
+                        && e.tick >= round[0]
+                        && e.tick < round[1]
+                })
+                .map(|e| e.tick)
+                .min()
+                .unwrap_or(round[1]);
+            windows.push(AliveWindow {
+                player: player.into(),
+                start: round[0],
+                end: death,
+            });
+        }
+    }
+    Prepared { windows }
+}
+
+#[cfg(test)]
 pub(super) fn plan(
     shots: Vec<Highlight>,
     cameras: Vec<Option<utility::Chase>>,
     originals: &[Highlight],
     demo: &DemoInfo,
-    events: &[utility::Event],
+    events: &[demo_data::Event],
+) -> (
+    Vec<Highlight>,
+    Vec<Option<utility::Chase>>,
+    Vec<Option<Opening>>,
+) {
+    let prepared = prepare(originals, demo, events);
+    compose(shots, cameras, originals, demo, &prepared)
+}
+
+pub(super) fn compose(
+    shots: Vec<Highlight>,
+    cameras: Vec<Option<utility::Chase>>,
+    originals: &[Highlight],
+    demo: &DemoInfo,
+    prepared: &Prepared,
 ) -> (
     Vec<Highlight>,
     Vec<Option<utility::Chase>>,
@@ -85,23 +156,11 @@ pub(super) fn plan(
             if let Some(original) = originals.iter().find(|h| h.id == shot.id) {
                 let end = shot.start_tick;
                 let start = end - (1.8 * demo.tick_rate).round() as i32;
-                let round_start = events
-                    .iter()
-                    .filter(|e| e.event_name == "round_start" && e.tick <= end)
-                    .map(|e| e.tick)
-                    .max()
-                    .unwrap_or(seek::MIN_TICK);
-                let alive = !events.iter().any(|e| {
-                    e.event_name == "player_death"
-                        && e.user_steamid.as_deref() == Some(original.player.steamid.as_str())
-                        && e.tick >= round_start
-                        && e.tick <= end
-                });
-                let slot = demo
-                    .players
-                    .iter()
-                    .any(|p| p.steamid == original.player.steamid && p.user_id.is_some());
-                if start > round_start && start > seek::MIN_TICK + 8 && alive && slot {
+                if start > seek::MIN_TICK + 8
+                    && prepared.windows.iter().any(|w| {
+                        w.player == original.player.steamid && start > w.start && end < w.end
+                    })
+                {
                     let mut intro = original.clone();
                     intro.start_tick = start;
                     intro.end_tick = end;
