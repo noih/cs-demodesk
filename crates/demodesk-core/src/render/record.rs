@@ -604,7 +604,7 @@ impl RecordSession<'_> {
 
     /// Follow the `[demodesk]` markers until the game quits; `Ok(true)` when the
     /// schedule ran to its end.
-    fn follow_markers(&mut self, con: &mut Netcon) -> Result<bool> {
+    fn follow_markers(&mut self, con: &mut Netcon, keep_alive: bool) -> Result<bool> {
         let timeout_at = Instant::now() + Duration::from_secs(self.timeout_seconds);
         let demo_deadline = Instant::now() + Duration::from_secs(120);
         let mut progress = Progress::default();
@@ -617,6 +617,9 @@ impl RecordSession<'_> {
             }
             for line in con.drain() {
                 self.handle_console_line(&line, &mut progress)?;
+            }
+            if progress.done && keep_alive {
+                return Ok(true);
             }
             if !progress.seen_marker && Instant::now() > demo_deadline {
                 if replayed {
@@ -689,77 +692,134 @@ impl RecordSession<'_> {
         }
         Ok(())
     }
+}
 
-    fn run(
-        &mut self,
-        schedule_file: &Path,
-        started_at: std::time::SystemTime,
-        processes: &super::process::ProcessTree,
-    ) -> Result<()> {
-        let mut hider = self.launch(processes)?;
-        let result = (|| {
-            let mut con = self
+/// One owned game process for all capture passes of one export.
+/// The job object still kills every descendant on errors or application exit.
+pub(super) struct RecordingHost {
+    processes: super::process::ProcessTree,
+    con: Netcon,
+    hider: Option<GameWindowGuard>,
+    started_at: std::time::SystemTime,
+    hook_log: PathBuf,
+}
+impl RecordingHost {
+    fn start(s: &mut RecordSession) -> Result<Self> {
+        if is_process_running("cs2.exe")? {
+            return Err(ErrorCode::Cs2AlreadyRunning.into());
+        }
+        register_ffmpeg_with_hlae(&s.hlae_exe, &s.ffmpeg_exe)?;
+        let processes = super::process::ProcessTree::new()?;
+        let started_at = std::time::SystemTime::now();
+        let _ = std::fs::remove_file(console_log_path(&s.cs2_dir));
+        let started = (|| {
+            let hider = s.launch(&processes)?;
+            let con = s
                 .connect_netcon(hider.as_ref())
                 .map_err(|e| ErrorCode::ConsoleUnavailable.wrap(e))?;
-            if !self.show_game {
-                let evidence = std::fs::read_to_string(self.output_dir.join("window-hook.log"))
-                    .unwrap_or_default();
+            let hook_log = s.output_dir.join("window-hook.log");
+            if !s.show_game {
+                let evidence = std::fs::read_to_string(&hook_log).unwrap_or_default();
                 if !evidence.lines().any(|line| line == "installed") {
                     return Err(anyhow!("Synchronous window hook did not report successful installation; see window-hook.log.").context(ErrorCode::WindowHookFailed));
                 }
-                (self.log)("synchronous window hook installed".into());
+                (s.log)("synchronous window hook installed".into());
             }
-            self.start_demo(&mut con, schedule_file)
-                .map_err(|e| ErrorCode::DemoStartFailed.wrap(e))?;
-            let followed = self.follow_markers(&mut con);
-            if let Some(dump) = newest_crash_dump(&self.cs2_exe, started_at) {
-                (self.log)(format!(
-                    "warning: CS2 wrote a crash dump ({}) — HLAE may be out of date",
-                    dump.file_name().unwrap().to_string_lossy()
-                ));
-            }
-            if !followed? {
-                return Err(ErrorCode::GameExited.into());
-            }
-            Ok(())
+            Ok((con, hider, hook_log))
         })();
-        if let Some(hider) = hider.as_mut() {
-            hider.stop();
-            hider.report(self.log);
-        }
-        if !self.show_game {
-            if let Ok(evidence) = std::fs::read_to_string(self.output_dir.join("window-hook.log")) {
-                for line in evidence.lines() {
-                    (self.log)(format!("window hook: {line}"));
-                }
+        match started {
+            Ok((con, hider, hook_log)) => Ok(Self {
+                processes,
+                con,
+                hider,
+                started_at,
+                hook_log,
+            }),
+            Err(error) => {
+                processes.finish()?;
+                Err(error)
             }
         }
-        result
+    }
+    fn finish(&mut self, log: &mut dyn FnMut(String)) -> Result<()> {
+        if let Some(hider) = self.hider.as_mut() {
+            hider.stop();
+            hider.report(log);
+        }
+        if let Ok(evidence) = std::fs::read_to_string(&self.hook_log) {
+            for line in evidence.lines() {
+                log(format!("window hook: {line}"));
+            }
+        }
+        self.processes.finish().map_err(Into::into)
     }
 }
 
-pub fn run_recording_session(s: &mut RecordSession) -> Result<()> {
-    if is_process_running("cs2.exe")? {
-        return Err(crate::ErrorCode::Cs2AlreadyRunning.into());
+impl Drop for RecordingHost {
+    fn drop(&mut self) {
+        if let Some(hider) = self.hider.as_mut() {
+            hider.stop();
+        }
+        if let Err(error) = self.processes.finish() {
+            eprintln!("recording process cleanup failed: {error}");
+        }
     }
+}
+
+pub(super) fn run_recording_pass(
+    s: &mut RecordSession,
+    host: &mut Option<RecordingHost>,
+    keep_alive: bool,
+) -> Result<()> {
     std::fs::create_dir_all(&s.output_dir)?;
     let schedule_file = s.output_dir.join("commands.xml");
     std::fs::write(&schedule_file, mirv_cmd_xml(&s.schedule))?;
-    register_ffmpeg_with_hlae(&s.hlae_exe, &s.ffmpeg_exe)?;
-    let started_at = std::time::SystemTime::now();
-    let _ = std::fs::remove_file(console_log_path(&s.cs2_dir));
-
-    let processes = super::process::ProcessTree::new()?;
-    let result = s.run(&schedule_file, started_at, &processes);
-    let cleanup = processes.finish();
+    let result = (|| {
+        if host.is_none() {
+            *host = Some(RecordingHost::start(s)?);
+        } else {
+            (s.log)("reusing CS2 for the next recording pass".into());
+            let con = &mut host.as_mut().unwrap().con;
+            con.send("mirv_cmd clear; stopdemo")?;
+            anyhow::ensure!(
+                con.ping("demodesk_pass_reset", Duration::from_secs(10))?,
+                "Game did not acknowledge pass reset"
+            );
+            con.drain();
+        }
+        let active = host.as_mut().unwrap();
+        s.start_demo(&mut active.con, &schedule_file)
+            .map_err(|e| ErrorCode::DemoStartFailed.wrap(e))?;
+        let followed = s.follow_markers(&mut active.con, keep_alive);
+        if let Some(dump) = newest_crash_dump(&s.cs2_exe, active.started_at) {
+            (s.log)(format!(
+                "warning: CS2 wrote a crash dump ({}) — HLAE may be out of date",
+                dump.file_name().unwrap().to_string_lossy()
+            ));
+        }
+        if !followed? {
+            return Err(ErrorCode::GameExited.into());
+        }
+        Ok(())
+    })();
+    let cleanup = if result.is_err() || !keep_alive {
+        host.take().map_or(Ok(()), |mut h| h.finish(s.log))
+    } else {
+        Ok(())
+    };
     if let Err(error) = &cleanup {
         (s.log)(format!("process cleanup failed: {error}"));
     }
-    let result = result.and(cleanup.map_err(Into::into));
+    let result = result.and(cleanup);
     if result.is_err() {
         summarize_console_log(&s.cs2_dir, s.log);
     }
     result
+}
+
+#[cfg(test)]
+pub fn run_recording_session(s: &mut RecordSession) -> Result<()> {
+    run_recording_pass(s, &mut None, false)
 }
 
 #[derive(Debug, Clone)]

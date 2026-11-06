@@ -57,7 +57,7 @@ use anyhow::{anyhow, Result};
 use encode::{bytes_to_mib, concat_clips, encode_to_size_with_progress, mux_clip, Control};
 use leftovers::{has_leftovers, remove_leftovers};
 use paths::{resolve_tool_paths, to_forward_slashes, PathOverrides, ToolPaths, IS_WINDOWS};
-use record::{collect_clip_outputs, run_recording_session, RecordSession};
+use record::{collect_clip_outputs, RecordSession};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
@@ -731,6 +731,7 @@ pub fn render_highlights(input: RenderJobInput) -> Result<RenderResult> {
     let mut failure = None;
     let mut pass_dirs = Vec::new();
     let mut recorded_seconds = 0.0;
+    let mut recording_host = None;
     for (pass_index, indices) in passes.iter().enumerate() {
         if cancel.load(std::sync::atomic::Ordering::Relaxed) {
             return Err(ErrorCode::ExportCancelled.into());
@@ -751,8 +752,12 @@ pub fn render_highlights(input: RenderJobInput) -> Result<RenderResult> {
             passes.len()
         ));
         let mut pass_options = o.clone();
-        if pass_index + 1 < passes.len() {
-            pass_options.quit_when_done = true;
+        let keep_alive = pass_index + 1 < passes.len();
+        #[cfg(test)]
+        let keep_alive =
+            keep_alive && std::env::var_os("DEMODESK_REPRO_SEPARATE_PROCESS").is_none();
+        if keep_alive {
+            pass_options.quit_when_done = false;
         }
         let mut schedule = build_schedule(
             &pass_clips,
@@ -805,8 +810,8 @@ pub fn render_highlights(input: RenderJobInput) -> Result<RenderResult> {
             stage: &mut *stage,
             progress: &mut recording_progress,
         };
-        let recorded =
-            run_recording_session(&mut session).map_err(|e| ErrorCode::RecordingFailed.wrap(e));
+        let recorded = record::run_recording_pass(&mut session, &mut recording_host, keep_alive)
+            .map_err(|e| ErrorCode::RecordingFailed.wrap(e));
         let completed = session.completed_clips.clone();
         drop(session);
         if cancel.load(std::sync::atomic::Ordering::Relaxed) {

@@ -107,7 +107,12 @@ pub fn build_schedule(clips: &[RenderClip], o: &ActionsOptions) -> Vec<Scheduled
         let (setup_tick, start_tick, end_tick) =
             (window.setup_tick, window.start_tick, window.end_tick);
         let folder = format!("{}/{}", o.output_dir, sequence_folder_name(seq));
-        let preset = format!("demodesk{}", seq + 1);
+        // HLAE keeps named presets across passes in the same game process.
+        let preset = format!(
+            "demodesk{}_{}",
+            sha1_smol::Sha1::from(o.output_dir.as_str()).digest(),
+            seq + 1
+        );
         let mut slot = window.schedule(seq + 1, n, &mut push);
 
         // Baseline and camera configuration share the protected seek's setup tick.
@@ -744,7 +749,10 @@ mod tests {
             .iter()
             .find(|a| a.cmd.starts_with("mirv_streams settings add ffmpeg"))
             .unwrap();
-        assert_eq!(preset.cmd, "mirv_streams settings add ffmpeg demodesk1 \"-c:v libx264 -pix_fmt yuv420p -crf 23 {QUOTE}C:/test-output/r1/1-sequence\\\\video.mp4{QUOTE}\"");
+        assert!(preset
+            .cmd
+            .starts_with("mirv_streams settings add ffmpeg demodesk"));
+        assert!(preset.cmd.contains(r#"-c:v libx264 -pix_fmt yuv420p -crf 23 {QUOTE}C:/test-output/r1/1-sequence\\video.mp4{QUOTE}"#));
         let xml = mirv_cmd_xml(&s);
         assert!(xml.starts_with(
             "<commandSystem>\n<commands>\n<c tick=\"96.000\">echo [demodesk] seq 1 of 1 seek</c>"
@@ -752,6 +760,27 @@ mod tests {
         assert!(xml.contains("<c tick=\"9808.000\">echo [demodesk] seq 1 of 1 setup</c>"));
     }
 
+    #[test]
+    fn reused_process_passes_use_distinct_encoder_settings() {
+        let render = RenderOptions::default();
+        let mut options = opts(&render);
+        let clips = [clip(10_000, 11_000, Some(3))];
+        let first = build_schedule(&clips, &options);
+        options.output_dir = "C:/test-output/pass-2".into();
+        let next = build_schedule(&clips, &options);
+        let settings = |schedule: &[Scheduled]| {
+            schedule
+                .iter()
+                .find(|a| a.cmd.starts_with("mirv_streams record screen settings "))
+                .unwrap()
+                .cmd
+                .clone()
+        };
+        assert_ne!(settings(&first), settings(&next));
+        assert!(next
+            .iter()
+            .any(|a| a.cmd.contains("{QUOTE}C:/test-output/pass-2/1-sequence")));
+    }
     #[test]
     fn player_selection_waits_for_observer_mode_before_recording() {
         for start in [50, 10_000] {
