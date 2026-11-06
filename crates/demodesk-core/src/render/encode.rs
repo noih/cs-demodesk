@@ -195,6 +195,22 @@ fn s(v: &str) -> String {
     v.to_string()
 }
 
+fn aac_args(kbps: u32) -> [String; 10] {
+    // The NMR default in some FFmpeg builds stalls on retained recordings at 192 kbps.
+    [
+        s("-c:a"),
+        s("aac"),
+        s("-aac_coder"),
+        s("twoloop"),
+        s("-b:a"),
+        format!("{kbps}k"),
+        s("-ar"),
+        s("48000"),
+        s("-ac"),
+        s("2"),
+    ]
+}
+
 pub fn ffprobe_exe(ffmpeg_exe: &Path) -> PathBuf {
     ffmpeg_exe.parent().unwrap().join(if cfg!(windows) {
         "ffprobe.exe"
@@ -272,16 +288,9 @@ pub fn mux_clip(
             s("1:a:0"),
             s("-c:v"),
             s("copy"),
-            s("-c:a"),
-            s("aac"),
-            s("-b:a"),
-            format!("{audio_kbps}k"),
-            s("-ar"),
-            s("48000"),
-            s("-ac"),
-            s("2"),
-            s("-shortest"),
         ]);
+        args.extend(aac_args(audio_kbps));
+        args.push(s("-shortest"));
     } else {
         args.extend([s("-c:v"), s("copy")]);
     }
@@ -620,14 +629,6 @@ pub fn encode_to_size_with_progress(
             s("0:v:0"),
             s("-map"),
             s("0:a:0?"),
-            s("-c:a"),
-            s("aac"),
-            s("-b:a"),
-            format!("{audio_kbps}k"),
-            s("-ar"),
-            s("48000"),
-            s("-ac"),
-            s("2"),
             s("-movflags"),
             s("+faststart"),
             s("-pix_fmt"),
@@ -635,6 +636,7 @@ pub fn encode_to_size_with_progress(
             s("-fps_mode"),
             s("passthrough"),
         ];
+        common.extend(aac_args(audio_kbps));
         common.extend(tag_args(codec));
         // Keep analysis only across size retries; a stall restart gets a new directory.
         let pass_dir = tempfile::tempdir()?;
@@ -817,6 +819,55 @@ pub fn bytes_to_mib(bytes: u64) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[ignore = "requires FFMPEG and DEMODESK_AAC_REPRO_SOURCE (retained recording)"]
+    fn real_recorded_aac_remux_finishes() {
+        let ffmpeg = PathBuf::from(std::env::var("FFMPEG").expect("FFMPEG"));
+        let source = PathBuf::from(
+            std::env::var("DEMODESK_AAC_REPRO_SOURCE").expect("DEMODESK_AAC_REPRO_SOURCE"),
+        );
+        let dir = tempfile::tempdir().unwrap();
+        let output = dir.path().join("remux.mp4");
+        let cancel = AtomicBool::new(false);
+        let mut log = |line| println!("{line}");
+        let mut control = Control::new(&cancel, &mut log);
+        let before = probe_media(&ffmpeg, &source, &mut control).unwrap();
+        assert!(before.1, "regression input must have audio");
+        mux_clip(
+            &ffmpeg,
+            &ClipOutput {
+                index: 0,
+                video: Some(source.clone()),
+                audio: Some(source.clone()),
+            },
+            &output,
+            192,
+            &mut control,
+        )
+        .unwrap();
+        let after = probe_media(&ffmpeg, &output, &mut control).unwrap();
+        assert!(after.1);
+        assert!((before.0 - after.0).abs() < 0.1);
+        run(
+            &ffmpeg,
+            &[
+                s("-v"),
+                s("error"),
+                s("-xerror"),
+                s("-i"),
+                output.to_string_lossy().into_owned(),
+                s("-map"),
+                s("0:v:0"),
+                s("-map"),
+                s("0:a:0"),
+                s("-f"),
+                s("null"),
+                s(if cfg!(windows) { "NUL" } else { "/dev/null" }),
+            ],
+        )
+        .unwrap();
+    }
 
     #[test]
     fn progress_fixture() {

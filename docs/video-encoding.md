@@ -44,6 +44,41 @@ codecs on Allstar/Medal/Discord/YouTube. Parameter references:
 [FFmpeg SVT-AV1 wrapper](https://ffmpeg.org/ffmpeg-codecs.html#libsvtav1),
 [SVT-AV1 parameters](https://gitlab.com/AOMediaCodec/SVT-AV1/-/blob/master/Docs/Parameters.md).
 
+### AAC coder compatibility
+
+The installed FFmpeg runtime inspected on 2026-11-06 defaults to the `nmr` AAC
+coder. A retained 24.37-second recording reproducibly stalled when its audio was
+re-encoded at 192 kbit/s: final muxing stopped at video frame 912, while audio-only
+encoding stopped near 15.09 seconds. Video-only concatenation, audio decoding,
+and audio stream copy completed. Selecting `-aac_coder twoloop` at the same rate
+completed the audio encode in under a second. Changing timestamps or increasing
+the timeout is not the fix.
+
+All export AAC encoding uses the explicit `twoloop` coder: capture audio muxing,
+ordinary size fitting, and combat-priority assembly. Audio remains stereo,
+48 kHz, at the requested target rate. Video encoder choices and the existing
+size and timing checks are unchanged. The shared AAC arguments prevent these
+paths from inheriting a different FFmpeg default independently.
+
+The retained-source regression is opt-in because recordings are private. Set
+`FFMPEG` and `DEMODESK_AAC_REPRO_SOURCE`, then run:
+
+```powershell
+cargo test -p demodesk-core --lib real_recorded_aac_remux_finishes -- --ignored --nocapture
+```
+
+It calls the production audio-mux path at 192 kbit/s, checks audio presence and
+duration, and fully decodes the result. Outputs stay in a temporary directory;
+the source and original job are untouched. The AAC method option is documented
+in [FFmpeg's codec documentation](https://ffmpeg.org/ffmpeg-codecs.html#aac).
+
+Validation: the retained-source test failed before the fix and passed after it.
+The 11 encoding unit tests and all six CPU codec/normal-or-combat real output
+checks passed. A recovered 1080p60 AV1 export was 19,504,052 bytes (18.60 MiB),
+with 1,460 video frames and 24.37 seconds of stereo AAC; both streams fully
+decoded. No game recording was repeated, original job files were preserved,
+and no release was published.
+
 ### FFmpeg two-pass compatibility
 
 CPU size fitting scopes `-pass:v` and `-passlogfile:v` to video. Newer FFmpeg

@@ -361,18 +361,8 @@ pub(super) fn encode(
                 s("copy"),
             ];
             if has_audio {
-                args.extend([
-                    s("-map"),
-                    s("1:a:0"),
-                    s("-c:a"),
-                    s("aac"),
-                    s("-b:a"),
-                    format!("{audio}k"),
-                    s("-ar"),
-                    s("48000"),
-                    s("-ac"),
-                    s("2"),
-                ]);
+                args.extend([s("-map"), s("1:a:0")]);
+                args.extend(aac_args(audio));
             }
             args.extend(tag_args(codec));
             args.extend([
@@ -389,7 +379,8 @@ pub(super) fn encode(
                     progress(reported);
                 },
                 control,
-            )?;
+            )
+            .context("joining combat-priority video and audio")?;
             let bytes = std::fs::metadata(&temp)?.len();
             (control.log)(format!(
                 "combat quality priority result: {bytes} bytes (limit {limit})"
