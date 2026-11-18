@@ -1,4 +1,14 @@
 {
+  "errorSources": {
+    "app": "CS DemoDesk",
+    "demoparser": "Demo 파서",
+    "hlae": "HLAE",
+    "ffmpeg": "FFmpeg",
+    "ffprobe": "FFmpeg (ffprobe)",
+    "source2Viewer": "Source 2 Viewer",
+    "cs2": "CS2",
+    "unknown": "출처 기록 없음"
+  },
   "errors": {
     "cs2-already-running": "CS2가 실행 중입니다. 먼저 게임을 종료하세요.",
     "data-directories-overlap": "새 데이터 폴더는 현재 데이터 폴더 안에 있거나 현재 폴더를 포함하는 상위 폴더일 수 없습니다. 서로 독립된 폴더를 선택하세요.",

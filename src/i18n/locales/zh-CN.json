@@ -1,4 +1,14 @@
 {
+  "errorSources": {
+    "app": "CS DemoDesk",
+    "demoparser": "Demo 解析器",
+    "hlae": "HLAE",
+    "ffmpeg": "FFmpeg",
+    "ffprobe": "FFmpeg (ffprobe)",
+    "source2Viewer": "Source 2 Viewer",
+    "cs2": "CS2",
+    "unknown": "来源未标记"
+  },
   "errors": {
     "cs2-already-running": "CS2 正在运行，请先关闭游戏。",
     "data-directories-overlap": "新数据目录不能位于当前数据目录内，也不能是它的上级目录。请选择彼此独立的文件夹。",

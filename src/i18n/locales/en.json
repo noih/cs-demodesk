@@ -1,4 +1,14 @@
 {
+  "errorSources": {
+    "app": "CS DemoDesk",
+    "demoparser": "Demo parser",
+    "hlae": "HLAE",
+    "ffmpeg": "FFmpeg",
+    "ffprobe": "FFmpeg (ffprobe)",
+    "source2Viewer": "Source 2 Viewer",
+    "cs2": "CS2",
+    "unknown": "Source not recorded"
+  },
   "errors": {
     "cs2-already-running": "CS2 is running. Close the game first.",
     "data-directories-overlap": "The new data folder cannot be inside the current data folder or contain it. Choose a separate folder.",

@@ -28,7 +28,7 @@ export function AnalysisQueueList({jobs,demos,onSelect,onChanged}: {
             <Badge color={job.status==='error'?'red':job.status==='done'?'green':'amber'}>{job.status==='queued'?t('scoring.queue.waiting',{position:queued.findIndex(j=>j.id===job.id)+1}):t(`scoring.queue.${job.status}`)}</Badge>
           </Flex>
           {job.step && <Text as="p" size="2">{t('scoring.progress',{step:job.step,total:3})} · {t(`scoring.steps.${job.step}`)}</Text>}
-          {job.error && <Text as="p" color="red" style={{overflowWrap:'anywhere'}}>{job.error}</Text>}
+          {job.error && <Text as="p" color="red" style={{overflowWrap:'anywhere'}}>{errorText(job.error)}</Text>}
           <Flex justify="end" gap="2" mt="2">
             {job.status==='error' && <Button variant="soft" disabled={!demo||!!pending||jobs.some(j=>j.demoId===job.demoId&&(j.status==='running'||j.status==='queued'))} onClick={()=>void retry(job)}>{t('scoring.queue.retry')}</Button>}
             <Button variant="outline" disabled={!demo} onClick={()=>{onSelect(job.demoId);}}>{t('ui.goToDemo')}</Button>

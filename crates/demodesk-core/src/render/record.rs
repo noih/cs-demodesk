@@ -9,6 +9,7 @@
 use super::actions::{mirv_cmd_xml, sequence_folder_name, Scheduled, MARK};
 use super::hide;
 use super::setup::register_ffmpeg_with_hlae;
+use crate::error::ErrorSource;
 use crate::ErrorCode;
 use anyhow::{anyhow, Context, Result};
 use std::io::{BufRead, BufReader, Write};
@@ -488,7 +489,7 @@ impl RecordSession<'_> {
         }
         let mut hlae = processes
             .spawn(&mut cmd)
-            .map_err(|e| ErrorCode::GameLaunchFailed.wrap(e.into()))?;
+            .map_err(|e| ErrorSource::Hlae.wrap(ErrorCode::GameLaunchFailed.wrap(e.into())))?;
 
         // HLAE is only a loader; it returns quickly once cs2.exe has been injected.
         let deadline = Instant::now() + Duration::from_secs(60);
@@ -522,7 +523,8 @@ impl RecordSession<'_> {
         if tasklist("cs2.exe", true).contains("Error - AfxHookSource") {
             return Err(
                 anyhow!("HLAE injection failed (AfxHookSource error window)")
-                    .context(ErrorCode::HlaeUnavailable),
+                    .context(ErrorCode::HlaeUnavailable)
+                    .context(ErrorSource::Hlae),
             );
         }
         if let Ok(Some(status)) = hlae.try_wait() {
@@ -542,7 +544,8 @@ impl RecordSession<'_> {
         let con = loop {
             if !is_process_running("cs2.exe")? {
                 return Err(anyhow!("cs2.exe exited before the console came up")
-                    .context(ErrorCode::GameExited));
+                    .context(ErrorCode::GameExited)
+                    .context(ErrorSource::Cs2));
             }
             if self.cancelled() {
                 return Err(ErrorCode::ExportCancelled.into());
@@ -585,7 +588,8 @@ impl RecordSession<'_> {
             .find(|l| l.to_lowercase().contains("unknown command") && l.contains("mirv_cmd"))
         {
             return Err(anyhow!("HLAE is not active in this game process ({err})")
-                .context(ErrorCode::HlaeUnavailable));
+                .context(ErrorCode::HlaeUnavailable)
+                .context(ErrorSource::Hlae));
         }
         (self.log)(format!(
             "schedule loaded ({} commands)",
@@ -798,7 +802,7 @@ pub(super) fn run_recording_pass(
             ));
         }
         if !followed? {
-            return Err(ErrorCode::GameExited.into());
+            return Err(ErrorSource::Cs2.wrap(ErrorCode::GameExited.into()));
         }
         Ok(())
     })();

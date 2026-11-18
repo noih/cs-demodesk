@@ -767,3 +767,22 @@ mod tests {
         );
     }
 }
+
+/// Check a tool at its call site so its identity survives contexts and persisted logs.
+pub(crate) fn tool_output(
+    command: &mut std::process::Command,
+    source: crate::error::ErrorSource,
+) -> anyhow::Result<std::process::Output> {
+    use anyhow::Context;
+    let output = ProcessTree::new()?.output(command).context(source)?;
+    if !output.status.success() {
+        return Err(anyhow::anyhow!(
+            "process exited with {}: {}{}",
+            output.status,
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        )
+        .context(source));
+    }
+    Ok(output)
+}

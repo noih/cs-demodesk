@@ -1,4 +1,14 @@
 {
+  "errorSources": {
+    "app": "CS DemoDesk",
+    "demoparser": "Demo パーサー",
+    "hlae": "HLAE",
+    "ffmpeg": "FFmpeg",
+    "ffprobe": "FFmpeg (ffprobe)",
+    "source2Viewer": "Source 2 Viewer",
+    "cs2": "CS2",
+    "unknown": "発生元の記録なし"
+  },
   "errors": {
     "cs2-already-running": "CS2 が起動中です。先にゲームを終了してください。",
     "data-directories-overlap": "新しいデータフォルダーは、現在のデータフォルダーの内側にも、それを含む親フォルダーにも指定できません。互いに独立したフォルダーを選んでください。",

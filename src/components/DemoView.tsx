@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { Badge, Box, Button, Callout, DropdownMenu, Flex, Heading, IconButton, Tabs, Text, Tooltip } from '@radix-ui/themes';
 import { Trans, useTranslation } from 'react-i18next';
 import { api, errorText, mb, type AnalysisJob, type Assessment, type DemoMeta, type ParsedDemo, type RenderJob, type Status } from '../api.ts';
-import { fmtDate } from '../i18n/index.ts';
+import { fmtDate, translateError } from '../i18n/index.ts';
 import { HighlightsTab } from './HighlightsTab.tsx';
 import { ScoringTab } from './ScoringTab.tsx';
 import { PlayersTab } from './PlayersTab.tsx';
@@ -191,7 +191,7 @@ export function DemoView({ analysisJobs, meta, jobs, status, onChanged, onRemove
             <>
               {(meta.status === 'error' || loadError) && (
                 <Callout.Root color="red" size="1" style={{ maxWidth: 640 }}>
-                  <Callout.Text className="selectable">{loadError ?? meta.error}</Callout.Text>
+                  <Callout.Text className="selectable">{loadError ?? translateError(meta.error)}</Callout.Text>
                 </Callout.Root>
               )}
               <Button size="3" onClick={run(() => api.parse(meta.id))}>

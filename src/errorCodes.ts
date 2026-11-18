@@ -38,11 +38,22 @@ export const ERROR_CODES = {
 } as const;
 export type ErrorCode = typeof ERROR_CODES[keyof typeof ERROR_CODES];
 
+const SOURCE_KEYS = {
+  'CS DemoDesk': 'app', demoparser: 'demoparser', HLAE: 'hlae', FFmpeg: 'ffmpeg',
+  ffprobe: 'ffprobe', 'Source 2 Viewer': 'source2Viewer', CS2: 'cs2',
+} as const;
+const SOURCE_MARKER = /\[(CS DemoDesk|demoparser|HLAE|FFmpeg|ffprobe|Source 2 Viewer|CS2)\](?::\s*)?/;
+
 export function translateError(error: string | null | undefined, code?: string): string {
+  if (!error && !code) return '';
+  // Only consume explicit backend provenance, never infer a tool from diagnostic wording.
+  const marker = error?.match(SOURCE_MARKER);
+  const source = marker ? SOURCE_KEYS[marker[1] as keyof typeof SOURCE_KEYS] : 'unknown';
+  const detail = error?.replace(SOURCE_MARKER, '').trim();
   let key: keyof typeof en.errors | undefined = code && Object.values(ERROR_CODES).some(value => value === code)
     ? code as ErrorCode : code ? 'export-failed' : undefined;
   if (!code && error === 'no clip was recorded') key = 'no-video-recorded';
   if (!code && error === 'cs2.exe is already running — close the game first') key = 'cs2-already-running';
   if (!code && error === 'The old and new data directories must not contain one another.') key = 'data-directories-overlap';
-  return (key && i18n.t(`errors.${key}`)) || error || '';
+  return `[${i18n.t(`errorSources.${source}`)}] ${(key && i18n.t(`errors.${key}`)) || detail || ''}`;
 }

@@ -127,8 +127,7 @@ fn hash_file(path: &Path) -> Result<FileDigest> {
 }
 
 fn run(vrf: &Path, command: &mut Command) -> Result<String> {
-    let output = crate::render::process::ProcessTree::new()?
-        .output(command)
+    let output = crate::render::process::tool_output(command, crate::error::ErrorSource::Source2Viewer)
         .with_context(|| format!("running animation asset decoder {}", vrf.display()))?;
     ensure!(
         output.status.success(),

@@ -40,7 +40,7 @@ pub fn prepare(root: &Path, game: &Path, vrf: &Path, map: &str) -> Result<Prepar
     let destination = dir.join("world_physics_physics.gltf");
     if !dir.join("ready").is_file() {
         let staging = tempfile::tempdir_in(&dir)?;
-        let output = crate::render::process::ProcessTree::new()?.output(
+        let output = vrf_output(
             Command::new(vrf)
                 .arg("-i")
                 .arg(&package)
@@ -107,7 +107,7 @@ pub fn collision_source(
     let fresh = if !ready.is_file() {
         let staging = tempfile::tempdir_in(&directory)?;
         let raw = staging.path().join("world.vmdl_c");
-        let extract = crate::render::process::ProcessTree::new()?.output(
+        let extract = vrf_output(
             Command::new(vrf)
                 .arg("-i")
                 .arg(&package)
@@ -121,8 +121,7 @@ pub fn collision_source(
             "collision resource extraction failed: {}",
             String::from_utf8_lossy(&extract.stderr)
         );
-        let decoded = crate::render::process::ProcessTree::new()?
-            .output(Command::new(vrf).arg("-i").arg(&raw).arg("-b").arg("PHYS"))?;
+        let decoded = vrf_output(Command::new(vrf).arg("-i").arg(&raw).arg("-b").arg("PHYS"))?;
         ensure!(
             decoded.status.success(),
             "collision resource decoding failed: {}",
@@ -411,4 +410,8 @@ mod tests {
         fs::write(dir.path().join("mesh.bin"), &bytes[..41]).unwrap();
         assert!(load(&file).is_err());
     }
+}
+
+fn vrf_output(command: &mut Command) -> Result<std::process::Output> {
+    crate::render::process::tool_output(command, crate::error::ErrorSource::Source2Viewer)
 }

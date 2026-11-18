@@ -1,4 +1,14 @@
 {
+  "errorSources": {
+    "app": "CS DemoDesk",
+    "demoparser": "Парсер Demo",
+    "hlae": "HLAE",
+    "ffmpeg": "FFmpeg",
+    "ffprobe": "FFmpeg (ffprobe)",
+    "source2Viewer": "Source 2 Viewer",
+    "cs2": "CS2",
+    "unknown": "Источник не указан"
+  },
   "errors": {
     "cs2-already-running": "CS2 уже запущена. Сначала закройте игру.",
     "data-directories-overlap": "Новая папка данных не может находиться внутри текущей папки или содержать её. Выберите отдельную папку.",

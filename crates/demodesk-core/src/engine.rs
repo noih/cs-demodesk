@@ -1057,7 +1057,7 @@ impl Engine {
                     .write_parsed(&job.id, &meta, &parsed)
                     .and_then(|_| self.store.clear_parse_error(&job.id))
                     .map(|_| Some(parsed))
-                    .map_err(|e| format!("Cannot save parse result: {e:#}")),
+                    .map_err(|e| format!("Cannot save parse result: {:#}", crate::error::ErrorSource::App.wrap(e))),
                 Ok(Ok(None)) => Ok(None),
                 Ok(Err(error)) => Err(format!("{error:#}")),
                 Err(_) => Err("parser crashed (unsupported or corrupt demo?)".into()),

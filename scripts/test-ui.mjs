@@ -262,10 +262,10 @@ try {
   await page.getByText('Partially completed', {exact:true}).waitFor();
   await page.getByText('Not completed: Missing highlight', {exact:true}).waitFor();
 
-  await page.getByText('Job interrupted because the app was closed',{exact:true}).waitFor();
+  await page.getByText('[Source not recorded] Job interrupted because the app was closed',{exact:true}).waitFor();
   assert.equal(await page.getByText('backend diagnostic changed',{exact:true}).count(),0,'Error code selects translation regardless of backend diagnostic wording');
   await page.evaluate(async () => { const job = (await window.__TAURI_INTERNALS__.invoke('list_jobs')).find(j => j.id === 'job-3'); window.emitTestEvent({type:'job-changed',job:{...job,status:'error',errorCode:'cs2-already-running',error:'recording startup diagnostic'}}); });
-  await page.getByText('CS2 is running. Close the game first.', {exact:true}).waitFor();
+  await page.getByText('[Source not recorded] CS2 is running. Close the game first.', {exact:true}).waitFor();
   assert.equal(await page.getByText('recording startup diagnostic',{exact:true}).count(),0,'CS2 error code selects translation without matching diagnostic text');
   const errorLocale = JSON.parse(await readFile(new URL('../src/i18n/locales/en.json', import.meta.url), 'utf8'));
   for (const code of [...Object.values(ERROR_CODES), 'future-error-code']) {
@@ -1911,21 +1911,21 @@ try {
     const savesBeforeError = await page.evaluate(() => window.testCalls.filter(c => c.cmd === 'save_settings').length);
     await page.getByLabel(locale.settings.dataDir, {exact:true}).fill('E:/data/nested');
     await page.getByRole('button', {name:locale.common.save,exact:true}).click();
-    await page.getByText(locale.errors['data-directories-overlap'], {exact:true}).waitFor();
+    await page.getByText(`[${locale.errorSources.unknown}] ${locale.errors['data-directories-overlap']}`, {exact:true}).waitFor();
     assert.equal(await page.evaluate(() => window.testCalls.filter(c => c.cmd === 'save_settings').length), savesBeforeError, 'Rejected directory changes are not saved');
     await page.evaluate(() => { window.previewSettingsError = 'cs2.exe is already running — close the game first'; });
     await page.getByRole('button', {name:locale.common.save,exact:true}).click();
-    await page.getByText(locale.errors['cs2-already-running'], {exact:true}).waitFor();
+    await page.getByText(`[${locale.errorSources.unknown}] ${locale.errors['cs2-already-running']}`, {exact:true}).waitFor();
     await page.evaluate(() => { window.previewSettingsError = {errorCode:'gpu-unavailable',message:'NVENC diagnostic'}; });
     await page.getByRole('button', {name:locale.common.save,exact:true}).click();
-    await page.getByText(locale.errors['gpu-unavailable'], {exact:true}).waitFor();
+    await page.getByText(`[${locale.errorSources.unknown}] ${locale.errors['gpu-unavailable']}`, {exact:true}).waitFor();
     await page.evaluate(() => { delete window.previewSettingsError; });
     await page.getByLabel(locale.settings.dataDir, {exact:true}).fill('');
   }
   await page.evaluate(() => { window.previewSettingsError = 'Unrecognized filesystem error: E:/data'; });
   await page.getByLabel('Data directory', {exact:true}).fill('E:/data/nested');
   await page.getByRole('button', {name:'Save',exact:true}).click();
-  await page.getByText('Unrecognized filesystem error: E:/data', {exact:true}).waitFor();
+  await page.getByText('[Source not recorded] Unrecognized filesystem error: E:/data', {exact:true}).waitFor();
   assert.deepEqual(errors,[]);
   console.log('UI checks passed: virtual lists, lazy demo reads, content-sized tabs, themes, charts, filters, queue jump, settings.');
 } finally { await browser.close(); if (dev) await server.close(); else await new Promise(resolve => server.httpServer.close(resolve)); }

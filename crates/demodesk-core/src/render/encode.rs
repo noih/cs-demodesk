@@ -5,7 +5,7 @@
 use super::paths::to_forward_slashes;
 use super::process::ProcessTree;
 use super::record::ClipOutput;
-use crate::ErrorCode;
+use crate::{error::ErrorSource, ErrorCode};
 use anyhow::{anyhow, Context, Result};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -101,7 +101,7 @@ fn run_progress(
         .filter(|p| *p != Path::new("NUL") && *p != Path::new("/dev/null"));
     let result = monitored_output(&mut cmd, seconds, progress, control, output);
     control.check_cancelled()?;
-    let out = result.map_err(|e| ErrorCode::EncodingFailed.wrap(e))?;
+    let out = result.map_err(|e| ErrorSource::Ffmpeg.wrap(ErrorCode::EncodingFailed.wrap(e)))?;
     if !out.status.success() {
         let err = String::from_utf8_lossy(&out.stderr);
         let tail: Vec<&str> = err.lines().rev().take(5).collect();
@@ -110,7 +110,8 @@ fn run_progress(
             exe.file_name().unwrap().to_string_lossy(),
             tail.into_iter().rev().collect::<Vec<_>>().join(" | ")
         )
-        .context(ErrorCode::ffmpeg(&err)));
+        .context(ErrorCode::ffmpeg(&err))
+        .context(ErrorSource::Ffmpeg));
     }
     Ok(())
 }
@@ -235,22 +236,28 @@ pub(super) fn probe_media(
         "json",
     ])
     .arg(file);
-    let out = monitored_output(&mut cmd, 1.0, &mut |_| {}, control, None)?;
+    let result = monitored_output(&mut cmd, 1.0, &mut |_| {}, control, None);
+    control.check_cancelled()?;
+    let out = result.map_err(|e| ErrorSource::Ffprobe.wrap(e))?;
     if !out.status.success() {
         return Err(anyhow!(
             "cannot probe input video: {}",
             String::from_utf8_lossy(&out.stderr)
         )
-        .context(ErrorCode::InvalidMedia));
+        .context(ErrorCode::InvalidMedia)
+        .context(ErrorSource::Ffprobe));
     }
-    let info: serde_json::Value =
-        serde_json::from_slice(&out.stdout).context(ErrorCode::InvalidMedia)?;
+    let info: serde_json::Value = serde_json::from_slice(&out.stdout)
+        .context(ErrorCode::InvalidMedia)
+        .context(ErrorSource::Ffprobe)?;
     let seconds = info["format"]["duration"]
         .as_str()
         .and_then(|v| v.parse::<f64>().ok())
         .filter(|v| v.is_finite() && *v > 0.0)
         .ok_or_else(|| {
-            anyhow!("input video has no valid duration").context(ErrorCode::InvalidMedia)
+            anyhow!("input video has no valid duration")
+                .context(ErrorCode::InvalidMedia)
+                .context(ErrorSource::Ffprobe)
         })?;
     let audio = info["streams"]
         .as_array()
@@ -908,6 +915,23 @@ mod tests {
             std::io::stdout().flush().unwrap();
             std::thread::sleep(Duration::from_millis(50));
         }
+    }
+
+    #[test]
+    fn missing_media_tools_preserve_their_source() {
+        let directory = tempfile::tempdir().unwrap();
+        let missing = directory.path().join("missing-ffmpeg.exe");
+        let error = run(&missing, &[]).unwrap_err();
+        assert_eq!(
+            error.downcast_ref::<ErrorSource>(),
+            Some(&ErrorSource::Ffmpeg)
+        );
+        let error =
+            probe_duration_seconds(&missing, &directory.path().join("input.mp4")).unwrap_err();
+        assert_eq!(
+            error.downcast_ref::<ErrorSource>(),
+            Some(&ErrorSource::Ffprobe)
+        );
     }
 
     fn progress_command(mode: &str) -> Command {
