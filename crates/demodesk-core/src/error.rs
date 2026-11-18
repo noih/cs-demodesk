@@ -1,6 +1,44 @@
 //! Application-wide error codes shared by APIs, persisted jobs and events.
 use serde::{Deserialize, Serialize};
 
+/// Attached at the failing component boundary; survives anyhow context and persisted text.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ErrorSource {
+    App,
+    DemoParser,
+    Hlae,
+    Ffmpeg,
+    Ffprobe,
+    Source2Viewer,
+    Cs2,
+}
+
+impl std::fmt::Display for ErrorSource {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::App => "[CS DemoDesk]",
+            Self::DemoParser => "[demoparser]",
+            Self::Hlae => "[HLAE]",
+            Self::Ffmpeg => "[FFmpeg]",
+            Self::Ffprobe => "[ffprobe]",
+            Self::Source2Viewer => "[Source 2 Viewer]",
+            Self::Cs2 => "[CS2]",
+        })
+    }
+}
+impl std::error::Error for ErrorSource {}
+impl ErrorSource {
+    pub fn wrap(self, error: anyhow::Error) -> anyhow::Error {
+        if error.downcast_ref::<Self>().is_some()
+            || error.downcast_ref::<ErrorCode>() == Some(&ErrorCode::ExportCancelled)
+        {
+            error
+        } else {
+            error.context(self)
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum ErrorCode {
@@ -216,6 +254,23 @@ mod tests {
             ),
             ErrorCode::FileBusy
         );
+    }
+
+    #[test]
+    fn source_survives_wrapping_classification_and_persisted_payload() {
+        let original = std::io::Error::new(std::io::ErrorKind::PermissionDenied, "fixture detail");
+        let error = ErrorSource::Ffmpeg.wrap(original.into());
+        let error = ErrorSource::App.wrap(ErrorCode::EncodingFailed.wrap(error));
+        assert_eq!(
+            error.downcast_ref::<ErrorSource>(),
+            Some(&ErrorSource::Ffmpeg)
+        );
+        let payload = ExportError::new(&error, ErrorCode::ExportFailed);
+        assert_eq!(payload.error_code, ErrorCode::PermissionDenied);
+        let json = serde_json::to_value(payload).unwrap();
+        assert!(json["message"].as_str().unwrap().contains("[FFmpeg]"));
+        assert!(json["message"].as_str().unwrap().contains("fixture detail"));
+        assert!(!json["message"].as_str().unwrap().contains("[CS DemoDesk]"));
     }
 
     #[test]

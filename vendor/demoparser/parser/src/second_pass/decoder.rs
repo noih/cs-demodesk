@@ -21,6 +21,9 @@ pub enum Decoder {
     FloatCoordDecoder,
     FloatSimulationTimeDecoder,
     Fixed64Decoder,
+    Fixed8Decoder,
+    Fixed8SignedDecoder,
+    Fixed8Unsigned64Decoder,
     QanglePitchYawDecoder,
     Qangle3Decoder(u8),
     QangleVarDecoder,
@@ -57,6 +60,9 @@ impl<'a> Bitreader<'a> {
             VectorNormalDecoder => Ok(Variant::VecXYZ(self.decode_normal_vec()?)),
             Unsigned64Decoder => Ok(Variant::U64(self.read_varint_u_64()?)),
             Fixed64Decoder => Ok(Variant::U64(self.decode_uint64()?)),
+            Fixed8Decoder => Ok(Variant::U32(self.read_nbits(8)?)),
+            Fixed8SignedDecoder => Ok(Variant::I32(self.read_nbits(8)? as u8 as i8 as i32)),
+            Fixed8Unsigned64Decoder => Ok(Variant::U64(self.read_nbits(8)? as u64)),
             VectorFloatCoordDecoder => Ok(Variant::VecXYZ(self.decode_vector_float_coord()?)),
             AmmoDecoder => Ok(Variant::U32(self.decode_ammo()?)),
             QanglePresDecoder => Ok(Variant::VecXYZ(self.decode_qangle_variant_pres()?)),
@@ -417,6 +423,19 @@ impl QuantalizedFloat {
 #[cfg(test)]
 mod tests {
     use crate::second_pass::decoder::*;
+
+    #[test]
+    fn fixed8_preserves_values_and_next_field_alignment() {
+        let qf_map = QfMapper { idx: 0, map: AHashMap::default() };
+        // The high bit must not consume the next byte as a varint continuation.
+        let bytes = [0x85, 0x01, 0xff, 0x7f, 0x81, 0x01];
+        let mut reader = Bitreader::new(&bytes);
+        assert_eq!(reader.decode(&Fixed8Decoder, &qf_map), Ok(Variant::U32(133)));
+        assert_eq!(reader.decode(&Fixed8Unsigned64Decoder, &qf_map), Ok(Variant::U64(1)));
+        assert_eq!(reader.decode(&Fixed8SignedDecoder, &qf_map), Ok(Variant::I32(-1)));
+        assert_eq!(reader.decode(&Fixed8SignedDecoder, &qf_map), Ok(Variant::I32(127)));
+        assert_eq!(reader.decode(&UnsignedDecoder, &qf_map), Ok(Variant::U32(129)));
+    }
 
     #[test]
     fn test_qfloat_new() {

@@ -1504,7 +1504,7 @@ mod tests {
     use super::*;
     #[test]
     fn movement_requires_signed_clock_and_qualified_velocity_without_filling_missing_values() {
-        use parser::second_pass::variants::Variant;
+        use crate::parser::Variant;
         let mut entity = Entity::default();
         let mut put = |name: &str, value: Variant| {
             entity.update(name, Some(&compact::value(&value).unwrap()));

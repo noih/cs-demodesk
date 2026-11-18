@@ -240,6 +240,14 @@ impl<'a> FirstPassParser<'a> {
         if field.encoder == "qangle_precise" {
             field.decoder = QanglePresDecoder;
         }
+        // CS2 build 14197 uses raw bytes for fixed8 fields; vector lengths remain varints.
+        if field.encoder == "fixed8" {
+            field.decoder = match field.decoder {
+                SignedDecoder => Fixed8SignedDecoder,
+                Unsigned64Decoder => Fixed8Unsigned64Decoder,
+                _ => Fixed8Decoder,
+            };
+        }
         field.field_type = ft;
         Ok(field)
     }
@@ -414,6 +422,7 @@ pub fn field_from_msg(
         Some(entry) => entry.clone(),
         None => return Err(DemoParserError::MalformedMessage),
     };
+    validate_encoder(&enc_name, &var_name, &var_type)?;
     let send_node = match serializer_msg.symbols.get(field.send_node_sym() as usize) {
         Some(entry) => entry.clone(),
         None => return Err(DemoParserError::MalformedMessage),
@@ -823,4 +832,27 @@ pub struct FieldType {
     pub pointer: bool,
     pub count: Option<i32>,
     pub element_type: Option<Box<FieldType>>,
+}
+
+fn validate_encoder(encoder: &str, field: &str, field_type: &str) -> Result<(), DemoParserError> {
+    match encoder {
+        "" | "coord" | "normal" | "fixed64" | "fixed8" | "qangle" | "qangle_precise" | "m_flSimulationTime" => Ok(()),
+        _ => Err(DemoParserError::UnsupportedEncoder {
+            encoder: encoder.into(), field: field.into(), field_type: field_type.into(),
+        }),
+    }
+}
+
+#[cfg(test)]
+mod compatibility_tests {
+    use super::*;
+    #[test]
+    fn unknown_encoder_is_rejected_before_decoding_entity_values() {
+        assert_eq!(validate_encoder("new_encoding", "m_test", "uint8"),
+            Err(DemoParserError::UnsupportedEncoder {
+                encoder: "new_encoding".into(), field: "m_test".into(), field_type: "uint8".into(),
+            }));
+        assert!(validate_encoder("fixed8", "m_test", "uint8").is_ok());
+        assert!(validate_encoder("", "m_test", "uint8").is_ok());
+    }
 }

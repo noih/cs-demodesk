@@ -64,6 +64,9 @@ pub struct FieldPath {
 }
 impl FieldPath {
     pub fn pop_special(&mut self, n: usize) -> Result<(), DemoParserError> {
+        if n > self.last {
+            return Err(DemoParserError::IllegalPathOp);
+        }
         for _ in 0..n {
             *self.get_entry_mut(self.last)? = 0;
             self.last -= 1;
@@ -425,3 +428,16 @@ value, weight, len(prefix), prefix
 1	10334	5	1110
 11	10530	5	1111
 */
+
+#[cfg(test)]
+mod resilience_tests {
+    use super::*;
+    #[test]
+    fn popping_past_root_fails_without_mutating_the_path() {
+        let mut path = generate_fp();
+        let before = path.path;
+        assert_eq!(path.pop_special(1), Err(DemoParserError::IllegalPathOp));
+        assert_eq!(path.path, before);
+        assert_eq!(path.last, 0);
+    }
+}

@@ -40,10 +40,14 @@ impl<'a> Bitreader<'a> {
         b
     }
     #[inline(always)]
-    pub fn consume(&mut self, n: u32) {
+    pub fn consume(&mut self, n: u32) -> Result<(), DemoParserError> {
+        if n > self.bits_left {
+            return Err(DemoParserError::OutOfBitsError);
+        }
         self.bits_left -= n;
-        self.bits >>= n;
+        self.bits = self.bits.checked_shr(n).unwrap_or(0);
         self.reader.consume(n);
+        Ok(())
     }
     #[inline(always)]
     pub fn peek(&mut self, n: u32) -> u64 {
@@ -64,11 +68,14 @@ impl<'a> Bitreader<'a> {
     }
     #[inline(always)]
     pub fn read_nbits(&mut self, n: u32) -> Result<u32, DemoParserError> {
+        if n > 32 {
+            return Err(DemoParserError::MalformedMessage);
+        }
         if self.bits_left < n {
             self.refill();
         }
         let b = self.peek(n);
-        self.consume(n);
+        self.consume(n)?;
         return Ok(b as u32);
     }
     #[inline(always)]
@@ -216,6 +223,7 @@ impl<'a> Bitreader<'a> {
 pub enum DemoParserError {
     ClassMapperNotFoundFirstPass,
     FieldNoDecoder,
+    UnsupportedEncoder { encoder: String, field: String, field_type: String },
     OutOfBitsError,
     OutOfBytesError,
     FailedByteRead(String),
@@ -255,6 +263,24 @@ impl std::error::Error for DemoParserError {}
 
 impl fmt::Display for DemoParserError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{:?}", self)
+        match self {
+            Self::UnsupportedEncoder { encoder, field, field_type } => write!(f,
+                "Unsupported demo encoding '{encoder}' for field '{field}' ({field_type}); the demo parser needs an update"),
+            _ => write!(f, "{:?}", self),
+        }
+    }
+}
+
+#[cfg(test)]
+mod resilience_tests {
+    use super::*;
+    #[test]
+    fn truncated_reads_and_huffman_consumption_return_errors_without_advancing() {
+        let mut reader = Bitreader::new(&[0x85]);
+        assert_eq!(reader.read_nbits(9), Err(DemoParserError::OutOfBitsError));
+        assert_eq!(reader.read_nbits(8), Ok(0x85));
+        assert_eq!(reader.consume(1), Err(DemoParserError::OutOfBitsError));
+        assert_eq!(reader.read_nbits(1), Err(DemoParserError::OutOfBitsError));
+        assert_eq!(reader.read_nbits(33), Err(DemoParserError::MalformedMessage));
     }
 }

@@ -254,7 +254,7 @@ impl<'a> SecondPassParser<'a> {
             // see create_huffman_lookup_table). So `peeked_bits` is always a valid index. Eliding
             // the bounds check removes a per-symbol branch in the hottest decode loop.
             let (symbol, code_len) = unsafe { *self.huffman_lookup_table.get_unchecked(peeked_bits as usize) };
-            bitreader.consume(code_len as u32);
+            bitreader.consume(code_len as u32)?;
             if symbol == STOP_READING_SYMBOL {
                 break;
             }

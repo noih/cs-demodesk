@@ -57,8 +57,8 @@ pub fn policies_for_demo(bytes: &[u8]) -> anyhow::Result<Vec<FirePolicy>> {
         "filter_player_simulation_time",
         "cq_enable",
     ];
-    let source = parser::first_pass::convars::read(bytes, &NAMES).map_err(anyhow::Error::msg)?;
-    let header = source.header();
+    let source = crate::parser::replicated_convars(bytes, &NAMES)?;
+    let header = &source;
     anyhow::ensure!(
         crate::analysis::compatibility::spread_defaults(
             header.patch_version,
@@ -67,7 +67,7 @@ pub fn policies_for_demo(bytes: &[u8]) -> anyhow::Result<Vec<FirePolicy>> {
         "unsupported spread policy source build"
     );
     source
-        .fires()
+        .fires
         .iter()
         .map(|fire| {
             let boolean = |name: &str, default: bool| -> anyhow::Result<bool> {

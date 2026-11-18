@@ -43,7 +43,7 @@ fn main() -> Result<()> {
                             };
                             current.insert(
                                 format!("pose/{name}/{path:?}"),
-                                compact::value(&parser::second_pass::variants::Variant::U32(
+                                compact::value(&demodesk_core::parser::Variant::U32(
                                     length,
                                 ))?,
                             );
@@ -52,7 +52,7 @@ fn main() -> Result<()> {
                                 child.push(index as i32);
                                 current.insert(
                                     format!("pose/{name}/{child:?}"),
-                                    compact::value(&parser::second_pass::variants::Variant::U32(
+                                    compact::value(&demodesk_core::parser::Variant::U32(
                                         value,
                                     ))?,
                                 );

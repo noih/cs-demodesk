@@ -96,7 +96,7 @@ pub fn demo_source(bytes: &[u8]) -> Result<Source> {
 }
 
 /// Require an explicit, consistent source clock; never infer 64 Hz from the game name.
-pub fn server_tick_rate(infos: &[csgoproto::CsvcMsgServerInfo]) -> Result<f64> {
+pub fn server_tick_rate(infos: &[crate::parser::ServerInfo]) -> Result<f64> {
     let interval = infos
         .first()
         .and_then(|i| i.tick_interval)
@@ -117,7 +117,7 @@ mod tests {
     use super::*;
     #[test]
     fn source_clock_requires_consistent_positive_intervals() {
-        let info = |n| csgoproto::CsvcMsgServerInfo {
+        let info = |n| crate::parser::ServerInfo {
             tick_interval: n,
             ..Default::default()
         };

@@ -2,7 +2,7 @@
 use super::{damage_weapon, weapon, RecoilBurst};
 use crate::parser::{DemoParser, Fields, Row};
 use anyhow::Result;
-use parser::second_pass::game_events::GameEvent;
+use crate::parser::GameEvent;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 

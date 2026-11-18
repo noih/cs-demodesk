@@ -1,7 +1,7 @@
 //! Shot-based aim statistics. Visibility-dependent metrics are intentionally separate.
 use crate::model::RoundInfo;
 use crate::parser::Fields;
-use parser::second_pass::game_events::GameEvent;
+use crate::parser::GameEvent;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
 
@@ -168,8 +168,8 @@ pub fn compute(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use parser::second_pass::game_events::EventField;
-    use parser::second_pass::variants::Variant;
+    use crate::parser::EventField;
+    use crate::parser::Variant;
     #[test]
     fn pairs_aliases_and_deduplicates_hits_with_burst_and_round_boundaries() {
         let round: RoundInfo = serde_json::from_value(serde_json::json!({"round":1,"startTick":0,"freezeEndTick":0,"endTick":100,"officiallyEndedTick":100,"reason":"","roster":{}})).unwrap();
@@ -392,7 +392,7 @@ pub fn recoil(
 #[cfg(test)]
 mod recoil_tests {
     use super::*;
-    use parser::second_pass::{game_events::EventField, variants::Variant};
+    use crate::parser::{EventField, Variant};
 
     #[test]
     fn preserves_individual_rays_and_breaks_on_missing_samples_weapons_rounds_and_recovery() {
