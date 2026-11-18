@@ -6,6 +6,7 @@ use anyhow::Context as _;
 pub(super) struct Spatial {
     pub tracks: demo_data::Tracks,
     pub geometry: visibility_assets::Prepared,
+    pub projectiles: demo_data::Projectiles,
 }
 pub(super) struct Context<'a> {
     pub demo: &'a DemoInfo,
@@ -23,6 +24,7 @@ impl<'a> Context<'a> {
         tools: &ToolPaths,
         root: &Path,
         spatial: bool,
+        projectiles: bool,
         cancel: &'a AtomicBool,
     ) -> Result<Self> {
         let path = Path::new(&demo.path);
@@ -46,9 +48,28 @@ impl<'a> Context<'a> {
                     demo.tick_rate.round() as i32,
                     cancel,
                 )?;
+                let projectiles = if projectiles {
+                    demo_data::read_projectiles(
+                        &bytes,
+                        recording,
+                        &events,
+                        demo.tick_rate.round() as i32,
+                        cancel,
+                    )
+                    .unwrap_or_else(|error| {
+                        eprintln!("Projectile analysis unavailable: {error:#}");
+                        Default::default()
+                    })
+                } else {
+                    Default::default()
+                };
                 drop(bytes);
                 let geometry = visibility_assets::prepare(root, game, vrf, &demo.map_name)?;
-                Ok(Spatial { tracks, geometry })
+                Ok(Spatial {
+                    tracks,
+                    geometry,
+                    projectiles,
+                })
             })
             .and_then(|result| {
                 result
@@ -78,4 +99,5 @@ impl<'a> Context<'a> {
 pub(super) struct Composition<'a> {
     pub demo: &'a DemoInfo,
     pub originals: &'a [Highlight],
+    pub replay_links: &'a [ReplayLink],
 }

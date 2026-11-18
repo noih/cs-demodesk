@@ -1,7 +1,7 @@
 //! One registration and one typed payload per feature; no cross-feature decisions here.
 use super::*;
 use context::{Composition, Context};
-mod combat;
+pub(super) mod combat;
 mod opening;
 mod push;
 mod teamwork;
@@ -23,13 +23,13 @@ pub(super) const REGISTRY: &[Registration] = &[
     },
     Registration {
         kind: Kind::Opening,
-        spatial: false,
+        spatial: true,
         enabled: |o| o.opening_camera,
         analyze: opening::analyze,
     },
     Registration {
         kind: Kind::Teamwork,
-        spatial: false,
+        spatial: true,
         enabled: |o| o.utility_teamwork,
         analyze: teamwork::analyze,
     },

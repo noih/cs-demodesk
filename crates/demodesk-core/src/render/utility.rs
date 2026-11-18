@@ -1,7 +1,31 @@
 //! Event-driven utility edits. Recording order may differ from the final story order.
 use super::demo_data::{enemies, gun, Event};
 use super::*;
-use editing::timeline::shot;
+use editing::{pacing, timeline::shot};
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "kind", content = "camera", rename_all = "camelCase")]
+pub(super) enum Camera {
+    Follow(Chase),
+    Observer(Observer),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct Observer {
+    camera: utility_observer::Camera,
+    anchor_slot: i32,
+}
+
+#[cfg(test)]
+impl Camera {
+    fn follow(&self) -> &Chase {
+        match self {
+            Self::Follow(chase) => chase,
+            Self::Observer(_) => panic!("expected follow camera"),
+        }
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -190,6 +214,7 @@ pub(super) struct Prepared {
 
 #[derive(Serialize, Deserialize)]
 struct Story {
+    round_start: i32,
     main: String,
     kill_tick: i32,
     effect_tick: i32,
@@ -197,6 +222,7 @@ struct Story {
     shooter: Option<View>,
     victim: View,
     return_start: Option<i32>,
+    observer: Option<Observer>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -239,7 +265,7 @@ pub(super) fn prepare(originals: &[Highlight], demo: &DemoInfo, events: &[Event]
             }) {
                 continue;
             }
-            let start = (c.throw.tick - rate * 3 / 4)
+            let proposed_start = (c.throw.tick - rate * 3 / 4)
                 .max(c.round_start)
                 .max(seek::MIN_TICK + 1);
             let chase_end = c
@@ -247,15 +273,32 @@ pub(super) fn prepare(originals: &[Highlight], demo: &DemoInfo, events: &[Event]
                 .map_or(c.throw.tick + rate / 2, |d| d.tick - (rate / 5).max(1))
                 .min(c.throw.tick + 3 * rate)
                 .min(c.effect.tick - 1);
+            let Some(start) = pacing::lead_start(
+                proposed_start,
+                chase_end,
+                c.round_start.max(seek::MIN_TICK + 1),
+                rate,
+            ) else {
+                continue;
+            };
+            let round_end = events
+                .iter()
+                .find(|e| e.event_name == "round_start" && e.tick > kill.tick)
+                .map_or(i32::MAX, |e| e.tick);
             let enemy_end = if c.utility_kill {
-                kill.tick + rate / 3
+                kill.tick + pacing::event_tail(rate)
             } else {
                 (c.effect.tick + rate + rate / 10).min(kill.tick - 2)
             };
-            let enemy_start = (c.effect.tick - rate / 5)
-                .min(enemy_end - rate)
-                .max(c.round_start);
-            if start >= chase_end || enemy_end <= c.effect.tick || enemy_start >= enemy_end {
+            let Some(enemy_start) = pacing::lead_start(
+                c.effect.tick - rate / 5,
+                enemy_end,
+                c.round_start.max(seek::MIN_TICK + 1),
+                rate,
+            ) else {
+                continue;
+            };
+            if enemy_end <= c.effect.tick || enemy_end >= round_end {
                 continue;
             }
             let shooter = c
@@ -280,13 +323,21 @@ pub(super) fn prepare(originals: &[Highlight], demo: &DemoInfo, events: &[Event]
                             .iter()
                             .any(|p| p.steamid == *id && p.user_id.is_some())
                     })?;
+                    let end = (damage.tick + rate / 3).min(kill.tick - 1);
                     Some(View {
                         player: shooter.into(),
-                        start: (damage.tick - rate / 2).max(c.round_start),
-                        end: (damage.tick + rate / 3).min(kill.tick - 1),
+                        start: pacing::lead_start(
+                            damage.tick - rate / 2,
+                            end,
+                            c.round_start,
+                            rate,
+                        )?,
+                        end,
                     })
                 });
             stories.push(Story {
+                round_start: c.round_start,
+                observer: None,
                 main: main.into(),
                 kill_tick: kill.tick,
                 effect_tick: c.effect.tick,
@@ -315,6 +366,7 @@ pub(super) fn prepare(originals: &[Highlight], demo: &DemoInfo, events: &[Event]
                 },
                 return_start: (!c.utility_kill).then_some(
                     (c.effect.tick - rate / 2)
+                        .min(kill.tick + pacing::event_tail(rate) - pacing::minimum(rate))
                         .max(kill.tick - 3 * rate)
                         .max(c.round_start),
                 ),
@@ -324,12 +376,145 @@ pub(super) fn prepare(originals: &[Highlight], demo: &DemoInfo, events: &[Event]
     Prepared { stories }
 }
 
+/// Qualify optional observer shots during analysis; composition and export only use saved data.
+pub(super) fn prepare_observers(
+    prepared: &mut Prepared,
+    tracks: &demo_data::Tracks,
+    projectiles: &demo_data::Projectiles,
+    demo: &DemoInfo,
+    ray: &impl Fn(
+        crate::analysis::line_of_sight::Vec3,
+        crate::analysis::line_of_sight::Vec3,
+    ) -> crate::analysis::line_of_sight::Occlusion,
+    cancel: &AtomicBool,
+) {
+    let rate = demo.tick_rate.round() as i32;
+    if rate <= 0 {
+        return;
+    }
+    for story in &mut prepared.stories {
+        if cancel.load(std::sync::atomic::Ordering::Relaxed) {
+            break;
+        }
+        let Some(grenade) = story
+            .chase
+            .grenade
+            .as_ref()
+            .filter(|g| g.class_name == "hegrenade_projectile")
+        else {
+            continue;
+        };
+        let Some(path) = projectiles.get(&grenade.entity_index) else {
+            continue;
+        };
+        let flight: Vec<_> = path
+            .iter()
+            .copied()
+            .filter(|(tick, _)| *tick >= grenade.throw_tick - 2 && *tick <= story.effect_tick)
+            .collect();
+        if flight.len() < 8
+            || flight.windows(2).any(|p| p[1].0 - p[0].0 > 2)
+            || flight.last().is_none_or(|p| story.effect_tick - p.0 > 2)
+        {
+            continue;
+        }
+        let end = story.victim.end;
+        let positions = |id: &str| -> Vec<(i32, crate::analysis::line_of_sight::Vec3)> {
+            tracks
+                .range(flight[0].0 - rate / 4..=end)
+                .filter_map(|(&tick, players)| {
+                    players
+                        .iter()
+                        .find(|p| p.id == id && p.alive)
+                        .map(|p| (tick, p.position))
+                })
+                .collect()
+        };
+        let victim = positions(&story.victim.player);
+        if victim.is_empty()
+            || victim
+                .last()
+                .is_none_or(|p| p.0 < story.effect_tick - rate / 4)
+        {
+            continue;
+        }
+        let mut body = vec![];
+        let mut missing = false;
+        for tick in (flight[0].0..=end).step_by((rate / 16).max(1) as usize) {
+            let Some(&(at, p)) = victim.iter().rev().find(|p| p.0 <= tick) else {
+                missing = true;
+                break;
+            };
+            if tick < story.effect_tick && tick - at > rate / 4 {
+                missing = true;
+                break;
+            }
+            body.push((tick, p));
+        }
+        if missing || body.len() < 2 {
+            continue;
+        }
+        let main = positions(&story.main);
+        let (cameras, _) =
+            utility_observer::search(&flight, &body, &main, story.effect_tick, rate, ray);
+        let Some(mut observer) = cameras.into_iter().next() else {
+            continue;
+        };
+        observer.end_tick = end;
+        if observer.end_tick - observer.start_tick < pacing::minimum(rate) {
+            continue;
+        }
+        // Keep spectator lifecycle independent of the victim's death in this world-space shot.
+        let anchor_slot = std::iter::once(story.main.as_str())
+            .chain(std::iter::once(story.chase.steam_id.as_str()))
+            .chain(demo.players.iter().map(|p| p.steamid.as_str()))
+            .filter(|id| *id != story.victim.player)
+            .find_map(|id| {
+                let slot = demo.players.iter().find(|p| p.steamid == id)?.user_id? + 1;
+                let after = tracks
+                    .range(end..)
+                    .next()
+                    .filter(|(tick, _)| **tick - end <= rate / 4)?;
+                let alive = |players: &Vec<demo_data::Player>| {
+                    players.iter().any(|p| p.id == id && p.alive)
+                };
+                (alive(after.1)
+                    && tracks
+                        .range(observer.start_tick..=end)
+                        .all(|(_, ps)| alive(ps)))
+                .then_some(slot)
+            });
+        let Some(anchor_slot) = anchor_slot else {
+            continue;
+        };
+        // Keep the wind-up and release before the observer; a small rewind may bridge the cut.
+        let throw_end = grenade.throw_tick + rate / 4;
+        let Some(throw_start) = pacing::lead_start(
+            story
+                .chase
+                .start_tick
+                .min(throw_end - pacing::minimum(rate)),
+            throw_end,
+            story.round_start.max(seek::MIN_TICK + 1),
+            rate,
+        ) else {
+            continue;
+        };
+        story.chase.start_tick = throw_start;
+        story.chase.end_tick = throw_end;
+        story.observer = Some(Observer {
+            camera: observer,
+            anchor_slot,
+        });
+    }
+}
+
 #[cfg(test)]
 pub(super) fn plan(
     recording: Vec<Highlight>,
     demo: &DemoInfo,
     events: &[Event],
-) -> (Vec<Highlight>, Vec<Option<Chase>>) {
+) -> (Vec<Highlight>, Vec<Option<Camera>>) {
     let prepared = prepare(&recording, demo, events);
     compose(recording, demo, &prepared)
 }
@@ -338,7 +523,7 @@ pub(super) fn compose(
     recording: Vec<Highlight>,
     demo: &DemoInfo,
     prepared: &Prepared,
-) -> (Vec<Highlight>, Vec<Option<Chase>>) {
+) -> (Vec<Highlight>, Vec<Option<Camera>>) {
     let rate = demo.tick_rate.round() as i32;
     let mut shots = vec![];
     let mut cameras = vec![];
@@ -357,8 +542,41 @@ pub(super) fn compose(
             }) {
                 continue;
             }
-            if start > cursor && start - cursor >= rate / 3 {
-                shots.push(shot(&h, &h.player.steamid, cursor, start, demo));
+            // A throw before the clip is a rewind, not permission to discard the
+            // original POV leading up to the story's return to the main player.
+            let prefix_end = if start <= cursor {
+                story
+                    .return_start
+                    .unwrap_or(story.effect_tick)
+                    .min(h.end_tick)
+            } else {
+                start
+            };
+            let prefix_end = if prefix_end > cursor {
+                prefix_end.max(cursor + pacing::minimum(rate))
+            } else {
+                cursor
+            };
+            // Preserve the initial POV without showing the same main-player kill twice.
+            if prefix_end > h.end_tick
+                || (story.return_start.is_some() && prefix_end > story.kill_tick)
+                || (story.return_start.is_none()
+                    && h.end_tick > story.victim.end.max(prefix_end)
+                    && h.end_tick - story.victim.end.max(prefix_end) < pacing::minimum(rate))
+            {
+                continue;
+            }
+            let return_window = if let Some(main_start) = story.return_start {
+                let end = (story.kill_tick + pacing::event_tail(rate)).min(h.end_tick);
+                let Some(start) = pacing::lead_start(main_start, end, main_start, rate) else {
+                    continue;
+                };
+                Some((start, end))
+            } else {
+                None
+            };
+            if prefix_end > cursor {
+                shots.push(shot(&h, &h.player.steamid, cursor, prefix_end, demo));
                 cameras.push(None);
             }
             shots.push(shot(
@@ -368,18 +586,36 @@ pub(super) fn compose(
                 story.chase.end_tick,
                 demo,
             ));
-            cameras.push(Some(story.chase.clone()));
-            for view in story.shooter.iter().chain(std::iter::once(&story.victim)) {
+            cameras.push(Some(Camera::Follow(story.chase.clone())));
+            if let Some(view) = &story.shooter {
                 shots.push(shot(&h, &view.player, view.start, view.end, demo));
                 cameras.push(None);
             }
-            if let Some(main_start) = story.return_start {
-                let main_end = (story.kill_tick + rate / 2).min(h.end_tick);
+            if let Some(observer) = &story.observer {
+                shots.push(shot(
+                    &h,
+                    &story.victim.player,
+                    observer.camera.start_tick,
+                    observer.camera.end_tick,
+                    demo,
+                ));
+                cameras.push(Some(Camera::Observer(observer.clone())));
+            } else {
+                shots.push(shot(
+                    &h,
+                    &story.victim.player,
+                    story.victim.start,
+                    story.victim.end,
+                    demo,
+                ));
+                cameras.push(None);
+            }
+            if let Some((main_start, main_end)) = return_window {
                 shots.push(shot(&h, &h.player.steamid, main_start, main_end, demo));
                 cameras.push(None);
                 cursor = main_end;
             } else {
-                cursor = story.victim.end.min(h.end_tick);
+                cursor = story.victim.end.max(prefix_end).min(h.end_tick);
             }
             edited = true;
         }
@@ -395,7 +631,7 @@ pub(super) fn compose(
     }
     // Avoid an unnecessary seek/audio boundary between the attack and its continuous aftermath.
     let mut joined: Vec<Highlight> = Vec::new();
-    let mut joined_cameras: Vec<Option<Chase>> = Vec::new();
+    let mut joined_cameras: Vec<Option<Camera>> = Vec::new();
     for (shot, camera) in shots.into_iter().zip(cameras) {
         if camera.is_none() && joined_cameras.last().is_some_and(Option::is_none) {
             if let Some(last) = joined.last_mut().filter(|last| {
@@ -417,6 +653,105 @@ pub(super) fn compose(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn observer_keeps_throw_and_death_hold_and_blocked_view_keeps_original_story() {
+        use crate::analysis::line_of_sight::Occlusion;
+        let (demo, mut h, events) = fixture(true, true, 0);
+        h.player.steamid = "ally".into();
+        let tracks = (700..=1100)
+            .step_by(4)
+            .map(|tick| {
+                (
+                    tick,
+                    ["ally", "enemy"]
+                        .map(|id| demo_data::Player {
+                            id: id.into(),
+                            team: if id == "ally" { 3 } else { 2 },
+                            alive: id == "ally" || tick < 1000,
+                            position: if id == "ally" {
+                                [0., 0., 0.]
+                            } else {
+                                [512., 0., 0.]
+                            },
+                            view: None,
+                        })
+                        .to_vec(),
+                )
+            })
+            .collect();
+        let projectiles = [(
+            500,
+            (900..=1000)
+                .map(|tick| (tick, [f64::from(tick - 900) * 4., 0., 36.]))
+                .collect(),
+        )]
+        .into_iter()
+        .collect();
+        let mut prepared = prepare(&[h.clone()], &demo, &events);
+        let baseline = compose(vec![h.clone()], &demo, &prepared);
+        prepare_observers(
+            &mut prepared,
+            &tracks,
+            &projectiles,
+            &demo,
+            &|_, _| Occlusion::Blocked,
+            &AtomicBool::new(false),
+        );
+        assert_eq!(
+            serde_json::to_value(compose(vec![h.clone()], &demo, &prepared)).unwrap(),
+            serde_json::to_value(baseline).unwrap()
+        );
+        prepare_observers(
+            &mut prepared,
+            &tracks,
+            &projectiles,
+            &demo,
+            &|_, _| Occlusion::Clear,
+            &AtomicBool::new(false),
+        );
+        // The saved analysis includes the chosen camera; composing it does not run the solver.
+        let saved: Prepared =
+            serde_json::from_slice(&serde_json::to_vec(&prepared).unwrap()).unwrap();
+        let (shots, cameras) = compose(vec![h], &demo, &saved);
+        let observer = cameras
+            .iter()
+            .position(|c| matches!(c, Some(Camera::Observer(_))))
+            .unwrap();
+        let Some(Camera::Observer(view)) = &cameras[observer] else {
+            unreachable!()
+        };
+        assert_eq!(
+            view.anchor_slot, 2,
+            "anchor must be the living thrower, not the dying victim"
+        );
+        let dir = tempfile::tempdir().unwrap();
+        let mut commands = vec![];
+        schedule(&mut commands, &[observer], &cameras, dir.path(), 64., true).unwrap();
+        let anchor = commands
+            .iter()
+            .find(|c| c.cmd.contains("spec_player 2"))
+            .unwrap();
+        assert!(anchor.tick < f64::from(view.camera.start_tick));
+        assert!(commands
+            .iter()
+            .any(|c| c.cmd == "r_drawviewmodel 1" && c.tick == f64::from(view.camera.end_tick)));
+        let Some(Camera::Follow(throw)) = &cameras[observer - 1] else {
+            panic!("throw must precede observer")
+        };
+        assert!(throw.start_tick < 900 && throw.end_tick > 900 && throw.end_tick < 1000);
+        assert!(shots
+            .iter()
+            .all(|s| s.end_tick - s.start_tick >= pacing::minimum(64)));
+        assert_eq!(shots[observer].end_tick, 1000 + pacing::event_tail(64));
+        assert_eq!(
+            cameras
+                .iter()
+                .filter(|c| matches!(c, Some(Camera::Observer(_))))
+                .count(),
+            1
+        );
+    }
+
     fn fixture(he: bool, direct: bool, delay: i32) -> (DemoInfo, Highlight, Vec<Event>) {
         let demo: DemoInfo = serde_json::from_value(serde_json::json!({
             "path":"test.dem", "mapName":"de_test", "serverName":"test", "tickRate":64.0,
@@ -438,13 +773,71 @@ mod tests {
     }
 
     #[test]
+    fn minimum_view_duration_includes_utility_death_and_shooter() {
+        let (demo, mut h, mut events) = fixture(true, true, 0);
+        h.player.steamid = "ally".into();
+        events.push(serde_json::from_value(serde_json::json!({"tick":980,"event_name":"player_hurt","weapon":"ak47","user_steamid":"enemy","attacker_steamid":"main","user_team_num":2,"attacker_team_num":3,"dmg_health":60})).unwrap());
+        events.sort_by_key(|e| e.tick);
+        let (shots, cameras) = plan(vec![h], &demo, &events);
+        assert_eq!(cameras.iter().flatten().count(), 1);
+        assert!(shots.iter().all(|h| h.end_tick - h.start_tick >= 96));
+        let victim = shots.iter().find(|h| h.player.steamid == "enemy").unwrap();
+        assert!(victim.end_tick >= 1032);
+    }
+
+    #[test]
+    fn minimum_views_do_not_cross_round_boundaries() {
+        let (demo, mut h, mut events) = fixture(true, true, 0);
+        h.player.steamid = "ally".into();
+        events.push(
+            serde_json::from_value(serde_json::json!({"tick":1020,"event_name":"round_start"}))
+                .unwrap(),
+        );
+        events.sort_by_key(|e| e.tick);
+        assert!(
+            plan(vec![h], &demo, &events).1.iter().all(Option::is_none),
+            "death hold must not continue into the next round"
+        );
+
+        let (demo, h, mut events) = fixture(false, false, 12);
+        events[1].tick = 930;
+        events.push(
+            serde_json::from_value(serde_json::json!({"tick":920,"event_name":"round_start"}))
+                .unwrap(),
+        );
+        events.sort_by_key(|e| e.tick);
+        assert!(
+            plan(vec![h], &demo, &events).1.iter().all(Option::is_none),
+            "the throw cannot borrow lead-in from the preceding round"
+        );
+    }
+
+    #[test]
+    fn a_preceding_throw_keeps_the_original_pov_before_rewinding() {
+        for direct in [false, true] {
+            let (demo, mut h, events) = fixture(direct, direct, if direct { 0 } else { 100 });
+            h.start_tick = 950;
+            if direct {
+                h.player.steamid = "ally".into();
+            }
+            let (shots, cameras) = plan(vec![h.clone()], &demo, &events);
+            assert_eq!(shots[0].player.steamid, h.player.steamid);
+            assert_eq!(shots[0].start_tick, 950);
+            assert_eq!(shots[0].end_tick, 1046);
+            assert!(cameras[0].is_none());
+            assert!(cameras[1].is_some());
+            assert_eq!(shots[1].start_tick, 852);
+        }
+    }
+
+    #[test]
     fn fast_death_rewinds_without_showing_victim_death_or_losing_kill() {
         let (demo, h, e) = fixture(false, false, 12);
         let (shots, cameras) = plan(vec![h], &demo, &e);
         assert_eq!(cameras.iter().flatten().count(), 1);
         let enemy = shots.iter().find(|s| s.player.steamid == "enemy").unwrap();
         assert!(enemy.end_tick < 1012 && enemy.end_tick > 1000);
-        assert!(enemy.end_tick - enemy.start_tick >= 64);
+        assert!(enemy.end_tick - enemy.start_tick >= 96);
         let main = shots
             .iter()
             .find(|s| s.player.steamid == "main" && s.end_tick > 1012)
@@ -464,6 +857,7 @@ mod tests {
                 .flatten()
                 .next()
                 .unwrap()
+                .follow()
                 .grenade
                 .as_ref()
                 .unwrap()
@@ -569,7 +963,14 @@ mod tests {
                     1,
                     "{weapon} direct={direct}"
                 );
-                assert!(cameras.iter().flatten().next().unwrap().grenade.is_none());
+                assert!(cameras
+                    .iter()
+                    .flatten()
+                    .next()
+                    .unwrap()
+                    .follow()
+                    .grenade
+                    .is_none());
                 assert_eq!(
                     shots.iter().filter(|s| s.player.steamid == "enemy").count(),
                     1
@@ -627,9 +1028,10 @@ mod tests {
 pub(super) fn schedule(
     schedule: &mut Vec<actions::Scheduled>,
     indices: &[usize],
-    cameras: &[Option<Chase>],
+    cameras: &[Option<Camera>],
     directory: &Path,
     rate: f64,
+    viewmodel: bool,
 ) -> Result<()> {
     for (local, &global) in indices.iter().enumerate() {
         let Some(camera) = &cameras[global] else {
@@ -637,30 +1039,71 @@ pub(super) fn schedule(
         };
         std::fs::create_dir_all(directory)?;
         let file = directory.join(format!("utility-{local}.mjs"));
-        std::fs::write(
-            &file,
-            format!(
-                "{}\nstartAimFollow({});\n",
-                include_str!("utility-camera.mjs"),
-                serde_json::to_string(camera)?
+        let (start, end, script, observer) = match camera {
+            Camera::Follow(camera) => (
+                camera.start_tick,
+                camera.end_tick,
+                format!(
+                    "{}\nstartAimFollow({});\n",
+                    include_str!("utility-camera.mjs"),
+                    serde_json::to_string(camera)?
+                ),
+                false,
             ),
-        )?;
-        let setup = seek::SeekWindow::new(
-            camera.start_tick,
-            camera.end_tick,
-            None,
-            rate.round() as i32,
-        )
-        .setup_tick;
+            Camera::Observer(observer) => {
+                let camera = &observer.camera;
+                std::fs::write(
+                    directory.join("team-push-camera.mjs"),
+                    include_str!("team-push-camera.mjs"),
+                )?;
+                std::fs::write(
+                    directory.join("camera-transition.mjs"),
+                    include_str!("camera-transition.mjs"),
+                )?;
+                (
+                    camera.start_tick,
+                    camera.end_tick,
+                    format!(
+                        "{}\nstartUtilityObserver({}, {});\n",
+                        include_str!("utility-observer-camera.mjs"),
+                        serde_json::to_string(camera)?,
+                        rate
+                    ),
+                    true,
+                )
+            }
+        };
+        std::fs::write(&file, format!("mirv.events.cViewRenderSetupView.off('demodesk/editing-aim-follow');\nmirv.events.cViewRenderSetupView.off('demodesk/utility-observer');\n{script}"))?;
+        let setup = seek::SeekWindow::new(start, end, None, rate.round() as i32).setup_tick;
         // Loading after the standard POV setup preserves the shared seek/audio gate.
         schedule.push(actions::Scheduled {
             tick: f64::from(setup + 1),
-            cmd: "spec_mode 3".into(),
+            cmd: if observer {
+                "spec_mode 3; r_drawviewmodel 0"
+            } else {
+                "spec_mode 3"
+            }
+            .into(),
         });
         schedule.push(actions::Scheduled {
             tick: f64::from(setup + 1) + 0.001,
             cmd: format!("mirv_script_load \"{}\"", to_forward_slashes(&file)),
         });
+        if observer {
+            if let Camera::Observer(view) = camera {
+                schedule.push(actions::Scheduled {
+                    tick: f64::from((setup + rate.round() as i32 / 4 + 1).min(start - 1)) + 0.01,
+                    cmd: format!(
+                        "spec_lock_to_accountid 0; spec_player {}; spec_mode 3",
+                        view.anchor_slot
+                    ),
+                });
+            }
+            schedule.push(actions::Scheduled {
+                tick: f64::from(end),
+                cmd: format!("r_drawviewmodel {}", viewmodel as u8),
+            });
+        }
     }
     schedule.sort_by(|a, b| a.tick.total_cmp(&b.tick));
     Ok(())

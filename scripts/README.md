@@ -31,6 +31,18 @@ operations and CS2/FFmpeg recording require a separate installed-app check.
 Set `TEST_UI_DEV=1` to run the same checks against Vite development mode, including
 dependency preprocessing and source loading. This uses an isolated cache under `out/`.
 
+Run `node --experimental-transform-types --test scripts/test-editing-links.mjs`
+for replay-link recommendation and selection changes. `test:ui` also verifies
+the release gate: hidden editing makes no analysis/cache/preview requests and exports
+with every editing effect disabled. When enabled, it checks link/unlink toggles,
+tooltips, playback order, cached preview validation and export payloads. Core editing tests cover the compiled order and non-repeated main POV.
+
+## Parser compatibility and error provenance
+
+Run `node --experimental-transform-types --test scripts/test-parser-boundary.mjs` for
+localized error provenance and the rule preventing vendor imports outside the adapter.
+See [the parser boundary](../docs/parser.md) for the interfaces and Demo regression workflow.
+
 ## Documentation screenshots
 
 After `npm run build`, run `node scripts/store-screenshots.mjs <data-directory>/parsed [more-parsed-directories...]`
@@ -250,7 +262,10 @@ approved magnet approach keep their existing behavior.
 Shared fixed encounter camera search: `cargo test -p demodesk-core render::camera_search::`
 checks full-interval framing, blocked/unknown geometry rejection, and lead-in trimming
 without dropping required combat. The solver is shared by team-push exports and the local fixture runner.
-It generates 24 directions × 3 distances × 3 heights × 3 FOVs relative to subject bounds,
+It uses the shared `camera_search::coarse_to_fine` angular search: scan 12 directions at
+30-degree intervals, then check ±15 degrees around the three best distinct directions
+(deduplicated). If no coarse view qualifies, check all remaining 15-degree gaps.
+Each direction tests 3 distances × 3 heights × 3 FOVs relative to subject bounds,
 checks body margins/size/separation and static chest/head rays over every supplied sample,
 then ranks accepted cameras. An empty result means keep the existing POV.
 
@@ -265,6 +280,23 @@ team-push experiment's `encounter` manifest to record the result without manual 
 Limits: standing body envelopes and static physics approximate the image; dynamic props,
 smoke, corpse animation, map-version matching and continuous between-sample visibility
 are not yet qualified. Production uses conservative nearby T-team advancement and entry/trade rules.
+
+Utility observer cameras: `cargo test -p demodesk-core --lib render::utility` checks
+path ranking, preserving the throw before the observer and unchanged fallback.
+`node --test scripts/test-utility-camera.mjs scripts/test-utility-observer.mjs` checks
+capture overrides and death/cut boundaries. For a real offline fixture,
+set `DEMODESK_UTILITY_OBSERVER_JOB` to a saved job JSON and
+`DEMODESK_UTILITY_OBSERVER_OUTPUT` to a new directory, then run
+`cargo test -p demodesk-core --lib plan_utility_observer_experiment -- --ignored --nocapture`.
+The victim must fit and remain unobstructed. Rank all passing views by the visible
+straight-line horizontal trajectory projected onto the camera's horizontal axis, divided
+by the full launch-to-impact horizontal distance (no arc length or screen-width percentage).
+Reject ratios below 20%; do not stop at the first passing view. Protagonist visibility
+breaks coverage ties, followed by victim size. It shares the same coarse-to-fine function
+with team-push cameras, while retaining its own qualification and ranking rules;
+if nothing qualifies, retain the original grenade-follow and victim-view sequence.
+Set `DEMODESK_UTILITY_OBSERVER_COMPARE=1` to also measure the original full 15-degree
+scan and save its best view, ray count and elapsed search time in `search.json`.
 
 Subtle encounter pan: `planEncounterAim(samples, encounter, tickRate)` in
 `render/team-push-camera.mjs` (re-exported by `editing-team-push.mjs`) follows changes in the two-subject centroid, with 0.45-second

@@ -5,7 +5,17 @@ pub(in crate::render::editing) struct Prepared {
     opportunities: utility::Prepared,
 }
 pub(super) fn analyze(ctx: &Context<'_>) -> Detected {
-    let opportunities = utility::prepare(ctx.originals, ctx.demo, &ctx.events);
+    let mut opportunities = utility::prepare(ctx.originals, ctx.demo, &ctx.events);
+    if let Some(spatial) = &ctx.spatial {
+        utility::prepare_observers(
+            &mut opportunities,
+            &spatial.tracks,
+            &spatial.projectiles,
+            ctx.demo,
+            &|a, b| spatial.geometry.world.ray(a, b),
+            ctx.cancel,
+        );
+    }
     let offers = ctx
         .originals
         .iter()

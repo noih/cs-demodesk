@@ -23,7 +23,6 @@
     "test:recoil": "node --experimental-transform-types --test scripts/test-recoil.mjs scripts/test-spray-tracking.mjs",
     "test:replay": "node --experimental-transform-types --test scripts/test-replay.mjs",
     "test:sync": "node --experimental-transform-types --test scripts/test-app-sync.mjs",
-    "test:stories": "node --experimental-transform-types --test scripts/test-team-stories.mjs",
     "test:ui": "node --experimental-transform-types scripts/test-ui.mjs"
   },
   "dependencies": {

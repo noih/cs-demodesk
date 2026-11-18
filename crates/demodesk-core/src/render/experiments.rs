@@ -3,6 +3,9 @@ use super::*;
 use anyhow::{ensure, Context};
 use std::io::Write;
 
+#[path = "utility_observer_experiment.rs"]
+mod utility_observer_experiment;
+
 #[test]
 #[ignore = "offline characterization of private demo jobs; writes a new output directory"]
 fn characterize_editing_pipeline() -> Result<()> {
@@ -119,21 +122,54 @@ fn reproduce_editing_job() -> Result<()> {
             &offline_tools,
             &output,
         )?;
-        let selected: Vec<_> = analysis
-            .candidates
-            .iter()
-            .filter(|c| {
-                c.recommended
-                    || (std::env::var_os("DEMODESK_REPRO_ALL_COMBAT").is_some()
-                        && c.kind == editing::Kind::Combat)
-            })
-            .map(|c| c.id.clone())
-            .collect();
-        let plan = analysis.select(&selected, &demo)?;
+        let link_all = std::env::var_os("DEMODESK_REPRO_LINK_ALL").is_some();
+        let selected: Vec<_> = if link_all {
+            analysis
+                .candidates
+                .iter()
+                .filter(|c| {
+                    c.kind == editing::Kind::Combat
+                        || (c.kind == editing::Kind::Opening && c.recommended)
+                })
+                .map(|c| c.id.clone())
+                .collect()
+        } else if std::env::var_os("DEMODESK_REPRO_SAVED_SELECTION").is_some() {
+            options.editing_selections.clone()
+        } else {
+            analysis
+                .candidates
+                .iter()
+                .filter(|c| {
+                    c.recommended
+                        || (std::env::var_os("DEMODESK_REPRO_ALL_COMBAT").is_some()
+                            && c.kind == editing::Kind::Combat)
+                })
+                .map(|c| c.id.clone())
+                .collect()
+        };
         std::fs::write(
             output.join("analysis.json"),
             serde_json::to_vec_pretty(&analysis.summary(false))?,
         )?;
+        let plan = if link_all {
+            let mut replays: Vec<_> = analysis
+                .candidates
+                .iter()
+                .filter(|c| c.kind == editing::Kind::Combat)
+                .collect();
+            replays.sort_by_key(|c| (&c.highlight_id, c.tick));
+            let links: Vec<_> = replays
+                .windows(2)
+                .filter(|p| p[0].highlight_id == p[1].highlight_id)
+                .map(|p| editing::ReplayLink {
+                    from: p[0].id.clone(),
+                    to: p[1].id.clone(),
+                })
+                .collect();
+            analysis.select_with_links(&selected, &links, &demo)?
+        } else {
+            analysis.select(&selected, &demo)?
+        };
         std::fs::write(
             output.join("editing-plan.json"),
             serde_json::to_vec_pretty(&plan)?,
@@ -211,6 +247,10 @@ struct Experiment {
     team_push: bool,
     #[serde(default)]
     grenade: Option<serde_json::Value>,
+    #[serde(default)]
+    hud: Option<bool>,
+    #[serde(default)]
+    viewmodel: Option<bool>,
 }
 
 #[test]
@@ -297,7 +337,7 @@ fn record_editing_experiment() -> Result<()> {
     highlight.anchor_tick = spec.switch_tick;
     highlight.round_result = None;
     highlight.key_moments.clear();
-    let clip = RenderClip {
+    let mut clip = RenderClip {
         highlight,
         slot: Some(player_slot),
         round_result_slot: None,
@@ -315,6 +355,8 @@ fn record_editing_experiment() -> Result<()> {
         max_size_mb: None,
         key_moments_only: false,
         show_game: false,
+        hud: spec.hud.unwrap_or(true),
+        viewmodel: spec.viewmodel.unwrap_or(true),
         ..Default::default()
     };
     let cancel = Arc::new(AtomicBool::new(false));
@@ -325,7 +367,10 @@ fn record_editing_experiment() -> Result<()> {
         println!("{line}");
         let _ = writeln!(logfile, "{line}");
     };
-    if spec.variant == "utility" {
+    if matches!(spec.variant.as_str(), "utility" | "opening") {
+        if spec.variant == "opening" {
+            clip.highlight.start_tick = spec.switch_tick;
+        }
         let result = render_highlights(RenderJobInput {
             prepared_editing: None,
             combat_ticks: None,
@@ -335,8 +380,8 @@ fn record_editing_experiment() -> Result<()> {
             preserve_merge_order: false,
             output_dir: spec.output_dir.clone(),
             options: RenderOptions {
-                utility_teamwork: true,
-                opening_camera: spec.opening_camera,
+                utility_teamwork: spec.variant == "utility",
+                opening_camera: spec.variant == "opening" || spec.opening_camera,
                 combat_perspectives: spec.combat_perspectives,
                 team_push: spec.team_push,
                 ..options
@@ -349,13 +394,13 @@ fn record_editing_experiment() -> Result<()> {
         })?;
         ensure!(
             result.failed_highlights.is_empty(),
-            "utility export incomplete"
+            "editing export incomplete"
         );
         std::fs::write(
             spec.output_dir.join("result.json"),
             serde_json::to_vec_pretty(&result)?,
         )?;
-        println!("UTILITY_RESULT {}", spec.output_dir.display());
+        println!("EDITING_RESULT {}", spec.output_dir.display());
         return Ok(());
     }
     let (preset, _) = encode::checked_record_preset(&ffmpeg, &options, &mut log, &cancel)?;
@@ -380,7 +425,7 @@ fn record_editing_experiment() -> Result<()> {
         ) + 1.0;
         let mode = if matches!(
             spec.variant.as_str(),
-            "third-person" | "aim-follow" | "grenade-follow" | "opening" | "team-push"
+            "third-person" | "aim-follow" | "grenade-follow" | "team-push"
         ) {
             3
         } else {
@@ -406,24 +451,7 @@ fn record_editing_experiment() -> Result<()> {
                 cmd: format!("mirv_script_load \"{}\"", to_forward_slashes(&script)),
             });
         }
-        let handoff_tick = spec.switch_tick
-            - if matches!(spec.variant.as_str(), "opening" | "team-push") {
-                8
-            } else {
-                0
-            };
-        if spec.variant == "opening" {
-            let script = spec.output_dir.join("opening.mjs");
-            let source = std::fs::read_to_string(
-                PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/render/opening-camera.mjs"),
-            )?;
-            let config = serde_json::json!({"steamId": spec.player, "startTick": spec.start_tick, "endTick": handoff_tick});
-            std::fs::write(&script, format!("{source}\nstartOpening({config});\n"))?;
-            schedule.push(actions::Scheduled {
-                tick: setup + 0.003,
-                cmd: format!("mirv_script_load \"{}\"", to_forward_slashes(&script)),
-            });
-        }
+        let handoff_tick = spec.switch_tick - if spec.variant == "team-push" { 8 } else { 0 };
         if spec.variant == "team-push" {
             let script = spec.output_dir.join("team-push.mjs");
             let source = std::fs::read_to_string(

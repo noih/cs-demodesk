@@ -883,30 +883,16 @@
     "reanalyze": "再分析",
     "selected": "{{total}} 件中 {{count}} 件を選択",
     "recommended": "おすすめ",
+    "replayLinked": "前のリプレイと連続再生",
+    "replayUnlinked": "個別再生",
+    "replayLinkLabel": "{{target}}：前のリプレイと連結",
+    "playbackOrder": "再生順序",
+    "mainPlayer": "主役",
+    "sequenceUnavailable": "この編集の組み合わせは適用できません。連結または選択を調整してください。",
     "empty": "利用可能な編集候補はありません。そのまま書き出せます。",
     "pushUnavailable": "マップの形状データを準備できないため、チーム進攻を分析できません。他の編集は利用できます。",
     "groupEmpty": "利用できる編集はありません",
-    "durationHint": "動画が長くなります。"
-  },
-  "teamStories": {
-    "title": "チームの物語",
-    "hint": "チームを主役に試合を振り返ります。映像編集の前に候補シーンを2Dで確認します。移動だけでは戦術の意図を断定できません。",
-    "experimental": "試作 · 2D絵コンテ",
-    "analyze": "チームの展開を分析",
-    "team": "チーム",
-    "mapUnavailable": "マップを表示できません。",
-    "won": "勝利",
-    "lost": "敗北",
-    "keyPlayer": "キープレイヤー",
-    "empty": "条件に合うチームシーンがありません。",
-    "select": "シーンを選び、前後の展開を確認します。",
-    "utility": "連携した投擲",
-    "trade": "トレードキル",
-    "converge": "別方向からの接近",
-    "advance": "チーム進攻",
-    "relocate": "長距離移動",
-    "plant": "設置",
-    "defuse": "解除",
-    "clutch": "クラッチの転機"
+    "durationHint": "動画が長くなります。",
+    "openingUnavailable": "マップの形状データがないため、オープニングのカメラ位置を分析できません。"
   }
 }

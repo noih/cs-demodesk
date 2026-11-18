@@ -883,30 +883,16 @@
     "reanalyze": "重新分析",
     "selected": "已選 {{count}} / {{total}} 項",
     "recommended": "推薦",
+    "replayLinked": "與上一段連播",
+    "replayUnlinked": "獨立播放",
+    "replayLinkLabel": "{{target}}：與上一段連播",
+    "playbackOrder": "播放順序",
+    "mainPlayer": "主角",
+    "sequenceUnavailable": "無法套用此剪輯組合，請調整連播或選取項目。",
     "empty": "這些片段沒有可用的剪輯情境，可直接輸出。",
     "pushUnavailable": "地圖幾何資料無法準備，暫時無法分析隊伍推進；其他剪輯仍可使用。",
     "groupEmpty": "沒有可用的剪輯情境",
-    "durationHint": "片長會增加。"
-  },
-  "teamStories": {
-    "title": "隊伍故事",
-    "hint": "以隊伍為主角瀏覽整場比賽。先用 2D 檢視候選段落，再驗證影片剪輯；移動軌跡本身不代表戰術意圖。",
-    "experimental": "原型 · 2D 分鏡",
-    "analyze": "分析隊伍故事",
-    "team": "隊伍",
-    "mapUnavailable": "地圖預覽無法使用。",
-    "won": "獲勝",
-    "lost": "落敗",
-    "keyPlayer": "關鍵人物",
-    "empty": "未找到符合條件的隊伍段落。",
-    "select": "選擇一個時刻，預覽前因與結果。",
-    "utility": "集中使用道具",
-    "trade": "隊友補槍",
-    "converge": "分路接近交戰區",
-    "advance": "隊伍推進",
-    "relocate": "長距離轉移",
-    "plant": "下包",
-    "defuse": "拆包",
-    "clutch": "殘局轉折"
+    "durationHint": "片長會增加。",
+    "openingUnavailable": "無法取得地圖幾何資料，暫時無法分析開場鏡位。"
   }
 }

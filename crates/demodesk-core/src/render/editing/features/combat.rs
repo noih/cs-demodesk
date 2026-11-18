@@ -19,22 +19,18 @@ pub(super) fn analyze(ctx: &Context<'_>) -> Detected {
             &opportunities,
             Some(&all),
         );
-        let (recommended, _) = perspectives::compose(
-            clips.clone(),
-            vec![None; clips.len()],
-            std::slice::from_ref(original),
-            ctx.demo,
-            &opportunities,
-            None,
-        );
         let rate = ctx.demo.tick_rate.round() as i32;
+        let mut previous_tick = None;
+        let mut group_tick = 0;
         for shot in possible
             .iter()
             .filter(|h| h.player.steamid != original.player.steamid)
         {
-            let recommended = recommended.iter().any(|h| {
-                h.player.steamid == shot.player.steamid && h.start_tick == shot.start_tick
-            });
+            let recommended = opportunities.recommended(
+                &original.player.steamid,
+                shot.start_tick + rate * 3 / 2,
+                &shot.player.steamid,
+            );
             let mut c = candidate(
                 &original.id,
                 Kind::Combat,
@@ -44,6 +40,11 @@ pub(super) fn analyze(ctx: &Context<'_>) -> Detected {
             );
             c.target_id = shot.player.steamid.clone();
             c.id.push_str(&format!(":{}", c.target_id));
+            if previous_tick.is_none_or(|tick| c.tick - tick > 3 * rate) {
+                group_tick = c.tick;
+            }
+            previous_tick = Some(c.tick);
+            c.replay_group = Some(format!("{}:{group_tick}", original.id));
             offers.push(Offer {
                 candidate: c,
                 priority: 1,
@@ -77,18 +78,15 @@ impl Feature for Prepared {
         ctx: &Composition<'_>,
         plan: &mut Plan,
     ) -> Result<()> {
-        let kills = selected
-            .iter()
-            .map(|c| (c.highlight_id.clone(), c.tick, c.target_id.clone()))
-            .collect();
-        let (recording, utilities) = perspectives::compose(
+        let groups = replay_groups(selected, ctx.replay_links);
+        let (recording, utilities) = perspectives::compose_groups(
             std::mem::take(&mut plan.recording),
             std::mem::take(&mut plan.utilities),
             ctx.originals,
             ctx.demo,
             &self.opportunities,
-            Some(&kills),
-        );
+            &groups,
+        )?;
         plan.replace_story(recording, utilities);
         Ok(())
     }
@@ -103,4 +101,62 @@ impl Feature for Prepared {
         );
         Ok(())
     }
+}
+
+fn ordered<'a>(candidates: impl Iterator<Item = &'a Candidate>) -> Vec<&'a Candidate> {
+    let mut selected: Vec<_> = candidates.filter(|c| c.kind == Kind::Combat).collect();
+    selected
+        .sort_by(|a, b| (&a.highlight_id, a.tick, &a.id).cmp(&(&b.highlight_id, b.tick, &b.id)));
+    selected
+}
+
+pub(in crate::render::editing) fn recommended_links(
+    candidates: &[Candidate],
+    ids: &[String],
+) -> Vec<ReplayLink> {
+    ordered(candidates.iter().filter(|c| ids.contains(&c.id)))
+        .windows(2)
+        .filter(|pair| {
+            pair[0].highlight_id == pair[1].highlight_id
+                && pair[0].replay_group.is_some()
+                && pair[0].replay_group == pair[1].replay_group
+        })
+        .map(|pair| ReplayLink {
+            from: pair[0].id.clone(),
+            to: pair[1].id.clone(),
+        })
+        .collect()
+}
+
+pub(in crate::render::editing) fn validate_links(
+    candidates: &[Candidate],
+    ids: &[String],
+    links: &[ReplayLink],
+) -> Result<()> {
+    let selected = ordered(candidates.iter().filter(|c| ids.contains(&c.id)));
+    let mut seen = HashSet::new();
+    ensure!(
+        links.iter().all(|link| seen.insert((&link.from, &link.to))
+            && selected.windows(2).any(|pair| pair[0].id == link.from
+                && pair[1].id == link.to
+                && pair[0].highlight_id == pair[1].highlight_id)),
+        "Replay links must connect adjacent selected exchanges in the same highlight"
+    );
+    Ok(())
+}
+
+fn replay_groups<'a>(selected: &[&'a Candidate], links: &[ReplayLink]) -> Vec<Vec<&'a Candidate>> {
+    let mut groups: Vec<Vec<&Candidate>> = vec![];
+    for candidate in ordered(selected.iter().copied()) {
+        if let Some(group) = groups.last_mut().filter(|group| {
+            links
+                .iter()
+                .any(|link| link.from == group.last().unwrap().id && link.to == candidate.id)
+        }) {
+            group.push(candidate);
+        } else {
+            groups.push(vec![candidate]);
+        }
+    }
+    groups
 }

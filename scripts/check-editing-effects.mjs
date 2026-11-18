@@ -1,3 +1,4 @@
+import { HIGHLIGHT_EDITING_ENABLED } from '../src/releaseFeatures.ts';
 import assert from 'node:assert/strict';
 
 export async function checkEditingEffects(page, dialog) {
@@ -8,7 +9,7 @@ export async function checkEditingEffects(page, dialog) {
     window.editingCalls = [];
     window.missingTools = false;
     window.__TAURI_INTERNALS__.invoke = async (cmd,args) => {
-      if (['analyze_editing','cached_editing_analysis','start_render'].includes(cmd)) window.editingCalls.push({cmd,args});
+      if (['analyze_editing','cached_editing_analysis','preview_editing_plan','start_render'].includes(cmd)) window.editingCalls.push({cmd,args});
       if (cmd === 'cached_editing_analysis') return args.options.shortCombatClips ? null : window.editingCache ?? null;
       if (cmd === 'analyze_editing') {
         if (args.force) window.editingCache=null;
@@ -17,9 +18,23 @@ export async function checkEditingEffects(page, dialog) {
         const h=args.highlightIds[0];
         return window.editingCache={id:'analysis-1',cached:!args.force,warnings:[],candidates:[
           {id:'intro',highlightId:h,kind:'opening',tick:1000,target:'',recommended:true,addedSeconds:1.8,conflicts:['push']},
-          ...[1,2,3].map(i=>({id:'kill-'+i,highlightId:h,kind:'combat',tick:1000+i*128,target:'Enemy '+i,recommended:i===1,addedSeconds:2,conflicts:[]})),
+          ...[1,2,3].map(i=>({id:'kill-'+i,highlightId:h,kind:'combat',tick:1000+i*128,target:'Enemy '+i,recommended:i===1,replayGroup:i<3?'nearby':'later',addedSeconds:2,conflicts:[]})),
           {id:'push',highlightId:h,kind:'push',tick:1000,target:'',recommended:false,addedSeconds:3,conflicts:['intro']},
         ]};
+      }
+      if (cmd === 'preview_editing_plan') {
+        if(window.editingPreviewFail) throw new Error('Preview test failure');
+        const replays=window.editingCache.candidates.filter(c=>c.kind==='combat'&&args.options.editingSelections.includes(c.id));
+        const groups=[];
+        for(const c of replays) {
+          const last=groups.at(-1);
+          if(last&&args.options.editingReplayLinks.some(link=>link.from===last.at(-1).id&&link.to===c.id))last.push(c);
+          else groups.push([c]);
+        }
+        return groups.flatMap(group=>[
+          {highlightId:group[0].highlightId,player:'Main',kind:'main',startTick:800,endTick:group.at(-1).tick+100},
+          ...group.map(c=>({highlightId:c.highlightId,player:c.target,kind:'perspective',startTick:c.tick-96,endTick:c.tick+53})),
+        ]);
       }
       if (cmd === 'start_render') {window.editingOptions=args.options;throw new Error('Editing export probe');}
       return window.editingRestore.invoke(cmd,args);
@@ -27,6 +42,32 @@ export async function checkEditingEffects(page, dialog) {
   });
   const refresh = page.locator('.header-tools .bi-arrow-clockwise').locator('..');
   await refresh.evaluate(el=>el.click());
+  if (!HIGHLIGHT_EDITING_ENABLED) {
+    assert.equal(await effects.count(), 0, 'Release hides highlight editing entirely');
+    await dialog.getByRole('button',{name:'Close',exact:true}).click();
+    await dialog.waitFor({state:'detached'});
+    await page.getByRole('button',{name:/^Export/}).click();
+    await dialog.waitFor();
+    assert.equal(await effects.count(), 0, 'Reopening does not restore editing controls');
+    await dialog.getByRole('button',{name:'Export',exact:true}).click();
+    await page.waitForFunction(()=>window.editingOptions !== undefined);
+    const options = await page.evaluate(()=>window.editingOptions);
+    assert.equal(options.editingAnalysisId, undefined);
+    assert.deepEqual(options.editingSelections, []);
+    assert.deepEqual(options.editingReplayLinks, []);
+    for (const key of ['openingCamera','combatPerspectives','utilityTeamwork','teamPush']) {
+      assert.equal(options[key], false, `Hidden editing never enables ${key}`);
+    }
+    assert.deepEqual(await page.evaluate(()=>window.editingCalls.map(c=>c.cmd)), ['start_render'],
+      'Ordinary export does not load editing caches, analyze scenes or preview edits');
+    await page.evaluate(()=>{
+      window.missingTools=window.editingRestore.missing;
+      window.__TAURI_INTERNALS__.invoke=window.editingRestore.invoke;
+      delete window.editingRestore;
+    });
+    await refresh.evaluate(el=>el.click());
+    return;
+  }
   await effects.getByRole('button',{name:'Analyze scenes',exact:true}).click();
   await effects.getByRole('checkbox').first().waitFor();
   const replays=effects.getByRole('checkbox',{name:/Combat perspectives/});
@@ -37,6 +78,31 @@ export async function checkEditingEffects(page, dialog) {
   // Clicking the entire option row works, not just the checkbox.
   await replays.nth(1).locator('xpath=ancestor::label').click();
   await replays.nth(2).click();
+  const link2=effects.getByRole('button',{name:'Enemy 2: link to previous replay',exact:true});
+  const link3=effects.getByRole('button',{name:'Enemy 3: link to previous replay',exact:true});
+  assert.equal(await link2.getAttribute('aria-pressed'),'false');
+  await link2.hover();
+  await page.getByRole('tooltip').filter({hasText:'Play separately'}).waitFor();
+  await link2.click();
+  assert.equal(await link2.getAttribute('aria-pressed'),'true');
+  await page.waitForFunction(()=>document.querySelector('.editing-playback')?.getAttribute('aria-busy')==='false');
+  assert.deepEqual(await effects.locator('.editing-playback .rt-Badge').allTextContents(),['Main player','Enemy 1','Enemy 2','Main player','Enemy 3']);
+  await link3.focus();
+  await link3.press('Space');
+  await page.waitForFunction(()=>document.querySelector('.editing-playback')?.getAttribute('aria-busy')==='false');
+  assert.deepEqual(await effects.locator('.editing-playback .rt-Badge').allTextContents(),['Main player','Enemy 1','Enemy 2','Enemy 3']);
+  const countBefore=await page.evaluate(()=>window.editingCalls.filter(c=>c.cmd==='analyze_editing').length);
+  await replays.nth(1).click();
+  assert.equal(await link3.getAttribute('aria-pressed'),'false','Removing middle replay does not link its neighbours');
+  await replays.nth(1).click();
+  await link2.click();
+  assert.equal(await page.evaluate(()=>window.editingCalls.filter(c=>c.cmd==='analyze_editing').length),countBefore,'Editing links reuse analysis');
+  await page.evaluate(()=>{window.editingPreviewFail=true;});
+  await link3.click();
+  await effects.getByRole('alert').filter({hasText:'Preview test failure'}).waitFor();
+  assert.equal(await dialog.getByRole('button',{name:'Export',exact:true}).isDisabled(),true,'Invalid preview blocks export before recording');
+  await page.evaluate(()=>{window.editingPreviewFail=false;});
+  await link3.click();
   await effects.getByRole('checkbox',{name:/Team push/}).click();
   assert.equal(await effects.getByRole('checkbox',{name:/Opening camera/}).isChecked(),false,'Conflicting intro is replaced');
   const groupHeader=effects.locator('.editing-highlight-header').first();
@@ -59,6 +125,7 @@ export async function checkEditingEffects(page, dialog) {
   const options=await page.evaluate(()=>window.editingOptions);
   assert.equal(options.editingAnalysisId,'analysis-1');
   assert.deepEqual(options.editingSelections,['kill-1','kill-2','kill-3','push']);
+  assert.deepEqual(options.editingReplayLinks,[{from:'kill-1',to:'kill-2'}]);
   assert.equal(options.combatPerspectives,true);
   assert.equal(options.utilityTeamwork,false);
   assert.equal(options.openingCamera,false);

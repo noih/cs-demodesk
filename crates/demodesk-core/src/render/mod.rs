@@ -15,6 +15,7 @@ mod leftovers;
 pub mod paths;
 pub(crate) mod process;
 mod team_push;
+mod utility_observer;
 
 /// Check a data root through the same process launcher used by rendering tools.
 pub fn verify_data_directory(
@@ -221,6 +222,7 @@ pub struct RenderOptions {
     pub team_push: bool,
     pub editing_analysis_id: Option<String>,
     pub editing_selections: Vec<String>,
+    pub editing_replay_links: Vec<editing::ReplayLink>,
     pub round_result_label: String,
     /// Re-encode so each output file — the merged video, or every clip — is at most this many MiB
     // Keep the serialized field name so saved export choices survive the unit change.
@@ -266,6 +268,7 @@ impl Default for RenderOptions {
             team_push: false,
             editing_analysis_id: None,
             editing_selections: vec![],
+            editing_replay_links: vec![],
             round_result_label: "Round result".into(),
             max_size_mb: Some(20.0),
             combat_quality_priority: true,
@@ -724,8 +727,15 @@ pub fn render_highlights(input: RenderJobInput) -> Result<RenderResult> {
             &utility_cameras,
             &pass_dir,
             demo.tick_rate,
+            pass_options.viewmodel,
         )?;
-        opening::schedule(&mut schedule, indices, &opening_cameras, &pass_dir)?;
+        opening::schedule(
+            &mut schedule,
+            indices,
+            &opening_cameras,
+            &pass_dir,
+            pass_options.viewmodel,
+        )?;
         team_push::schedule(
             &mut schedule,
             indices,

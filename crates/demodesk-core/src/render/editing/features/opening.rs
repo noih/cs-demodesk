@@ -6,7 +6,15 @@ pub(in crate::render::editing) struct Prepared {
     opportunities: camera::Prepared,
 }
 pub(super) fn analyze(ctx: &Context<'_>) -> Detected {
-    let opportunities = camera::prepare(ctx.originals, ctx.demo, &ctx.events);
+    let mut opportunities = camera::prepare(ctx.recording, ctx.demo, &ctx.events);
+    if let Some(spatial) = &ctx.spatial {
+        opportunities.plan_paths(
+            ctx.recording,
+            &spatial.tracks,
+            ctx.demo.tick_rate,
+            &|a, b| spatial.geometry.world.ray(a, b),
+        );
+    }
     let offers = ctx
         .originals
         .iter()
@@ -30,7 +38,11 @@ pub(super) fn analyze(ctx: &Context<'_>) -> Detected {
     Detected {
         data: super::Prepared::Opening(Prepared { opportunities }),
         offers,
-        warnings: vec![],
+        warnings: if ctx.spatial.is_none() {
+            vec!["openingUnavailable".into()]
+        } else {
+            vec![]
+        },
     }
 }
 impl Feature for Prepared {

@@ -1,6 +1,5 @@
 import { DialogCloseButton } from './DialogCloseButton.tsx';
 import { ExportDialog } from './ExportDialog.tsx';
-import { TeamStories } from './TeamStories.tsx';
 import { displayPlayerName } from '../playerName.ts';
 import { useCallback, useMemo, useState } from 'react';
 import { Badge, Box, Button, Checkbox, Dialog, Flex, Select, Slider, Table, Text } from '@radix-ui/themes';
@@ -97,7 +96,6 @@ export function HighlightsTab({ meta, parsed, status, onRendered, onSetup }: { m
           <Slider min={0} max={15} step={1} value={[minScore]} onValueChange={([v]) => setMinScore(v ?? 0)} style={{ flex: 1 }} />
         </Flex>
         <Box style={{ flex: 1 }} />
-        <TeamStories meta={meta} parsed={parsed} />
         <Text size="2" color="gray">
           {t('highlights.shown', { shown: visible.length, total: parsed.highlights.length })}
         </Text>

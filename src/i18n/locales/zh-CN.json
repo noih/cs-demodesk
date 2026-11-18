@@ -883,30 +883,16 @@
     "reanalyze": "重新分析",
     "selected": "已选 {{count}} / {{total}} 项",
     "recommended": "推荐",
+    "replayLinked": "与上一段连播",
+    "replayUnlinked": "独立播放",
+    "replayLinkLabel": "{{target}}：与上一段连播",
+    "playbackOrder": "播放顺序",
+    "mainPlayer": "主角",
+    "sequenceUnavailable": "无法应用此剪辑组合，请调整连播或所选项目。",
     "empty": "这些片段没有可用的剪辑情境，可直接输出。",
     "pushUnavailable": "地图几何数据无法准备，暂时无法分析队伍推进；其他剪辑仍可使用。",
     "groupEmpty": "没有可用的剪辑情境",
-    "durationHint": "片长会增加。"
-  },
-  "teamStories": {
-    "title": "队伍故事",
-    "hint": "以队伍为主角浏览整场比赛。先用 2D 检视候选段落，再验证视频剪辑；移动轨迹本身不代表战术意图。",
-    "experimental": "原型 · 2D 分镜",
-    "analyze": "分析队伍故事",
-    "team": "队伍",
-    "mapUnavailable": "地图预览无法使用。",
-    "won": "获胜",
-    "lost": "落败",
-    "keyPlayer": "关键人物",
-    "empty": "未找到符合条件的队伍段落。",
-    "select": "选择一个时刻，预览前因与结果。",
-    "utility": "集中使用道具",
-    "trade": "队友补枪",
-    "converge": "分路接近交战区",
-    "advance": "队伍推进",
-    "relocate": "长距离转移",
-    "plant": "下包",
-    "defuse": "拆包",
-    "clutch": "残局转折"
+    "durationHint": "片长会增加。",
+    "openingUnavailable": "无法获取地图几何数据，暂时无法分析开场镜位。"
   }
 }

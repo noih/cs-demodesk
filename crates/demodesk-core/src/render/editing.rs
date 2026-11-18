@@ -5,11 +5,19 @@ use std::collections::HashSet;
 
 mod context;
 mod features;
+pub(super) mod pacing;
 #[cfg(test)]
 mod tests;
 pub(super) mod timeline;
 
-pub const VERSION: u32 = 2;
+pub const VERSION: u32 = 9;
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReplayLink {
+    pub from: String,
+    pub to: String,
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -32,6 +40,7 @@ pub struct Candidate {
     pub recommended: bool,
     pub conflicts: Vec<String>,
     pub added_seconds: f64,
+    pub replay_group: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -41,6 +50,16 @@ pub struct Summary {
     pub candidates: Vec<Candidate>,
     pub cached: bool,
     pub warnings: Vec<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PreviewShot {
+    pub highlight_id: String,
+    pub player: String,
+    pub kind: &'static str,
+    pub start_tick: i32,
+    pub end_tick: i32,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -57,7 +76,7 @@ pub struct Analysis {
 #[derive(Serialize, Deserialize)]
 pub struct Plan {
     pub(super) recording: Vec<Highlight>,
-    pub(super) utilities: Vec<Option<utility::Chase>>,
+    pub(super) utilities: Vec<Option<utility::Camera>>,
     pub(super) openings: Vec<Option<opening::Opening>>,
     pub(super) teams: Vec<team_push::Sequence>,
 }
@@ -73,6 +92,7 @@ fn candidate(id: &str, kind: Kind, tick: i32, target: String, recommended: bool)
         recommended,
         conflicts: vec![],
         added_seconds: 0.0,
+        replay_group: None,
     }
 }
 
@@ -132,6 +152,7 @@ impl Analysis {
             tools,
             root,
             registry.iter().any(|f| f.spatial),
+            registry.iter().any(|f| f.kind == Kind::Teamwork),
             cancel,
         )?;
         Self::analyze_context(id, ctx, registry)
@@ -241,6 +262,16 @@ impl Analysis {
     }
 
     pub fn select(&self, ids: &[String], demo: &DemoInfo) -> Result<Plan> {
+        let links = features::combat::recommended_links(&self.candidates, ids);
+        self.select_with_links(ids, &links, demo)
+    }
+
+    pub fn select_with_links(
+        &self,
+        ids: &[String],
+        links: &[ReplayLink],
+        demo: &DemoInfo,
+    ) -> Result<Plan> {
         let selected: HashSet<_> = ids.iter().map(String::as_str).collect();
         ensure!(
             self.version == VERSION && selected.len() == ids.len(),
@@ -267,9 +298,11 @@ impl Analysis {
             "Missing prepared feature; analyze again"
         );
         let mut plan = Plan::plain(self.recording.clone());
+        features::combat::validate_links(&self.candidates, ids, links)?;
         let context = context::Composition {
             demo,
             originals: &self.originals,
+            replay_links: links,
         };
         for feature in &self.features {
             let feature = feature.feature();
@@ -291,6 +324,13 @@ impl Analysis {
             feature.validate(&choices, &plan)?;
         }
         plan.validate()?;
+        let edited: Vec<_> = self
+            .candidates
+            .iter()
+            .filter(|c| selected.contains(c.id.as_str()))
+            .map(|c| c.highlight_id.as_str())
+            .collect();
+        pacing::validate(&plan, &edited, demo.tick_rate.round() as i32)?;
         Ok(plan)
     }
 
@@ -329,6 +369,29 @@ impl Analysis {
 }
 
 impl Plan {
+    pub fn preview(&self, originals: &[Highlight]) -> Vec<PreviewShot> {
+        self.recording
+            .iter()
+            .zip(&self.openings)
+            .map(|(h, opening)| PreviewShot {
+                highlight_id: h.id.clone(),
+                player: h.player.name.clone(),
+                kind: if opening.is_some() {
+                    "opening"
+                } else if originals
+                    .iter()
+                    .any(|o| o.id == h.id && o.player.steamid == h.player.steamid)
+                {
+                    "main"
+                } else {
+                    "perspective"
+                },
+                start_tick: h.start_tick,
+                end_tick: h.end_tick,
+            })
+            .collect()
+    }
+
     pub(super) fn plain(recording: Vec<Highlight>) -> Self {
         Self {
             utilities: vec![None; recording.len()],
@@ -338,7 +401,11 @@ impl Plan {
         }
     }
     /// Story and replay phases run before introductions; keep renderer arrays aligned.
-    fn replace_story(&mut self, recording: Vec<Highlight>, utilities: Vec<Option<utility::Chase>>) {
+    fn replace_story(
+        &mut self,
+        recording: Vec<Highlight>,
+        utilities: Vec<Option<utility::Camera>>,
+    ) {
         self.openings = vec![None; recording.len()];
         self.recording = recording;
         self.utilities = utilities;

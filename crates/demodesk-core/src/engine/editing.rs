@@ -44,6 +44,27 @@ fn key(
 }
 
 impl Engine {
+    pub fn preview_editing_plan(
+        &self,
+        demo_id: &str,
+        ids: &[String],
+        options: &RenderOptions,
+    ) -> Result<Vec<crate::render::editing::PreviewShot>> {
+        let (meta, parsed) = self
+            .get_demo(demo_id)
+            .ok_or(crate::ErrorCode::DemoMissing)?;
+        let parsed = parsed.ok_or(crate::ErrorCode::DemoNotReady)?;
+        ensure!(
+            meta.status == DemoStatus::Parsed,
+            crate::ErrorCode::DemoNotReady
+        );
+        let originals = selected(&parsed, ids)?;
+        let plan = self
+            .selected_editing_plan(&meta, &parsed, ids, options)?
+            .ok_or_else(|| anyhow::anyhow!("Editing preview requires analysis"))?;
+        Ok(plan.preview(&originals))
+    }
+
     fn editing_path(&self, id: &str) -> Result<PathBuf> {
         ensure!(
             id.len() == 40 && id.bytes().all(|b| b.is_ascii_hexdigit()),
@@ -148,7 +169,7 @@ impl Engine {
     ) -> Result<Option<Plan>> {
         let Some(id) = &options.editing_analysis_id else {
             ensure!(
-                options.editing_selections.is_empty(),
+                options.editing_selections.is_empty() && options.editing_replay_links.is_empty(),
                 "Editing selections require analysis"
             );
             return Ok(None);
@@ -161,9 +182,11 @@ impl Engine {
         );
         let analysis: Analysis = serde_json::from_slice(&std::fs::read(self.editing_path(id)?)?)?;
         ensure!(analysis.id == *id, "Invalid editing analysis");
-        Ok(Some(
-            analysis.select(&options.editing_selections, &parsed.info)?,
-        ))
+        Ok(Some(analysis.select_with_links(
+            &options.editing_selections,
+            &options.editing_replay_links,
+            &parsed.info,
+        )?))
     }
 
     pub(super) fn saved_editing_plan(
@@ -252,9 +275,24 @@ mod tests {
             .is_err());
         assert!(engine.store.list_jobs().is_empty());
         options.editing_selections.clear();
+        let preview = engine.preview_editing_plan("demo", &ids, &options)?;
+        assert_eq!(preview.len(), 1);
+        assert_eq!(
+            (preview[0].kind, preview[0].start_tick, preview[0].end_tick),
+            ("main", 800, 2000)
+        );
+        options
+            .editing_replay_links
+            .push(crate::render::editing::ReplayLink {
+                from: "unknown".into(),
+                to: "other".into(),
+            });
+        assert!(engine.preview_editing_plan("demo", &ids, &options).is_err());
+        options.editing_replay_links.clear();
         let job = engine.enqueue_render("demo", ids.clone(), options.clone())?;
         engine.clear_editing_analysis(&id)?;
         assert!(!path.exists());
+        assert!(engine.preview_editing_plan("demo", &ids, &options).is_err());
         assert!(engine.saved_editing_plan(&job, &meta, &parsed)?.is_some());
         assert!(engine
             .selected_editing_plan(&meta, &parsed, &ids, &options)

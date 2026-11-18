@@ -1,8 +1,28 @@
-// Route-follow opening. shortcut: eye-route clearance is not world collision detection.
-export function startOpening({ steamId, startTick, endTick, tickRate = 64 }) {
+// The offline planner qualifies the full shoulder path against map geometry.
+export function openingView({ startTick, endTick, tickRate = 64, path }, tick, eye, angles) {
+  if (tick < startTick || !path || path.length < 2) return;
+  if (tick >= endTick) return { x: eye[0], y: eye[1], z: eye[2], rX: angles[0], rY: angles[1], rZ: 0 };
+  const next = path.findIndex(p => p.tick >= tick);
+  const index = next < 0 ? path.length - 1 : Math.max(1, next);
+  const a = path[index - 1], b = path[index];
+  const t = Math.min(1, Math.max(0, (tick - a.tick) / (b.tick - a.tick)));
+  const turn = Math.min(1, Math.max(0, (tick - startTick - tickRate * 1.2) / Math.max(1, endTick - startTick - tickRate * 1.2 - 1)));
+  const blend = turn ** 3;
+  const position = a.position.map((v, i) => {
+    const base = v + (b.position[i] - v) * t;
+    return base + (eye[i] - base) * blend;
+  });
+  const target = a.target.map((v, i) => v + (b.target[i] - v) * t);
+  const delta = target.map((v, i) => v - position[i]);
+  const aimYaw = Math.atan2(delta[1], delta[0]) * 180 / Math.PI;
+  const aimPitch = -Math.atan2(delta[2], Math.hypot(delta[0], delta[1])) * 180 / Math.PI;
+  const yawDelta = ((angles[1] - aimYaw + 540) % 360) - 180;
+  return { x: position[0], y: position[1], z: position[2], rX: aimPitch + (angles[0] - aimPitch) * blend, rY: aimYaw + yawDelta * blend, rZ: 0 };
+}
+
+export function startOpening(config) {
+  const { steamId, endTick, tickRate = 64 } = config;
   const id = 'demodesk/opening-experiment';
-  const path = [];
-  let lastTick, viewYaw;
   mirv.events.cViewRenderSetupView.on(id, () => {
     const tick = mirv.getDemoTick();
     // Keep the eye override across the asynchronous spectator-mode handoff.
@@ -19,42 +39,6 @@ export function startOpening({ steamId, startTick, endTick, tickRate = 64 }) {
     if (!pawn?.isValid() || !pawn.isPlayerPawn() || pawn.getHealth() <= 0) return;
     const eye = pawn.getRenderEyeOrigin(), angles = pawn.getRenderEyeAngles();
     if (![...eye, ...angles].every(Number.isFinite)) return;
-    if (tick >= endTick) return { x: eye[0], y: eye[1], z: eye[2], rX: angles[0], rY: angles[1], rZ: 0 };
-    // Collect during seek preroll, so the opening starts on the actual approach route.
-    const previous = path.at(-1);
-    if (!previous || Math.hypot(...eye.map((v, i) => v - previous[i])) > 1) path.push([...eye]);
-    if (path.length > 1024) path.shift();
-    if (tick < startTick) return;
-    // 1.2 seconds follow, then 0.6 seconds approach including the handoff.
-    const turn = Math.min(1, Math.max(0, (tick - startTick - tickRate * 1.2) / Math.max(1, endTick - startTick - tickRate * 1.2 - 1)));
-    // Accelerate into the POV at the cut instead of easing to a stop before it.
-    const blend = turn * turn * turn;
-    let remaining = 70 * (1 - blend);
-    let position = [...eye];
-    for (let i = path.length - 1; i >= 0; i--) {
-      const distance = Math.hypot(...position.map((v, axis) => v - path[i][axis]));
-      if (distance >= remaining && distance > 0) {
-        position = position.map((v, axis) => v + (path[i][axis] - v) * remaining / distance);
-        remaining = 0;
-        break;
-      }
-      remaining -= distance;
-      position = path[i];
-    }
-    // With no approach history, keep a modest shoulder offset until movement supplies it.
-    if (remaining > 0) {
-      const yaw = angles[1] * Math.PI / 180;
-      position = [position[0] - remaining * Math.cos(yaw), position[1] - remaining * Math.sin(yaw), position[2]];
-    }
-    const [x, y, baseZ] = position;
-    const z = baseZ + 16 * (1 - blend);
-    const targetYaw = Math.atan2(eye[1] - y, eye[0] - x) * 180 / Math.PI;
-    const delta = ((targetYaw - (viewYaw ?? targetYaw) + 540) % 360) - 180;
-    viewYaw = (viewYaw ?? targetYaw) + delta * (1 - Math.exp(-Math.max(0, tick - (lastTick ?? tick)) / 8));
-    lastTick = tick;
-    // Converge along the recorded route before matching the first-person view.
-    const yawDelta = ((angles[1] - viewYaw + 540) % 360) - 180;
-    const routePitch = Math.atan2(z - eye[2], Math.hypot(eye[0] - x, eye[1] - y)) * 180 / Math.PI;
-    return { x, y, z, rX: routePitch + (angles[0] - routePitch) * blend, rY: viewYaw + yawDelta * blend, rZ: 0 };
+    return openingView(config, tick, eye, angles);
   });
 }

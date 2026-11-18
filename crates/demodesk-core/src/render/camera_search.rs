@@ -3,7 +3,92 @@ use crate::analysis::line_of_sight::{Occlusion, Vec3};
 use anyhow::{ensure, Result};
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Deserialize, Serialize)]
+/// Evaluate the whole circle coarsely, then refine the three best distinct directions.
+/// `compare` orders best first; the caller owns qualification and camera quality.
+pub(super) fn coarse_to_fine<T>(
+    mut evaluate: impl FnMut(i32) -> Vec<T>,
+    compare: impl Fn(&T, &T) -> std::cmp::Ordering,
+) -> Vec<T> {
+    let mut ranked: Vec<_> = (0..360)
+        .step_by(30)
+        .flat_map(|angle| evaluate(angle).into_iter().map(move |view| (angle, view)))
+        .collect();
+    ranked.sort_by(|a, b| compare(&a.1, &b.1));
+    let mut directions = vec![];
+    for (angle, _) in &ranked {
+        if !directions.contains(angle) {
+            directions.push(*angle);
+        }
+        if directions.len() == 3 {
+            break;
+        }
+    }
+    let mut refine: Vec<_> = if directions.is_empty() {
+        // A narrow opening may lie between all coarse directions.
+        (15..360).step_by(30).collect()
+    } else {
+        directions
+            .iter()
+            .flat_map(|angle| [(angle + 345) % 360, (angle + 15) % 360])
+            .collect()
+    };
+    refine.sort_unstable();
+    refine.dedup();
+    for angle in refine {
+        ranked.extend(evaluate(angle).into_iter().map(|view| (angle, view)));
+    }
+    ranked.sort_by(|a, b| compare(&a.1, &b.1));
+    ranked.into_iter().map(|(_, view)| view).collect()
+}
+
+#[test]
+fn angular_search_refines_distinct_best_directions_without_duplicate_work() {
+    let mut calls = vec![];
+    let views = coarse_to_fine(
+        |angle| {
+            calls.push(angle);
+            let score = match angle {
+                345 => 100,
+                0 => 90,
+                90 => 80,
+                180 => 70,
+                _ => 1,
+            };
+            vec![(angle, score); 4]
+        },
+        |a, b| b.1.cmp(&a.1),
+    );
+    assert_eq!(views[0].0, 345);
+    assert_eq!(&calls[..12], &(0..360).step_by(30).collect::<Vec<_>>());
+    assert_eq!(calls.len(), 18);
+    assert!([15, 75, 105, 165, 195, 345]
+        .iter()
+        .all(|a| calls.contains(a)));
+    calls.sort_unstable();
+    calls.dedup();
+    assert_eq!(calls.len(), 18);
+}
+
+#[test]
+fn angular_search_checks_gaps_when_coarse_views_are_all_rejected() {
+    let mut calls = vec![];
+    let views = coarse_to_fine(
+        |angle| {
+            calls.push(angle);
+            if angle == 15 {
+                vec![angle]
+            } else {
+                vec![]
+            }
+        },
+        Ord::cmp,
+    );
+    assert_eq!(views, vec![15]);
+    calls.sort_unstable();
+    assert_eq!(calls, (0..360).step_by(15).collect::<Vec<_>>());
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Sample {
     pub tick: i32,
     pub subjects: Vec<Vec3>, // Feet positions, with a conservative standing body envelope.
@@ -79,124 +164,128 @@ pub fn search(samples: &[Sample], ray: impl Fn(Vec3, Vec3) -> Occlusion) -> Resu
         candidates: vec![],
         occlusion_diagnostics: vec![],
     };
-    for direction in 0..24 {
-        for radius in [base, base * 1.5, base * 2.] {
-            for height in [80., 160., 260.] {
-                let angle = (direction as f64 * 15.).to_radians();
-                let position = [
-                    target[0] + radius * angle.cos(),
-                    target[1] + radius * angle.sin(),
-                    hi[2] + height,
-                ];
-                let forward = normalized(sub(target, position));
-                let right = normalized(cross(forward, [0., 0., 1.]));
-                let up = cross(right, forward);
-                // A small camera envelope rejects surfaces touching the lens. Subject rays also
-                // reject enclosed positions. This is not a general point-in-solid proof.
-                let clear = (0..3).all(|axis| {
-                    [-12., 12.].iter().all(|offset| {
-                        let mut p = position;
-                        p[axis] += offset;
-                        ray(position, p) == Occlusion::Clear
-                    })
-                });
-                for fov in [60_f64, 75., 90.] {
-                    result.evaluated += 1;
-                    if !clear {
-                        result.rejected_clearance += 1;
-                        continue;
-                    }
-                    // Source's base FOV is horizontal at 4:3; use conservative 4:3 bounds
-                    // even when recording 16:9, whose horizontal coverage is wider.
-                    let tangent = (fov.to_radians() / 2.).tan();
-                    let project = |point: Vec3| -> Option<[f64; 2]> {
-                        let d = sub(point, position);
-                        let depth = dot(d, forward);
-                        (depth > 16.).then(|| {
-                            [
-                                dot(d, right) / depth / tangent,
-                                dot(d, up) / depth / tangent * 4. / 3.,
-                            ]
+    result.candidates = coarse_to_fine(
+        |direction| {
+            let mut candidates = vec![];
+            for radius in [base, base * 1.5, base * 2.] {
+                for height in [80., 160., 260.] {
+                    let angle = (direction as f64).to_radians();
+                    let position = [
+                        target[0] + radius * angle.cos(),
+                        target[1] + radius * angle.sin(),
+                        hi[2] + height,
+                    ];
+                    let forward = normalized(sub(target, position));
+                    let right = normalized(cross(forward, [0., 0., 1.]));
+                    let up = cross(right, forward);
+                    // A small camera envelope rejects surfaces touching the lens. Subject rays also
+                    // reject enclosed positions. This is not a general point-in-solid proof.
+                    let clear = (0..3).all(|axis| {
+                        [-12., 12.].iter().all(|offset| {
+                            let mut p = position;
+                            p[axis] += offset;
+                            ray(position, p) == Occlusion::Clear
                         })
-                    };
-                    let mut min_height = f64::INFINITY;
-                    let mut min_separation = f64::INFINITY;
-                    let mut framed = true;
-                    for sample in samples {
-                        let mut centers = vec![];
-                        for p in &sample.subjects {
-                            let mut bottom = f64::INFINITY;
-                            let mut top = f64::NEG_INFINITY;
-                            for dx in [-16., 16.] {
-                                for dy in [-16., 16.] {
-                                    for dz in [0., 72.] {
-                                        match project([p[0] + dx, p[1] + dy, p[2] + dz]) {
-                                            Some([x, y]) if x.abs() <= 0.86 && y.abs() <= 0.86 => {
-                                                bottom = bottom.min(y);
-                                                top = top.max(y);
+                    });
+                    for fov in [60_f64, 75., 90.] {
+                        result.evaluated += 1;
+                        if !clear {
+                            result.rejected_clearance += 1;
+                            continue;
+                        }
+                        // Source's base FOV is horizontal at 4:3; use conservative 4:3 bounds
+                        // even when recording 16:9, whose horizontal coverage is wider.
+                        let tangent = (fov.to_radians() / 2.).tan();
+                        let project = |point: Vec3| -> Option<[f64; 2]> {
+                            let d = sub(point, position);
+                            let depth = dot(d, forward);
+                            (depth > 16.).then(|| {
+                                [
+                                    dot(d, right) / depth / tangent,
+                                    dot(d, up) / depth / tangent * 4. / 3.,
+                                ]
+                            })
+                        };
+                        let mut min_height = f64::INFINITY;
+                        let mut min_separation = f64::INFINITY;
+                        let mut framed = true;
+                        for sample in samples {
+                            let mut centers = vec![];
+                            for p in &sample.subjects {
+                                let mut bottom = f64::INFINITY;
+                                let mut top = f64::NEG_INFINITY;
+                                for dx in [-16., 16.] {
+                                    for dy in [-16., 16.] {
+                                        for dz in [0., 72.] {
+                                            match project([p[0] + dx, p[1] + dy, p[2] + dz]) {
+                                                Some([x, y])
+                                                    if x.abs() <= 0.86 && y.abs() <= 0.86 =>
+                                                {
+                                                    bottom = bottom.min(y);
+                                                    top = top.max(y);
+                                                }
+                                                _ => framed = false,
                                             }
-                                            _ => framed = false,
                                         }
                                     }
                                 }
+                                min_height = min_height.min((top - bottom) / 2.);
+                                if let Some(center) = project([p[0], p[1], p[2] + 36.]) {
+                                    centers.push(center);
+                                } else {
+                                    framed = false;
+                                }
                             }
-                            min_height = min_height.min((top - bottom) / 2.);
-                            if let Some(center) = project([p[0], p[1], p[2] + 36.]) {
-                                centers.push(center);
-                            } else {
-                                framed = false;
-                            }
-                        }
-                        for i in 0..centers.len() {
-                            for j in i + 1..centers.len() {
-                                min_separation = min_separation.min(
-                                    (centers[i][0] - centers[j][0])
-                                        .hypot(centers[i][1] - centers[j][1])
-                                        / 2.,
-                                );
-                            }
-                        }
-                    }
-                    if !framed || min_height < 0.075 || min_separation < 0.06 {
-                        result.rejected_framing += 1;
-                        continue;
-                    }
-                    // Unknown material intersections are not treated as visible. Every sampled
-                    // subject must expose both chest and head for this first strict prototype.
-                    let mut failures = vec![];
-                    for s in samples {
-                        for (subject, p) in s.subjects.iter().enumerate() {
-                            for dz in [36., 64.] {
-                                let state = ray(position, [p[0], p[1], p[2] + dz]);
-                                if state != Occlusion::Clear {
-                                    failures.push(serde_json::json!({"tick":s.tick,"subject":subject,"height":dz,"state":format!("{state:?}")}));
+                            for i in 0..centers.len() {
+                                for j in i + 1..centers.len() {
+                                    min_separation = min_separation.min(
+                                        (centers[i][0] - centers[j][0])
+                                            .hypot(centers[i][1] - centers[j][1])
+                                            / 2.,
+                                    );
                                 }
                             }
                         }
-                    }
-                    if !failures.is_empty() {
-                        result.rejected_occlusion += 1;
-                        result.occlusion_diagnostics.push(
+                        if !framed || min_height < 0.075 || min_separation < 0.06 {
+                            result.rejected_framing += 1;
+                            continue;
+                        }
+                        // Unknown material intersections are not treated as visible. Every sampled
+                        // subject must expose both chest and head for this first strict prototype.
+                        let mut failures = vec![];
+                        for s in samples {
+                            for (subject, p) in s.subjects.iter().enumerate() {
+                                for dz in [36., 64.] {
+                                    let state = ray(position, [p[0], p[1], p[2] + dz]);
+                                    if state != Occlusion::Clear {
+                                        failures.push(serde_json::json!({"tick":s.tick,"subject":subject,"height":dz,"state":format!("{state:?}")}));
+                                    }
+                                }
+                            }
+                        }
+                        if !failures.is_empty() {
+                            result.rejected_occlusion += 1;
+                            result.occlusion_diagnostics.push(
                             serde_json::json!({"position":position,"fov":fov,"failures":failures}),
                         );
-                        continue;
+                            continue;
+                        }
+                        let score = 100. * min_height + 30. * min_separation.min(0.4) - 0.01 * fov;
+                        candidates.push(Candidate {
+                            position,
+                            target,
+                            fov,
+                            score,
+                            minimum_body_height: min_height,
+                            minimum_separation: min_separation,
+                        });
                     }
-                    let score = 100. * min_height + 30. * min_separation.min(0.4) - 0.01 * fov;
-                    result.candidates.push(Candidate {
-                        position,
-                        target,
-                        fov,
-                        score,
-                        minimum_body_height: min_height,
-                        minimum_separation: min_separation,
-                    });
                 }
             }
-        }
-    }
-    result
-        .candidates
-        .sort_by(|a, b| b.score.total_cmp(&a.score));
+            candidates
+        },
+        |a, b| b.score.total_cmp(&a.score),
+    );
     Ok(result)
 }
 
@@ -270,7 +359,7 @@ fn whole_interval_framing_and_missing_visibility() {
         },
     ];
     let clear = search(&samples, |_, _| Occlusion::Clear).unwrap();
-    assert_eq!(clear.evaluated, 648);
+    assert!((324..=486).contains(&clear.evaluated));
     assert!(!clear.candidates.is_empty());
     assert!(clear
         .candidates

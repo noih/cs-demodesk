@@ -1,8 +1,129 @@
-//! Enemy replays follow completed exchanges; the original main-POV tail survives.
+//! Enemy replays follow completed exchanges; brief continuations stay before the replay.
 use super::*;
 use demo_data::{enemies, gun, Event};
-use editing::timeline::shot;
-use utility::Chase;
+use editing::{pacing, timeline::shot};
+use utility::Camera;
+
+/// Explicit replay groups only rearrange recorded POVs; they never repeat main-player footage.
+pub(super) fn compose_groups(
+    recording: Vec<Highlight>,
+    cameras: Vec<Option<Camera>>,
+    originals: &[Highlight],
+    demo: &DemoInfo,
+    prepared: &Prepared,
+    groups: &[Vec<&editing::Candidate>],
+) -> Result<(Vec<Highlight>, Vec<Option<Camera>>)> {
+    use anyhow::{ensure, Context};
+    let rate = demo.tick_rate.round() as i32;
+    let mut insertions = vec![];
+    for group in groups {
+        let last = group.last().context("Empty replay group")?;
+        let original = originals
+            .iter()
+            .find(|h| h.id == last.highlight_id)
+            .context("Unknown replay highlight")?;
+        let exchanges = prepared
+            .players
+            .iter()
+            .find(|p| p.main == original.player.steamid)
+            .context("Missing prepared exchanges")?;
+        let source = recording
+            .iter()
+            .zip(&cameras)
+            .rposition(|(h, camera)| {
+                h.id == original.id
+                    && h.player.steamid == original.player.steamid
+                    && camera.is_none()
+                    && h.start_tick <= last.tick
+                    && last.tick < h.end_tick
+            })
+            .context("Replay has no main-player footage")?;
+        for candidate in group {
+            ensure!(
+                exchanges.kills.iter().any(|kill| kill.eligible
+                    && kill.tick == candidate.tick
+                    && kill.victim == candidate.target_id),
+                "Invalid selected exchange"
+            );
+            ensure!(
+                recording[..=source].iter().any(|h| h.id == original.id
+                    && h.player.steamid == original.player.steamid
+                    && h.start_tick <= candidate.tick
+                    && candidate.tick < h.end_tick),
+                "Replay cannot precede its main-player exchange"
+            );
+        }
+        let h = &recording[source];
+        let next = groups
+            .iter()
+            .filter_map(|g| g.first())
+            .filter(|c| c.highlight_id == last.highlight_id && c.tick > last.tick)
+            .map(|c| c.tick)
+            .min();
+        let mut settled = last.tick;
+        for &tick in exchanges.activity.iter().filter(|&&tick| {
+            tick > last.tick && tick < h.end_tick && next.is_none_or(|next| tick < next)
+        }) {
+            if tick - settled > rate {
+                break;
+            }
+            settled = tick;
+        }
+        let mut cut = (settled + rate / 2).max(last.tick + pacing::event_tail(rate));
+        // A final linked replay follows the complete main-player ending, including its existing hold.
+        if group.len() > 1
+            && !exchanges
+                .kills
+                .iter()
+                .any(|k| k.tick > last.tick && k.tick < h.end_tick)
+        {
+            cut = h.end_tick;
+        }
+        insertions.push((source, cut, group));
+    }
+    insertions.sort_by_key(|(source, _, group)| (*source, group.last().unwrap().tick));
+    let (mut out, mut views) = (vec![], vec![]);
+    for (index, (h, camera)) in recording.into_iter().zip(cameras).enumerate() {
+        let pending: Vec<_> = insertions
+            .iter()
+            .filter(|(source, _, _)| *source == index)
+            .collect();
+        if pending.is_empty() {
+            out.push(h);
+            views.push(camera);
+            continue;
+        }
+        let mut cursor = h.start_tick;
+        for (_, requested, group) in pending {
+            let cut = pacing::replay_cut(*requested, cursor, h.end_tick, rate)
+                .context("Separate replays leave less than 1.5 seconds of main-player footage; link these exchanges")?;
+            let mut main = shot(&h, &h.player.steamid, cursor, cut, demo);
+            if cut == h.end_tick {
+                main.round_result = h.round_result.clone();
+            }
+            out.push(main);
+            views.push(None);
+            for candidate in *group {
+                out.push(shot(
+                    &h,
+                    &candidate.target_id,
+                    candidate.tick - rate * 3 / 2,
+                    candidate.tick + pacing::event_tail(rate),
+                    demo,
+                ));
+                views.push(None);
+            }
+            cursor = cut;
+        }
+        if cursor < h.end_tick {
+            let mut tail = shot(&h, &h.player.steamid, cursor, h.end_tick, demo);
+            tail.round_result = h.round_result;
+            out.push(tail);
+            views.push(None);
+        }
+    }
+    Ok((out, views))
+}
 
 #[cfg(test)]
 mod tests {
@@ -22,6 +143,17 @@ mod tests {
         events.sort_by_key(|e: &Event| e.tick);
         (demo, h, events)
     }
+    #[test]
+    fn minimum_view_duration_absorbs_short_return_before_replay() {
+        let (demo, mut h, events) = fixture();
+        h.end_tick = 1100;
+        let (shots, _) = plan(vec![h.clone()], vec![None], &[h], &demo, &events);
+        assert_eq!(shots.len(), 2);
+        assert_eq!(shots[0].end_tick, 1100);
+        assert_eq!(shots[1].player.steamid, "enemy");
+        assert!(shots.iter().all(|h| h.end_tick - h.start_tick >= 96));
+    }
+
     #[test]
     fn explicit_selection_can_replay_every_eligible_kill() {
         let (demo, h, events) = fixture();
@@ -64,11 +196,11 @@ mod tests {
         let (shots, cameras) = plan(vec![h.clone()], vec![None], &[h.clone()], &demo, &events);
         assert_eq!(shots.len(), 5);
         assert_eq!(cameras.len(), shots.len());
-        assert_eq!((shots[0].start_tick, shots[0].end_tick), (800, 1032));
-        assert_eq!((shots[1].start_tick, shots[1].end_tick), (904, 1032));
-        assert_eq!((shots[2].start_tick, shots[2].end_tick), (1032, 1782));
-        assert_eq!((shots[3].start_tick, shots[3].end_tick), (1654, 1782));
-        assert_eq!((shots[4].start_tick, shots[4].end_tick), (1782, 2000));
+        assert_eq!((shots[0].start_tick, shots[0].end_tick), (800, 1053));
+        assert_eq!((shots[1].start_tick, shots[1].end_tick), (904, 1053));
+        assert_eq!((shots[2].start_tick, shots[2].end_tick), (1053, 1803));
+        assert_eq!((shots[3].start_tick, shots[3].end_tick), (1654, 1803));
+        assert_eq!((shots[4].start_tick, shots[4].end_tick), (1803, 2000));
         assert_eq!(shots[4].player.steamid, "main");
         assert!(shots.iter().all(|s| s.id == h.id));
     }
@@ -227,12 +359,11 @@ pub(super) fn prepare(originals: &[Highlight], demo: &DemoInfo, events: &[Event]
                     .map(|kill| {
                         let victim = kill.user_steamid.clone().unwrap_or_default();
                         let start = kill.tick - rate * 3 / 2;
-                        let end = kill.tick + rate / 2;
+                        let end = kill.tick + pacing::event_tail(rate);
                         Kill {
                             tick: kill.tick,
                             score: value(kill, main, events, rate),
                             eligible: rate > 0
-                                && gun(&kill.weapon)
                                 && enemies(kill)
                                 && start > seek::MIN_TICK + 8
                                 && !events.iter().any(|e| {
@@ -252,6 +383,14 @@ pub(super) fn prepare(originals: &[Highlight], demo: &DemoInfo, events: &[Event]
 }
 
 impl Prepared {
+    pub(super) fn recommended(&self, main: &str, tick: i32, victim: &str) -> bool {
+        self.players
+            .iter()
+            .filter(|p| p.main == main)
+            .flat_map(|p| &p.kills)
+            .any(|kill| kill.tick == tick && kill.victim == victim && kill.score >= 20)
+    }
+
     pub(super) fn all(
         &self,
         originals: &[Highlight],
@@ -275,35 +414,35 @@ impl Prepared {
 #[cfg(test)]
 pub(super) fn plan(
     recording: Vec<Highlight>,
-    cameras: Vec<Option<Chase>>,
+    cameras: Vec<Option<Camera>>,
     originals: &[Highlight],
     demo: &DemoInfo,
     events: &[Event],
-) -> (Vec<Highlight>, Vec<Option<Chase>>) {
+) -> (Vec<Highlight>, Vec<Option<Camera>>) {
     plan_selected(recording, cameras, originals, demo, events, None)
 }
 
 #[cfg(test)]
 pub(super) fn plan_selected(
     recording: Vec<Highlight>,
-    cameras: Vec<Option<Chase>>,
+    cameras: Vec<Option<Camera>>,
     originals: &[Highlight],
     demo: &DemoInfo,
     events: &[Event],
     selected: Option<&std::collections::HashSet<(String, i32, String)>>,
-) -> (Vec<Highlight>, Vec<Option<Chase>>) {
+) -> (Vec<Highlight>, Vec<Option<Camera>>) {
     let prepared = prepare(originals, demo, events);
     compose(recording, cameras, originals, demo, &prepared, selected)
 }
 
 pub(super) fn compose(
     recording: Vec<Highlight>,
-    cameras: Vec<Option<Chase>>,
+    cameras: Vec<Option<Camera>>,
     originals: &[Highlight],
     demo: &DemoInfo,
     prepared: &Prepared,
     selected: Option<&std::collections::HashSet<(String, i32, String)>>,
-) -> (Vec<Highlight>, Vec<Option<Chase>>) {
+) -> (Vec<Highlight>, Vec<Option<Camera>>) {
     let rate = demo.tick_rate.round() as i32;
     if rate <= 0 {
         return (recording, cameras);
@@ -373,11 +512,11 @@ pub(super) fn compose(
                 }
                 settled = tick;
             }
-            let cut = settled + rate / 2;
-            if cut <= cursor
-                || cut >= h.end_tick
-                || h.round_result.as_ref().is_some_and(|r| cut >= r.from_tick)
-            {
+            let requested = (settled + rate / 2).max(last + pacing::event_tail(rate));
+            let Some(cut) = pacing::replay_cut(requested, cursor, h.end_tick, rate) else {
+                continue;
+            };
+            if cut <= cursor || h.round_result.as_ref().is_some_and(|r| cut >= r.from_tick) {
                 continue;
             }
             let mut candidates: Vec<_> = group
@@ -386,7 +525,7 @@ pub(super) fn compose(
                     let enemy = kill.victim.as_str();
                     let score = kill.score;
                     let start = kill.tick - rate * 3 / 2;
-                    let end = kill.tick + rate / 2;
+                    let end = kill.tick + pacing::event_tail(rate);
                     let wanted = selected.map_or(score >= 20, |s| {
                         s.contains(&(h.id.clone(), kill.tick, enemy.to_owned()))
                     });
@@ -419,7 +558,7 @@ pub(super) fn compose(
                     &h,
                     &kill.victim,
                     kill.tick - rate * 3 / 2,
-                    kill.tick + rate / 2,
+                    kill.tick + pacing::event_tail(rate),
                     demo,
                 ));
                 views.push(None);
@@ -430,7 +569,7 @@ pub(super) fn compose(
         if cursor == h.start_tick {
             out.push(h);
             views.push(None);
-        } else {
+        } else if cursor < h.end_tick {
             let mut tail = shot(&h, main, cursor, h.end_tick, demo);
             tail.round_result = h.round_result;
             out.push(tail);

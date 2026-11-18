@@ -1,3 +1,4 @@
+import { HIGHLIGHT_EDITING_ENABLED } from '../releaseFeatures.ts';
 import { EditingEffects, type EditingChoice } from './EditingEffects.tsx';
 import { DialogCloseButton } from './DialogCloseButton.tsx';
 import { summarizeHighlights } from '../highlightWindows.ts';
@@ -25,12 +26,12 @@ export function ExportDialog({open,onOpenChange,count,seconds,status,onSetup,onS
   const [error,setError]=useState<string>();
   const [editing,setEditing]=useState<EditingChoice>();
   const editingContext=JSON.stringify([demoId, highlights?.map(h=>h.id).sort(), opts.keyMomentsOnly, opts.shortCombatClips]);
-  const choice=editing?.context===editingContext ? editing : undefined;
+  const choice=HIGHLIGHT_EDITING_ENABLED && editing?.context===editingContext ? editing : undefined;
   const preview = highlights && tickRate ? summarizeHighlights(highlights, tickRate, opts.keyMomentsOnly, opts.shortCombatClips) : undefined;
   const render=async()=>{
     if(submitting || choice?.busy)return;setSubmitting(true);setError(undefined);
     const chosen=choice?.analysis?.candidates.filter(c=>choice.selected.includes(c.id)) ?? [];
-    try {await onSubmit({...opts,editingAnalysisId:chosen.length ? choice?.analysis?.id : undefined,editingSelections:chosen.map(c=>c.id),
+    try {await onSubmit({...opts,editingAnalysisId:chosen.length ? choice?.analysis?.id : undefined,editingSelections:chosen.map(c=>c.id),editingReplayLinks:choice?.links ?? [],
       openingCamera:chosen.some(c=>c.kind==='opening'),combatPerspectives:chosen.some(c=>c.kind==='combat'),utilityTeamwork:chosen.some(c=>c.kind==='teamwork'),teamPush:chosen.some(c=>c.kind==='push'),
       roundResultLabel:t('highlights.roundResult'),merge:forceMerge||opts.merge,keyMomentsOnly:!!highlights&&opts.keyMomentsOnly});onOpenChange(false);onSubmitted();}
     catch(error){setError(errorText(error));}finally{setSubmitting(false);}
@@ -171,7 +172,7 @@ export function ExportDialog({open,onOpenChange,count,seconds,status,onSetup,onS
               </Box>
             </Flex>
           </Grid>
-          {highlights && demoId && tickRate && <EditingEffects key={editingContext} context={editingContext} demoId={demoId} highlights={highlights} tickRate={tickRate} options={opts} onChange={setEditing} />}
+          {HIGHLIGHT_EDITING_ENABLED && highlights && demoId && tickRate && <EditingEffects key={editingContext} context={editingContext} demoId={demoId} highlights={highlights} tickRate={tickRate} options={opts} onChange={setEditing} />}
           </div>
             <Flex mt="4" gap="3" justify="end" align="center" wrap="wrap">
               {status && !status.ok && (

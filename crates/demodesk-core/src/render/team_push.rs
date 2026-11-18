@@ -3,6 +3,7 @@ use super::demo_data::{Player, Tracks};
 use super::*;
 use crate::analysis::line_of_sight::{Occlusion, Vec3};
 use camera_search::{Candidate, Sample};
+use editing::pacing;
 
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -29,20 +30,43 @@ impl Sequence {
 pub(super) fn applies(
     plan: &Sequence,
     recording: &[Highlight],
-    utilities: &[Option<utility::Chase>],
+    utilities: &[Option<utility::Camera>],
 ) -> bool {
     recording.iter().enumerate().any(|(index, h)| {
-        eligible(index, recording, utilities, plan)
-            && plan.shots.iter().any(|s| {
-                s.end_tick.min(h.end_tick) - (s.start_tick.max(h.start_tick))
-                    >= (plan.tick_rate / 2.) as i32
-            })
+        eligible(index, recording, utilities, plan) && !recording_shots(plan, h).is_empty()
     })
 }
+// Analysis and scheduling must agree after clipping a sequence to the final POV window.
+fn recording_shots(plan: &Sequence, h: &Highlight) -> Vec<Shot> {
+    let rate = plan.tick_rate.round() as i32;
+    let minimum = pacing::minimum(rate);
+    let guard = (plan.tick_rate * 0.125).ceil() as i32;
+    let end = (h.end_tick - minimum).min(
+        h.round_result
+            .as_ref()
+            .map_or(h.end_tick, |r| r.from_tick - guard),
+    );
+    let mut previous = h.start_tick;
+    plan.shots
+        .iter()
+        .filter_map(|s| {
+            let mut s = s.clone();
+            s.start_tick = s.start_tick.max(h.start_tick);
+            s.end_tick = s.end_tick.min(end);
+            let gap = s.start_tick - previous;
+            if s.end_tick - s.start_tick < minimum || gap < 0 || (gap > 0 && gap < minimum) {
+                return None;
+            }
+            previous = s.end_tick;
+            Some(s)
+        })
+        .collect()
+}
+
 fn eligible(
     index: usize,
     recording: &[Highlight],
-    utilities: &[Option<utility::Chase>],
+    utilities: &[Option<utility::Camera>],
     plan: &Sequence,
 ) -> bool {
     let h = &recording[index];
@@ -182,6 +206,9 @@ fn camera_shot(
         return None;
     }
     let (cut, search) = camera_search::search_window(&data, required, ray).ok()?;
+    if end - cut < pacing::minimum(rate) {
+        return None;
+    }
     let camera = search.candidates.into_iter().next()?;
     Some(Shot {
         start_tick: cut,
@@ -233,7 +260,7 @@ fn plan_one(
             .map(|r| r.from_tick)
             .unwrap_or(h.end_tick),
     );
-    if end - start < rate {
+    if end - start < pacing::minimum(rate) {
         return None;
     }
     let mut shots = vec![];
@@ -243,7 +270,7 @@ fn plan_one(
         .filter(|e| {
             e.event_name == "player_death"
                 && e.tick > start
-                && e.tick + rate / 2 < end
+                && e.tick + pacing::event_tail(rate) < end
                 && e.user_team_num == Some(2)
                 && e.attacker_team_num == Some(3)
                 && demo_data::gun(&e.weapon)
@@ -278,13 +305,13 @@ fn plan_one(
                 .map(|e| e.tick)
                 .min()
                 .unwrap_or(death.tick);
-            let from = (first - rate).max(start + rate / 2);
+            let from = (first - rate).max(start + pacing::minimum(rate));
             let required = (first - rate / 4).max(from);
             camera_shot(
                 tracks,
                 &[ally.into(), enemy.into()],
                 from,
-                death.tick + rate / 2,
+                death.tick + pacing::event_tail(rate),
                 required,
                 rate,
                 ray,
@@ -297,7 +324,7 @@ fn plan_one(
         .unwrap_or((onset + rate * 3 / 2).min(end));
     // Establish the cohort while it can still share a frame. The entry player can
     // leave the room before the rest advance, so do not demand one view of both phases.
-    'establish: for duration in [2 * rate, rate * 3 / 2, rate, rate * 3 / 4, rate / 2] {
+    'establish: for duration in [2 * rate, pacing::minimum(rate)] {
         for from in (start..=onset.min(group_end - duration)).step_by((rate / 4).max(1) as usize) {
             if let Some(shot) = camera_shot(
                 tracks,
@@ -390,18 +417,33 @@ mod tests {
                             team: 2,
                             alive: true,
                             position: [f64::from(tick) * 2., 0., 0.],
+                            view: Some(demo_data::PlayerView {
+                                yaw: 0.,
+                                pitch: 0.,
+                                duck: 0.,
+                            }),
                         },
                         Player {
                             id: "ally".into(),
                             team: 2,
                             alive: tick < 480,
                             position: [f64::from(tick.min(480)) * 2. + 80., 30., 0.],
+                            view: Some(demo_data::PlayerView {
+                                yaw: 0.,
+                                pitch: 0.,
+                                duck: 0.,
+                            }),
                         },
                         Player {
                             id: "enemy".into(),
                             team: 3,
                             alive: tick < 640,
                             position: [1200., 150., 0.],
+                            view: Some(demo_data::PlayerView {
+                                yaw: 0.,
+                                pitch: 0.,
+                                duck: 0.,
+                            }),
                         },
                     ],
                 )
@@ -416,7 +458,7 @@ mod tests {
         let plan = plan_one(&h, &tracks, &events, 64, &|_, _| Occlusion::Clear).unwrap();
         assert_eq!(plan.shots.len(), 2);
         assert!(plan.shots[0].end_tick <= plan.shots[1].start_tick);
-        assert_eq!(plan.shots[1].end_tick, 512);
+        assert_eq!(plan.shots[1].end_tick, 533);
         assert!(plan.shots.last().unwrap().end_tick < 640 - 32);
     }
     #[test]
@@ -490,10 +532,45 @@ mod tests {
             end_tick: h.end_tick,
             grenade: None,
         };
-        assert!(!applies(&plan, &[h.clone()], &[Some(chase)]));
+        assert!(!applies(
+            &plan,
+            &[h.clone()],
+            &[Some(utility::Camera::Follow(chase))]
+        ));
         let original_end = h.end_tick;
         assert!(plan.shots.iter().all(|s| s.end_tick < original_end));
     }
+    #[test]
+    fn final_sequence_clipping_never_leaves_short_camera_or_pov_gaps() {
+        let (mut h, tracks, events) = fixture();
+        let mut plan = plan_one(&h, &tracks, &events, 64, &|_, _| Occlusion::Clear).unwrap();
+        let template = plan.shots[0].clone();
+        h.start_tick = 1000;
+        h.end_tick = 1600;
+        plan.shots = [
+            (1000, 1096),
+            (1100, 1196),
+            (1192, 1288),
+            (1400, 1420),
+            (1490, 1600),
+        ]
+        .into_iter()
+        .map(|(start, end)| Shot {
+            start_tick: start,
+            end_tick: end,
+            ..template.clone()
+        })
+        .collect();
+        let shots = recording_shots(&plan, &h);
+        assert_eq!(
+            shots
+                .iter()
+                .map(|s| (s.start_tick, s.end_tick))
+                .collect::<Vec<_>>(),
+            vec![(1000, 1096), (1192, 1288)]
+        );
+    }
+
     #[test]
     fn missing_geometry_and_round_boundary_keep_original_story() {
         let (h, tracks, mut events) = fixture();
@@ -516,7 +593,7 @@ pub(super) fn schedule(
     schedule: &mut Vec<actions::Scheduled>,
     indices: &[usize],
     recording: &[Highlight],
-    utilities: &[Option<utility::Chase>],
+    utilities: &[Option<utility::Camera>],
     openings: &[Option<opening::Opening>],
     plans: &[Sequence],
     directory: &Path,
@@ -533,17 +610,7 @@ pub(super) fn schedule(
             continue;
         };
         let mut plan = plan.clone();
-        let guard = (plan.tick_rate * 0.125).ceil() as i32;
-        plan.shots.retain_mut(|s| {
-            s.start_tick = s.start_tick.max(h.start_tick);
-            s.end_tick = s.end_tick.min(h.end_tick - guard).min(
-                h.round_result
-                    .as_ref()
-                    .map(|r| r.from_tick - guard)
-                    .unwrap_or(h.end_tick),
-            );
-            s.end_tick - s.start_tick >= (plan.tick_rate / 2.) as i32
-        });
+        plan.shots = recording_shots(&plan, h);
         if plan.shots.is_empty() {
             continue;
         }

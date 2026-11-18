@@ -799,12 +799,21 @@ video {
 .editing-combat-options { min-width: 0; margin: var(--space-2) 0 0; padding: 0; border: 0; }
 .editing-combat-options legend { padding: var(--space-2); }
 .editing-combat-options .editing-option-copy { flex-direction: row; align-items: baseline; flex-wrap: wrap; gap: 2px var(--space-3); }
+.editing-replay-row { display: flex; align-items: center; gap: var(--space-2); min-width: 0; }
+.editing-replay-row > .editing-option-row { flex: 1; }
+.editing-replay-link, .editing-replay-link-space { flex: 0 0 24px; margin-inline-end: var(--space-2); }
+.editing-replay-link-space { width: 24px; height: 24px; }
+.editing-playback { border-top: 1px solid var(--app-border); margin: var(--space-2); padding-top: var(--space-2); }
+.editing-playback[aria-busy='true'] { opacity: 0.6; }
+.editing-playback-flow { display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-2); margin-top: var(--space-1); }
+.editing-playback-step { display: inline-flex; align-items: center; gap: var(--space-2); min-width: 0; max-width: 100%; }
+.editing-playback-step .rt-Badge { white-space: normal; overflow-wrap: anywhere; }
+.editing-playback-arrow { color: var(--gray-10); flex-shrink: 0; }
+@media (pointer: coarse) {
+  .editing-replay-link, .editing-replay-link-space { flex-basis: 44px; width: 44px; height: 44px; }
+}
 @media (max-width: 640px) {
   .editing-highlight-header { flex-wrap: wrap; }
   .editing-highlight-title { flex-basis: calc(100% - 24px); }
   .editing-highlight-count { margin-inline-start: 19px; }
 }
-.team-story-layout { display: grid; grid-template-columns: minmax(250px, 1fr) minmax(0, 3fr); gap: var(--space-4); align-items: start; }
-.team-story-round { border: 1px solid var(--app-border); border-radius: var(--radius-3); }
-.team-story-layout > :first-child { max-height: calc(100vh - 240px); overflow-y: auto; padding-right: var(--space-2); }
-@media (max-width: 900px) { .team-story-layout { grid-template-columns: 1fr; } }

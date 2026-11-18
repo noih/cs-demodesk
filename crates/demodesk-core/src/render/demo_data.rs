@@ -110,8 +110,62 @@ pub(super) struct Player {
     pub(super) team: i32,
     pub(super) alive: bool,
     pub(super) position: Vec3,
+    pub(super) view: Option<PlayerView>,
 }
+#[derive(Clone, Debug)]
+pub(super) struct PlayerView {
+    pub yaw: f64,
+    pub pitch: f64,
+    pub duck: f64,
+}
+
 pub(super) type Tracks = BTreeMap<i32, Vec<Player>>;
+pub(super) type Projectiles = BTreeMap<i32, Vec<(i32, Vec3)>>;
+
+pub(super) fn read_projectiles(
+    bytes: &[u8],
+    clips: &[Highlight],
+    events: &[Event],
+    rate: i32,
+    cancel: &AtomicBool,
+) -> Result<Projectiles> {
+    let mut ticks = BTreeSet::new();
+    for event in events.iter().filter(|e| {
+        e.event_name == "hegrenade_detonate"
+            && clips
+                .iter()
+                .any(|h| e.tick >= h.start_tick - 4 * rate && e.tick < h.end_tick)
+    }) {
+        ticks.extend((event.tick - 3 * rate).max(seek::MIN_TICK)..=event.tick);
+    }
+    let mut out = Projectiles::new();
+    if ticks.is_empty() {
+        return Ok(out);
+    }
+    Control::new(cancel, &mut |_| {}).check_cancelled()?;
+    let rows = crate::parser::DemoParser::new().projectiles(bytes, ticks.into_iter().collect())?;
+    for row in rows.iter() {
+        if let (Some(entity), Some(tick), Some(x), Some(y), Some(z)) = (
+            row.num("grenade_entity_id"),
+            row.tick(),
+            row.num("x"),
+            row.num("y"),
+            row.num("z"),
+        ) {
+            if [entity, x, y, z].iter().all(|v| v.is_finite()) {
+                out.entry(entity as i32)
+                    .or_default()
+                    .push((tick, [x, y, z]));
+            }
+        }
+    }
+    for path in out.values_mut() {
+        path.sort_by_key(|p| p.0);
+        path.dedup_by_key(|p| p.0);
+    }
+    Control::new(cancel, &mut |_| {}).check_cancelled()?;
+    Ok(out)
+}
 #[cfg(test)]
 pub(super) fn load_tracks(
     path: &Path,
@@ -139,7 +193,17 @@ pub(super) fn read_tracks(
     Control::new(cancel, &mut |_| {}).check_cancelled()?;
     let rows = crate::parser::DemoParser::new().ticks(
         bytes,
-        &["X", "Y", "Z", "team_num", "health"].map(String::from),
+        &[
+            "X",
+            "Y",
+            "Z",
+            "team_num",
+            "health",
+            "yaw",
+            "pitch",
+            "duck_amount",
+        ]
+        .map(String::from),
         ticks.into_iter().collect(),
     )?;
     let mut out = Tracks::new();
@@ -163,6 +227,12 @@ pub(super) fn read_tracks(
             team: team as i32,
             alive: health > 0.,
             position: [x, y, z],
+            view: row
+                .num("yaw")
+                .zip(row.num("pitch"))
+                .zip(row.num("duck_amount"))
+                .filter(|((yaw, pitch), duck)| [*yaw, *pitch, *duck].iter().all(|v| v.is_finite()))
+                .map(|((yaw, pitch), duck)| PlayerView { yaw, pitch, duck }),
         });
     }
     Control::new(cancel, &mut |_| {}).check_cancelled()?;

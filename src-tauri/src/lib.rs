@@ -555,6 +555,11 @@ async fn cached_editing_analysis(engine: State<'_, Eng>, demo_id: String, highli
 }
 
 #[tauri::command]
+async fn preview_editing_plan(engine: State<'_, Eng>, demo_id: String, highlight_ids: Vec<String>, options: RenderOptions) -> CmdResult<Vec<demodesk_core::render::editing::PreviewShot>> {
+    blocking(&engine, move |e| e.preview_editing_plan(&demo_id, &highlight_ids, &options).map_err(err)).await
+}
+
+#[tauri::command]
 async fn analyze_editing(engine: State<'_, Eng>, demo_id: String, highlight_ids: Vec<String>, options: RenderOptions, force: bool) -> CmdResult<demodesk_core::render::editing::Summary> {
     blocking(&engine, move |e| e.analyze_editing(&demo_id, &highlight_ids, &options, force).map_err(err)).await
 }
@@ -708,6 +713,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             analyze_editing,
             cached_editing_analysis,
+            preview_editing_plan,
             clear_editing_analysis,
             browse_directory,
             check_for_updates,

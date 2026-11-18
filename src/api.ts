@@ -215,6 +215,7 @@ export type Camera = 'slot' | 'lock';
 export interface RenderOptions {
   editingAnalysisId?: string;
   editingSelections?: string[];
+  editingReplayLinks?: ReplayLink[];
   utilityTeamwork: boolean;
   openingCamera: boolean;
   combatPerspectives: boolean;
@@ -307,6 +308,15 @@ export interface EditingCandidate {
   recommended: boolean;
   conflicts: string[];
   addedSeconds: number;
+  replayGroup?: string | null;
+}
+export interface ReplayLink { from: string; to: string }
+export interface EditingPreviewShot {
+  highlightId: string;
+  player: string;
+  kind: 'opening' | 'main' | 'perspective';
+  startTick: number;
+  endTick: number;
 }
 export interface EditingAnalysis {
   id: string;
@@ -530,6 +540,7 @@ export const api = {
   render: (demoId: string, highlightIds: string[], options: RenderOptions) => invoke<RenderJob>('start_render', { demoId, highlightIds, options }),
   analyzeEditing: (demoId: string, highlightIds: string[], options: RenderOptions, force = false) => invoke<EditingAnalysis>('analyze_editing', { demoId, highlightIds, options, force }),
   cachedEditingAnalysis: (demoId: string, highlightIds: string[], options: RenderOptions) => invoke<EditingAnalysis | null>('cached_editing_analysis', { demoId, highlightIds, options }),
+  previewEditingPlan: (demoId: string, highlightIds: string[], options: RenderOptions) => invoke<EditingPreviewShot[]>('preview_editing_plan', { demoId, highlightIds, options }),
   jobs: () => invoke<RenderJob[]>('list_jobs'),
   cancel: (id: string) => invoke<boolean>('cancel_job', { id }),
   deleteJob: (id: string) => invoke<void>('delete_job', { id }),
