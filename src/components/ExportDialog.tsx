@@ -1,11 +1,12 @@
 import { HIGHLIGHT_EDITING_ENABLED } from '../releaseFeatures.ts';
+import { ERROR_CODES } from '../errorCodes.ts';
 import { EditingEffects, type EditingChoice } from './EditingEffects.tsx';
 import { DialogCloseButton } from './DialogCloseButton.tsx';
 import { summarizeHighlights } from '../highlightWindows.ts';
 import { useState, type ReactNode } from 'react';
 import { Box, Button, Dialog, Flex, Grid, SegmentedControl, Select, Slider, Switch, Text } from '@radix-ui/themes';
 import { useTranslation } from 'react-i18next';
-import { errorText, DEFAULT_RENDER_OPTIONS, RENDER_QUALITY, type Highlight, type RenderOptions, type Status } from '../api.ts';
+import { api, errorText, DEFAULT_RENDER_OPTIONS, RENDER_QUALITY, type Highlight, type RenderOptions, type Status } from '../api.ts';
 const RESOLUTIONS = [
   { label: '720p', width: 1280, height: 720 },
   { label: '1080p', width: 1920, height: 1080 },
@@ -31,7 +32,17 @@ export function ExportDialog({open,onOpenChange,count,seconds,status,onSetup,onS
   const render=async()=>{
     if(submitting || choice?.busy)return;setSubmitting(true);setError(undefined);
     const chosen=choice?.analysis?.candidates.filter(c=>choice.selected.includes(c.id)) ?? [];
-    try {await onSubmit({...opts,editingAnalysisId:chosen.length ? choice?.analysis?.id : undefined,editingSelections:chosen.map(c=>c.id),editingReplayLinks:choice?.links ?? [],
+    try {
+      if (opts.codec.endsWith('_amf') || opts.codec.endsWith('_nvenc')) {
+        try { await api.probeGpuEncoder(opts); }
+        catch (cause) {
+          setError(String(cause) === ERROR_CODES.TOOLS_MISSING || /unknown encoder|encoder .* not found/i.test(String(cause))
+            ? t('highlights.encoderPackageMissing')
+            : t('highlights.encoderUnavailable', { codec: opts.codec }) + ' ' + errorText(cause));
+          return;
+        }
+      }
+      await onSubmit({...opts,editingAnalysisId:chosen.length ? choice?.analysis?.id : undefined,editingSelections:chosen.map(c=>c.id),editingReplayLinks:choice?.links ?? [],
       openingCamera:chosen.some(c=>c.kind==='opening'),combatPerspectives:chosen.some(c=>c.kind==='combat'),utilityTeamwork:chosen.some(c=>c.kind==='teamwork'),teamPush:chosen.some(c=>c.kind==='push'),
       roundResultLabel:t('highlights.roundResult'),merge:forceMerge||opts.merge,keyMomentsOnly:!!highlights&&opts.keyMomentsOnly});onOpenChange(false);onSubmitted();}
     catch(error){setError(errorText(error));}finally{setSubmitting(false);}
@@ -120,18 +131,21 @@ export function ExportDialog({open,onOpenChange,count,seconds,status,onSetup,onS
                 <Text as="div" size="1" color="gray" mb="1">
                   {t('highlights.encoder')}
                 </Text>
-                <Select.Root value={opts.codec} onValueChange={(v) => setOpts({ ...opts, codec: v, crf: RENDER_QUALITY[v] ?? DEFAULT_RENDER_OPTIONS.crf })} size="1">
+                <Select.Root value={opts.codec} onValueChange={(v) => { setError(undefined); setOpts({ ...opts, codec: v, crf: RENDER_QUALITY[v] ?? DEFAULT_RENDER_OPTIONS.crf }); }} size="1">
                   <Select.Trigger style={{ width: '100%' }} />
                   <Select.Content>
                     <Select.Item value="libsvtav1">AV1 · CPU（libsvtav1）</Select.Item>
+                    <Select.Item value="av1_amf">AV1 · AMD (av1_amf)</Select.Item>
                     <Select.Item value="av1_nvenc">AV1 · NVIDIA（av1_nvenc）</Select.Item>
                     <Select.Item value="libx264">H.264 · CPU（libx264）</Select.Item>
+                    <Select.Item value="h264_amf">H.264 · AMD (h264_amf)</Select.Item>
                     <Select.Item value="h264_nvenc">H.264 · NVIDIA（h264_nvenc）</Select.Item>
                     <Select.Item value="libx265">H.265 · CPU（libx265）</Select.Item>
+                    <Select.Item value="hevc_amf">H.265 · AMD (hevc_amf)</Select.Item>
                     <Select.Item value="hevc_nvenc">H.265 · NVIDIA（hevc_nvenc）</Select.Item>
                   </Select.Content>
                 </Select.Root>
-                {(opts.codec === 'libsvtav1' || opts.codec === 'av1_nvenc') && <Text as="p" size="1" color="gray" mt="1">{t('highlights.av1Hint')}</Text>}
+                {(opts.codec === 'libsvtav1' || opts.codec === 'av1_nvenc' || opts.codec === 'av1_amf') && <Text as="p" size="1" color="gray" mt="1">{t('highlights.av1Hint')}</Text>}
               </Box>
               <Flex direction="column" gap="2" pt="3" style={{ borderTop: '1px solid var(--app-border)' }}>
                 <Text as="label" size="1">

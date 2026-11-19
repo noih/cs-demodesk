@@ -278,6 +278,8 @@
     "cumulativeHint": "累積至該回合結束；致盲統計使用超過 1.1 秒的敵人致盲事件。"
   },
   "highlights": {
+    "encoderPackageMissing": "請嘗試下載新版 FFmpeg",
+    "encoderUnavailable": "目前無法啟動 {{codec}}，請選擇其他編碼器。",
     "details": "詳情",
     "scoring": {
       "actions": "操作",

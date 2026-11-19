@@ -236,7 +236,12 @@ pub(super) fn encode(
                     // Audio padding at joined clip boundaries can leave small gaps in video timestamps.
                     common.extend([s("-vf"), format!("fps={}", info.fps)]);
                 }
-                if codec.contains("nvenc") {
+                if codec.ends_with("_amf") {
+                    common.extend([s("-rc"), s("vbr_peak"), s("-maxrate"), format!("{}k", rate * 2)]);
+                    common.extend(tag_args(codec));
+                    common.push(path.to_string_lossy().into_owned());
+                    run_progress(ffmpeg, &common, part_seconds, &mut report, control)?;
+                } else if codec.contains("nvenc") {
                     with_nvenc_fallback(compatible, |fallback| {
                         let mut args = common.clone();
                         args.extend([s("-rc"), s("vbr")]);
@@ -479,7 +484,7 @@ mod tests {
         .unwrap();
         let windows = [[0.317, 0.91], [1.117, 2.15]];
         for (codec, _) in CODECS {
-            if codec.contains("nvenc") && std::env::var_os("TEST_NVENC").is_none() {
+            if (codec.contains("nvenc") && std::env::var_os("TEST_NVENC").is_none()) || (codec.ends_with("_amf") && std::env::var_os("TEST_AMF").is_none()) {
                 continue;
             }
             let max_size_mb = if codec == "libx265" {

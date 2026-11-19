@@ -53,6 +53,7 @@ function ReadyApp() {
     }, (ev) => {
       if (ev.type === 'setup-progress') setSetup(current => ({ ...current, [ev.tool]: { running: true, log: [], progress: ev.progress } }));
       if (ev.type === 'setup-finished') {
+        if (ev.installed) void api.status().then(setStatus).catch(error => notify(errorText(error)));
         setSetup(current => ({ ...current, [ev.tool]: undefined }));
         if (!ev.ok && !ev.cancelled) notify(ev.error ?? t('settings.unknownError'));
       }

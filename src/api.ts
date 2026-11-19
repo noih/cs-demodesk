@@ -257,7 +257,7 @@ export interface RenderOptions {
   audioKbps: number;
   extraLaunchOptions: string[];
 }
-export const RENDER_QUALITY: Record<string, number> = { libsvtav1: 20, av1_nvenc: 20, libx264: 19, libx265: 20, h264_nvenc: 20, hevc_nvenc: 20 };
+export const RENDER_QUALITY: Record<string, number> = { libsvtav1: 20, av1_nvenc: 20, libx264: 19, libx265: 20, h264_nvenc: 20, hevc_nvenc: 20, h264_amf: 20, hevc_amf: 20, av1_amf: 20 };
 
 export const DEFAULT_RENDER_OPTIONS: RenderOptions = {
   utilityTeamwork: false,
@@ -490,6 +490,7 @@ export const api = {
   settings: () => invoke<SettingsResponse>('get_settings'),
   previewSettings: (settings: Settings, originalSettings: Settings, dataDirOverride: string | null) => invoke<{ target: string; restartRequired: boolean }>('preview_settings', { settings, originalSettings, dataDirOverride }),
   saveSettings: (settings: Settings, dataDirOverride: string | null, originalSettings: Settings, changeConfirmed = false) => invoke<SettingsResponse>('save_settings', { settings, originalSettings, dataDirOverride, changeConfirmed }),
+  probeGpuEncoder: (options: RenderOptions) => invoke<void>('probe_gpu_encoder', { options }),
   runSetup: (tool: 'hlae' | 'ffmpeg' | 'vrf', force = false, directory: string | null = null) => invoke<boolean>('run_setup', { tool, force, directory }),
   cancelSetup: (tool: 'hlae' | 'ffmpeg' | 'vrf') => invoke<void>('cancel_setup', { tool }),
   checkTools: () => invoke<SettingsResponse>('check_tools'),

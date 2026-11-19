@@ -3,13 +3,16 @@ use super::super::process::ProcessTree;
 use serde::Serialize;
 use std::{fs, path::Path, process::Command, time::Instant};
 
-const CODECS: [&str; 6] = [
+const CODECS: [&str; 9] = [
     "libx264",
     "libx265",
     "libsvtav1",
     "h264_nvenc",
     "hevc_nvenc",
     "av1_nvenc",
+    "h264_amf",
+    "hevc_amf",
+    "av1_amf",
 ];
 
 #[derive(Debug, Clone, Serialize)]
@@ -78,8 +81,8 @@ fn run(command: &mut Command) -> Result<String, (Status, String)> {
 
 fn valid_streams(text: &str, codec: &str) -> bool {
     let expected = match codec {
-        "libx264" | "h264_nvenc" => "h264",
-        "libx265" | "hevc_nvenc" => "hevc",
+        "libx264" | "h264_nvenc" | "h264_amf" => "h264",
+        "libx265" | "hevc_nvenc" | "hevc_amf" => "hevc",
         _ => "av1",
     };
     let Ok(value) = serde_json::from_str::<serde_json::Value>(text) else {
@@ -158,6 +161,7 @@ fn encode(exe: &Path, root: &Path, codec: &str) -> Result<(), (Status, String)> 
         "libsvtav1" => {
             command.args(["-preset", "12", "-svtav1-params", "lp=2"]);
         }
+        codec if codec.ends_with("_amf") => {}
         _ => {
             command.args(["-preset", "p1"]);
         }

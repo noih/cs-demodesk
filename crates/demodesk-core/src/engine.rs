@@ -660,6 +660,16 @@ impl Engine {
     pub fn tool_paths(&self) -> ToolPaths {
         resolve_tool_paths(&self.tools_dir(), &self.overrides(&self.store.settings()))
     }
+    pub fn probe_gpu_encoder(&self, options: &RenderOptions) -> Result<()> {
+        use crate::render::encode::{checked_record_preset, CODECS};
+        anyhow::ensure!(CODECS.iter().any(|&(codec, _)| codec == options.codec), "Unknown encoder");
+        let _lease = self.tool_access.use_tools(&[SetupTool::Ffmpeg]);
+        let paths = self.tool_paths();
+        let exe = paths.ffmpeg_exe.as_deref().ok_or(crate::ErrorCode::ToolsMissing)?;
+        checked_record_preset(exe, options, &mut |_| {}, &AtomicBool::new(false))?;
+        Ok(())
+    }
+
     pub fn doctor(&self) -> DoctorReport {
         doctor(&self.tools_dir(), &self.overrides(&self.store.settings()))
     }

@@ -278,6 +278,8 @@
     "cumulativeHint": "각 라운드 종료까지 누적됩니다. 섬광은 적의 실명 시간이 1.1초를 초과한 이벤트를 집계합니다."
   },
   "highlights": {
+    "encoderPackageMissing": "최신 FFmpeg를 다운로드해 보세요.",
+    "encoderUnavailable": "{{codec}} 초기화에 실패했습니다. 다른 인코더를 선택하세요.",
     "details": "상세",
     "scoring": {
       "actions": "작업",

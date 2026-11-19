@@ -302,6 +302,11 @@ async fn save_settings(
 }
 
 #[tauri::command]
+async fn probe_gpu_encoder(engine: State<'_, Eng>, options: RenderOptions) -> CmdResult<()> {
+    blocking(&engine, move |e| e.probe_gpu_encoder(&options).map_err(err)).await
+}
+
+#[tauri::command]
 async fn run_setup(
     engine: State<'_, Eng>,
     tool: SetupTool,
@@ -728,6 +733,7 @@ pub fn run() {
             save_settings,
             preview_settings,
             run_setup,
+            probe_gpu_encoder,
             cancel_setup,
             check_tools,
             tool_diagnostics,

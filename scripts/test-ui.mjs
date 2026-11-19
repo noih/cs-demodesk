@@ -74,6 +74,7 @@ try {
       if(cmd==='plugin:dialog|open')return null;
       if(cmd==='cancel_setup'){window.emitTestEvent({type:'setup-finished',tool:args.tool,ok:false,cancelled:true,error:null});return;}
       if(cmd==='run_setup'){window.setupState={...window.setupState,[args.tool]:{running:true,progress:null,log:['Download started']}};return true;}
+      if(cmd==='probe_gpu_encoder'){if(window.encoderProbeError)throw window.encoderProbeError;return;}
       if(cmd==='check_for_updates'){if(window.holdUpdate)await new Promise(resolve=>window.releaseUpdate=resolve);if(window.failUpdate)throw new Error('offline');return window.updateStatus ?? {status:'available',version:'1.0.10'};}
       if(cmd==='open_url'){window.openedUrl=args.url;return;}
       if(cmd==='open_path'){window.openedPath=args.path;return;}
@@ -1331,6 +1332,25 @@ try {
   const encoder = exportDialog.getByRole('combobox').filter({hasText:'AV1 · CPU'});
   await encoder.waitFor();
   await encoder.click();
+  await page.getByRole('option',{name:'AV1 · AMD (av1_amf)',exact:true}).click();
+  assert.equal(await exportDialog.getByText('Please try downloading the latest FFmpeg.',{exact:true}).count(),0,'No package warning before export');
+  assert.equal(await exportDialog.getByRole('button',{name:'Download latest FFmpeg',exact:true}).count(),0,'Export does not offer a separate package download');
+  await page.evaluate(() => { window.missingTools=false; window.encoderProbeError='tools-missing'; });
+  await page.locator('.header-tools .bi-arrow-clockwise').locator('..').evaluate(el => el.click());
+  const exportButton = exportDialog.getByRole('button',{name:'Export',exact:true});
+  await page.waitForFunction(() => [...document.querySelectorAll('[role=dialog] button')].some(button => button.textContent==='Export' && !button.disabled));
+  await exportButton.click();
+  await exportDialog.getByRole('alert').filter({hasText:'Please try downloading the latest FFmpeg.'}).waitFor();
+  assert.equal(await page.evaluate(() => window.testCalls.filter(call => call.cmd==='probe_gpu_encoder').at(-1).args.options.codec),'av1_amf');
+  await page.evaluate(() => { window.encoderProbeError="Unknown encoder 'av1_amf'"; });
+  await exportButton.click();
+  await exportDialog.getByRole('alert').filter({hasText:'Please try downloading the latest FFmpeg.'}).waitFor();
+  await page.evaluate(() => { window.encoderProbeError='AMF failed to initialise: unsupported GPU'; });
+  await exportButton.click();
+  await exportDialog.getByRole('alert').filter({hasText:'Could not initialize av1_amf. Please choose another encoder.'}).waitFor();
+  await page.evaluate(() => { window.missingTools=true; delete window.encoderProbeError; });
+  await page.locator('.header-tools .bi-arrow-clockwise').locator('..').evaluate(el => el.click());
+  await exportDialog.getByRole('combobox').filter({hasText:'AV1 · AMD'}).click();
   await page.getByRole('option',{name:'AV1 · NVIDIA（av1_nvenc）',exact:true}).click();
   await exportDialog.getByRole('combobox').filter({hasText:'AV1 · NVIDIA'}).click();
   await page.getByRole('option',{name:'AV1 · CPU（libsvtav1）',exact:true}).click();

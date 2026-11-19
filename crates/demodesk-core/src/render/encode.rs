@@ -360,21 +360,24 @@ pub struct SizeResult {
 }
 
 /// Video codecs we know how to drive: (ffmpeg encoder name, label).
-pub const CODECS: [(&str, &str); 6] = [
+pub const CODECS: [(&str, &str); 9] = [
     ("libsvtav1", "AV1 CPU"),
     ("av1_nvenc", "AV1 NVIDIA"),
     ("libx264", "H.264 CPU"),
     ("libx265", "H.265 CPU"),
     ("h264_nvenc", "H.264 NVIDIA"),
     ("hevc_nvenc", "H.265 NVIDIA"),
+    ("h264_amf", "H.264 AMD"),
+    ("hevc_amf", "H.265 AMD"),
+    ("av1_amf", "AV1 AMD"),
 ];
 
 fn is_hevc(codec: &str) -> bool {
-    codec == "libx265" || codec == "hevc_nvenc"
+    matches!(codec, "libx265" | "hevc_nvenc" | "hevc_amf")
 }
 
 fn is_av1(codec: &str) -> bool {
-    matches!(codec, "libsvtav1" | "av1_nvenc")
+    matches!(codec, "libsvtav1" | "av1_nvenc" | "av1_amf")
 }
 
 const AV1_PARAMS: &str = "tune=0:enable-tf=1:lp=6";
@@ -382,7 +385,7 @@ const AV1_PARAMS: &str = "tune=0:enable-tf=1:lp=6";
 fn pixel_format(codec: &str) -> &'static str {
     match codec {
         "libsvtav1" => "yuv420p10le",
-        "av1_nvenc" => "p010le",
+        "av1_nvenc" | "av1_amf" => "p010le",
         _ => "yuv420p",
     }
 }
@@ -446,7 +449,7 @@ pub fn checked_record_preset(
     cancel: &AtomicBool,
 ) -> Result<(String, bool)> {
     let preset = record_preset(&options.codec, options.crf, options.fps);
-    if !options.codec.contains("nvenc") && options.codec != "libsvtav1" {
+    if !options.codec.ends_with("_amf") && !options.codec.contains("nvenc") && options.codec != "libsvtav1" {
         return Ok((preset, false));
     }
     let mut compatible = false;
@@ -507,6 +510,8 @@ pub fn record_preset(codec: &str, crf: u32, fps: u32) -> String {
             "-crf {crf} -preset 8 -svtav1-params {AV1_PARAMS} -g {}",
             u64::from(fps) * 2
         ));
+    } else if codec.ends_with("_amf") {
+        parts.push(format!("-rc cqp -qp_i {crf} -qp_p {crf} -g {}", u64::from(fps) * 2));
     } else if codec.contains("nvenc") {
         parts.push(format!(
             "-rc constqp -qp {crf} -b:v 0 {NVENC_RECORDING} -g {} {}",
@@ -656,7 +661,11 @@ pub fn encode_to_size_with_progress(
             // Leave space for size verification and retries without moving backwards.
             let start = 1.0 - 0.1_f64.powi(attempt);
             let span = 0.9 * 0.1_f64.powi(attempt);
-            if codec.contains("nvenc") {
+            if codec.ends_with("_amf") {
+                let mut args = common.clone();
+                args.extend([s("-c:v"), s(codec), s("-rc"), s("vbr_peak"), s("-b:v"), format!("{bitrate}k"), s("-maxrate"), format!("{}k", u64::from(bitrate)*2), output_s.clone()]);
+                run_progress(ffmpeg_exe, &args, seconds, &mut |p| progress(start + span*p), control)?;
+            } else if codec.contains("nvenc") {
                 with_nvenc_fallback(compatible, |fallback| {
                     let mut args = common.clone();
                     args.extend([
@@ -1166,6 +1175,8 @@ mod tests {
             assert!(preset.contains(&format!("-c:v {codec}")));
             assert!(preset.contains(if codec.contains("nvenc") {
                 "-rc constqp -qp 20"
+            } else if codec.ends_with("_amf") {
+                "-rc cqp -qp_i 20 -qp_p 20"
             } else {
                 "-crf 20"
             }));
@@ -1176,6 +1187,8 @@ mod tests {
                 assert!(preset.contains("-g 180"));
                 assert!(!preset.contains("-cq "));
                 assert!(record_preset(codec, 20, 60).contains("-g 120"));
+            } else if codec.ends_with("_amf") {
+                assert!(preset.contains("-g 180"));
             } else if codec == "libsvtav1" {
                 assert!(preset.contains("-preset 8"));
                 assert!(preset.contains("-pix_fmt yuv420p10le"));
@@ -1454,7 +1467,7 @@ mod tests {
             .to_string_lossy()
             .starts_with("encode-")));
         for (codec, _) in CODECS {
-            if codec.contains("nvenc") && std::env::var_os("TEST_NVENC").is_none() {
+            if (codec.contains("nvenc") && std::env::var_os("TEST_NVENC").is_none()) || (codec.ends_with("_amf") && std::env::var_os("TEST_AMF").is_none()) {
                 continue;
             }
             let output = dir.path().join(format!("{codec}.mp4"));

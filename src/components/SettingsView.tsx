@@ -604,7 +604,7 @@ export function SettingsView({ onChanged, toolsRequest = 0, toolsTarget = 'rende
                   <Table.Body>
                     {encodingResults.results.map(result => <Fragment key={result.codec}>
                       <Table.Row>
-                        <Table.Cell>{result.codec.includes('nvenc') ? 'NVIDIA' : 'CPU'}</Table.Cell>
+                        <Table.Cell>{result.codec.endsWith('_amf') ? 'AMD' : result.codec.includes('nvenc') ? 'NVIDIA' : 'CPU'}</Table.Cell>
                         <Table.Cell>{result.codec.includes('264') ? 'H.264' : result.codec.includes('265') || result.codec.includes('hevc') ? 'H.265' : 'AV1'}</Table.Cell>
                         <Table.RowHeaderCell className="mono">{result.codec}</Table.RowHeaderCell>
                         <Table.Cell><Text color={result.status === 'passed' ? 'green' : result.status === 'failed' ? 'red' : 'gray'}>{t(`settings.encodingStatus.${result.status}`)}</Text></Table.Cell>

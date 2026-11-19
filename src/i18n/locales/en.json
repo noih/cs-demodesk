@@ -282,6 +282,8 @@
     "cumulativeHint": "Cumulative through each round; flashed counts enemy blind events over 1.1 seconds."
   },
   "highlights": {
+    "encoderPackageMissing": "Please try downloading the latest FFmpeg.",
+    "encoderUnavailable": "Could not initialize {{codec}}. Please choose another encoder.",
     "details": "Details",
     "scoring": {
       "actions": "Actions",

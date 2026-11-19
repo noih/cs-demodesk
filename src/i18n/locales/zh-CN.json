@@ -278,6 +278,8 @@
     "cumulativeHint": "累计至该回合结束；闪光统计计入敌人被闪超过 1.1 秒的事件。"
   },
   "highlights": {
+    "encoderPackageMissing": "请尝试下载新版 FFmpeg",
+    "encoderUnavailable": "目前无法启动 {{codec}}，请选择其他编码器。",
     "details": "详情",
     "scoring": {
       "actions": "操作",

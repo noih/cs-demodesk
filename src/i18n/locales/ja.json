@@ -278,6 +278,8 @@
     "cumulativeHint": "各ラウンド終了までの累計です。フラッシュは敵の視界を1.1秒超奪ったイベントを集計します。"
   },
   "highlights": {
+    "encoderPackageMissing": "最新版の FFmpeg のダウンロードをお試しください。",
+    "encoderUnavailable": "{{codec}} を初期化できません。別のエンコーダーを選択してください。",
     "details": "詳細",
     "scoring": {
       "actions": "操作",
