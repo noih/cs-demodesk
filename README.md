@@ -13,7 +13,7 @@ A Windows desktop tool for managing and analyzing Counter-Strike 2 demos. Explor
 
 - If export fails after a CS2 update, re-download HLAE from Settings; this usually fixes it.
 - You cannot play while recording.
-- NVIDIA encoding requires an NVIDIA GPU.
+- GPU encoding requires compatible hardware and drivers for the selected encoder.
 
 ## Features
 
@@ -36,7 +36,7 @@ Statistics are for reference, not a cheating verdict. They cannot identify delib
 - Highlights (multi-kills, clutches, ninja defuses) are detected and scored automatically
 - Selected clips are recorded by CS2 in the background and encoded with FFmpeg
 - Customize video resolution and frame rate (FPS)
-- Choose AV1 (default), H.264 or H.265, with CPU or NVIDIA GPU encoding
+- Choose AV1 (default), H.264 or H.265, with CPU, NVIDIA GPU or AMD GPU encoding
 - Choose which on-screen elements to show and optionally merge clips into one video
 - Set a file size limit (10 / 20 / 50 / 100 MiB) for easy sharing
 
