@@ -497,7 +497,7 @@ mod tests {
         cached.encoding = Some(encoding::check(None));
         let advisory = tool_report(&paths, SetupTool::Hlae, Some(&cached));
         assert_eq!(advisory["lastCheck"]["ok"], true);
-        assert_eq!(advisory["lastCheck"]["encoding"]["results"].as_array().unwrap().len(), 6);
+        assert_eq!(advisory["lastCheck"]["encoding"]["results"].as_array().unwrap().len(), 9);
         assert_eq!(advisory["lastCheck"]["encoding"]["results"][0]["status"], "skipped");
         cached.encoding = None;
 

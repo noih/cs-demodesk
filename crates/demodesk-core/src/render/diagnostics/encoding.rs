@@ -254,19 +254,22 @@ mod tests {
     #[test]
     fn missing_tools_are_not_successes() {
         let report = check(None);
-        assert_eq!(report.results.len(), 6);
+        assert_eq!(report.results.len(), 9);
+        for codec in ["h264_amf", "hevc_amf", "av1_amf"] {
+            assert!(report.results.iter().any(|result| result.codec == codec));
+        }
         assert!(report.results.iter().all(|r| r.status == Status::Skipped));
         let report = check(Some(Path::new("missing-encoding-test-executable")));
         assert!(report.results.iter().all(|r| r.status == Status::Failed));
     }
 
     #[test]
-    #[ignore = "requires DEMODESK_TEST_FFMPEG; exercises installed CPU and NVIDIA encoders"]
+    #[ignore = "requires DEMODESK_TEST_FFMPEG; exercises installed CPU, NVIDIA and AMD encoders"]
     fn installed_encoders_report_results() {
         let exe = std::env::var_os("DEMODESK_TEST_FFMPEG").expect("FFmpeg path");
         let report = check(Some(Path::new(&exe)));
         println!("{}", serde_json::to_string(&report).unwrap());
-        assert_eq!(report.results.len(), 6);
+        assert_eq!(report.results.len(), 9);
         assert!(report.results[..3]
             .iter()
             .all(|r| r.status == Status::Passed));
